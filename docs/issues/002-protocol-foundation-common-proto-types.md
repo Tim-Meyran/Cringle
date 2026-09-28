@@ -2,8 +2,8 @@
 id: 002
 title: Protocol foundation - common proto types
 milestone: M0
-status: open
-assignee:
+status: in-progress
+assignee: Tim-Meyran
 depends_on: [001]
 architecture: ["18", "5", "8.4"]
 ---
