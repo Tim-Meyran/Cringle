@@ -2,8 +2,8 @@
 id: 001
 title: Repository layout and build setup
 milestone: M0
-status: open
-assignee:
+status: in-progress
+assignee: Tim-Meyran
 depends_on: []
 architecture: ["1", "18", "19"]
 ---
