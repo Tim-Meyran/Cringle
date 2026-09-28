@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Standard pagination request parameters.
+message PaginationRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+// Standard pagination response metadata.
+message PaginationResponse {
+  string next_page_token = 1;
+  int64 total_items = 2;
+}

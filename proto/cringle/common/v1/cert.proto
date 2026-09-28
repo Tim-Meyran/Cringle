@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Public certificate metadata used for mTLS identification and trust verification.
+// Never contains private key material.
+message CertificateInfo {
+  string fingerprint = 1;
+  string subject = 2;
+  string issuer = 3;
+  google.protobuf.Timestamp not_before = 4;
+  google.protobuf.Timestamp not_after = 5;
+  string serial_number = 6;
+}

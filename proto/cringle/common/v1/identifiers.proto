@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Unique identifier of an Engine instance.
+message EngineId {
+  string value = 1;
+}
+
+// Unique identifier of a Machine/Host.
+message MachineId {
+  string value = 1;
+}
+
+// Unique identifier of a running Fabric instance.
+message FabricId {
+  string value = 1;
+}
+
+// Unique identifier of a Block within a Blueprint/Fabric.
+message BlockId {
+  string value = 1;
+}
+
+// Reference to a versioned Project.
+message ProjectRef {
+  string name = 1;
+  string version = 2;
+}
+
+// Reference to a versioned Plugin.
+message PluginRef {
+  string name = 1;
+  string version = 2;
+}

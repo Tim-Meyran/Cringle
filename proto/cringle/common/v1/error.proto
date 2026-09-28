@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Standardized error model for Cringle services.
+message CringleError {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}

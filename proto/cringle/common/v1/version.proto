@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Semantic version representation (SemVer 2.0).
+message Version {
+  string raw = 1;
+  uint32 major = 2;
+  uint32 minor = 3;
+  uint32 patch = 4;
+  string pre_release = 5;
+  string build_metadata = 6;
+}
+
+// npm-style version range expression (e.g. "^1.2.0", ">=2.0.0 <3.0.0").
+message VersionRange {
+  string expression = 1;
+}
