@@ -2,7 +2,7 @@
 id: 002
 title: Protocol foundation - common proto types
 milestone: M0
-status: in-progress
+status: done
 assignee: Tim-Meyran
 depends_on: [001]
 architecture: ["18", "5", "8.4"]
@@ -31,10 +31,25 @@ Service definitions (Router, ManagementServer, Repository, Engine management API
 - Certificate handling is done in 013; here only the descriptive message.
 
 ## Acceptance criteria
-- [ ] Protos compile via the build from issue 001 and generate Kotlin classes.
-- [ ] `buf lint` (or equivalent) passes.
-- [ ] `spec/proto-style.md` exists.
+- [x] Protos compile via the build from issue 001 and generate Kotlin classes.
+- [x] `buf lint` (or equivalent) passes.
+- [x] `spec/proto-style.md` exists.
 
 ## Notes / Findings
+- Created modular `.proto` files in `proto/cringle/common/v1/` following standard Buf rules and proto3 best practices: `identifiers.proto`, `version.proto`, `hash.proto`, `cert.proto`, `error.proto`, `pagination.proto`, and `heartbeat.proto`.
+- Added `buf.yaml` in root referencing the proto modules.
+- Replaced the initial dummy proto with comprehensive unit tests in `CommonProtoTypesTest.kt` verifying serialization and Kotlin DSL builder usage for all generated types.
 
 ## Result
+- Defined common proto types in `proto/cringle/common/v1/`:
+  - `identifiers.proto`: `EngineId`, `MachineId`, `FabricId`, `BlockId`, `ProjectRef`, `PluginRef`
+  - `version.proto`: SemVer `Version` and npm-style `VersionRange`
+  - `hash.proto`: `Hash` and `HashAlgorithm`
+  - `cert.proto`: `CertificateInfo` (without private key data)
+  - `error.proto`: `CringleError`
+  - `pagination.proto`: `PaginationRequest`, `PaginationResponse`
+  - `heartbeat.proto`: `EngineHeartbeat`, `FabricStateSummary`, `FabricLifecycleState`, `EngineMetrics`
+- Created Protocol Buffer style guide in `spec/proto-style.md` and `buf.yaml`.
+- Added unit tests in `kotlin/common/src/test/kotlin/cringle/common/CommonProtoTypesTest.kt`.
+- Verified with `./gradlew build`.
+

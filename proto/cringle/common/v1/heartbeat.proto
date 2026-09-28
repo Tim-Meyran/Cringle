@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+import "cringle/common/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// State of a running fabric instance on an Engine.
+enum FabricLifecycleState {
+  FABRIC_LIFECYCLE_STATE_UNSPECIFIED = 0;
+  FABRIC_LIFECYCLE_STATE_INITIALIZING = 1;
+  FABRIC_LIFECYCLE_STATE_RUNNING = 2;
+  FABRIC_LIFECYCLE_STATE_PAUSED = 3;
+  FABRIC_LIFECYCLE_STATE_STOPPING = 4;
+  FABRIC_LIFECYCLE_STATE_STOPPED = 5;
+  FABRIC_LIFECYCLE_STATE_FAILED = 6;
+}
+
+// Summary of an active fabric on an Engine.
+message FabricStateSummary {
+  FabricId fabric_id = 1;
+  FabricLifecycleState state = 2;
+  string blueprint_name = 3;
+}
+
+// Basic runtime metrics reported in engine heartbeats.
+message EngineMetrics {
+  double cpu_usage_percent = 1;
+  int64 memory_used_bytes = 2;
+  int64 memory_max_bytes = 3;
+  int64 tether_messages_per_sec = 4;
+}
+
+// Engine heartbeat payload periodically sent to the registry.
+message EngineHeartbeat {
+  EngineId engine_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  repeated FabricStateSummary fabric_states = 3;
+  EngineMetrics metrics = 4;
+}

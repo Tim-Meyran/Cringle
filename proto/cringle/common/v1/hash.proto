@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.common.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.common.v1";
+
+// Supported cryptographic hash algorithms.
+enum HashAlgorithm {
+  HASH_ALGORITHM_UNSPECIFIED = 0;
+  HASH_ALGORITHM_SHA256 = 1;
+  HASH_ALGORITHM_SHA512 = 2;
+}
+
+// Cryptographic hash digest with algorithm metadata.
+message Hash {
+  HashAlgorithm algorithm = 1;
+  string digest = 2;
+}
