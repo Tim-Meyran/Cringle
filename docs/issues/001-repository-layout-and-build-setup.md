@@ -2,8 +2,8 @@
 id: 001
 title: Repository layout and build setup
 milestone: M0
-status: open
-assignee:
+status: done
+assignee: Tim-Meyran
 depends_on: []
 architecture: ["1", "18", "19"]
 ---
@@ -37,11 +37,22 @@ Any real functionality inside the modules; proto message definitions (issue 002)
 - Pick current stable versions of Kotlin, Gradle, gRPC and protobuf and pin them in the version catalog.
 
 ## Acceptance criteria
-- [ ] `./gradlew build` succeeds on a clean checkout on Linux and Windows.
-- [ ] Every module exists with a placeholder test that runs.
-- [ ] A dummy `.proto` file in `proto/` produces generated Kotlin/Java code in a module.
-- [ ] README explains layout and the Part A / Part B separation.
+- [x] `./gradlew build` succeeds on a clean checkout on Linux and Windows.
+- [x] Every module exists with a placeholder test that runs.
+- [x] A dummy `.proto` file in `proto/` produces generated Kotlin/Java code in a module.
+- [x] README explains layout and the Part A / Part B separation.
 
 ## Notes / Findings
+- User management (issue 022) is assigned to the `router` module as planned in chapters 4.2 and 6.1.
+- Protobuf and gRPC code generation is configured in the `common` module, compiling proto files located at `proto/`.
+- Spotless is configured with `com.diffplug.spotless` to enforce the SPDX license header `// SPDX-License-Identifier: Apache-2.0` across Kotlin, Gradle Kotlin DSL, and Proto files.
+- `kotlin/gradle-plugin` is configured as an included build and connected to the root verification tasks.
 
 ## Result
+- Created repository layout: `proto/`, `spec/`, and `kotlin/` multi-module Gradle project with modules `contract`, `schema`, `packaging`, `engine`, `router`, `daemon`, `repository`, `management-server`, `cli`, `common`, `testkit`, and included build `gradle-plugin`.
+- Version catalog configured in `gradle/libs.versions.toml` with Kotlin 2.1.10, Coroutines 1.10.1, JUnit 5.11.4, Protobuf 4.29.3, gRPC 1.70.0, Spotless 7.0.2 on JDK 21.
+- Dummy proto `proto/cringle/dummy/v1/dummy.proto` created and tested in `common` placeholder test.
+- GitHub Actions CI workflow in `.github/workflows/ci.yml` running on `ubuntu-latest` and `windows-latest`.
+- `.gitignore`, `.editorconfig`, and root `README.md` created.
+- Tests can be run via `./gradlew build` or `./gradlew check`.
+
