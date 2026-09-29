@@ -63,6 +63,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -77,6 +79,9 @@ public class ManagementServer(
     port: Int = 0,
     users: UserManager? = null,
     private val recoverOnStart: Boolean = true,
+    /** If set, package versions that no fabric uses and that were not used for this many days are removed regularly. */
+    private val cacheMaxUnusedDays: Long? = null,
+    private val cleanupInterval: java.time.Duration = java.time.Duration.ofHours(1),
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
@@ -102,6 +107,14 @@ public class ManagementServer(
     public fun start(): ManagementServer {
         server.start()
         if (recoverOnStart) recovery = scope.async { core.recover() }
+        if (cacheMaxUnusedDays != null) {
+            scope.launch {
+                while (true) {
+                    delay(cleanupInterval.toMillis())
+                    runCatching { core.cleanupCache(null, cacheMaxUnusedDays * 86_400) }
+                }
+            }
+        }
         return this
     }
 
@@ -120,7 +133,7 @@ public class ManagementServer(
         .setRepositoryAddress(v.record.repositoryAddress.orEmpty()).setReachable(v.reachable).setLastError(v.lastError).build()
 
     private fun engineInfo(v: EngineView): ManagedEngine {
-        val b = ManagedEngine.newBuilder().setMachineId(v.machine).setProcess(v.process).setAutostart(v.autostart)
+        val b = ManagedEngine.newBuilder().setMachineId(v.machine).setProcess(v.process).setAutostart(v.autostart).addAllRoles(v.roles).putAllLabels(v.labels)
         if (v.status != null) b.setStatus(v.status)
         return b.build()
     }
@@ -148,7 +161,30 @@ public class ManagementServer(
             ListMachinesResponse.newBuilder().addAllMachines(core.listMachines().map(::machineInfo)).build()
 
         override suspend fun createEngine(request: CreateEngineRequest): ManagedEngine = guard {
-            engineInfo(core.createEngine(request.machineId, request.engineId, request.name, if (request.hasAutostart()) request.autostart else true))
+            engineInfo(
+                core.createEngine(
+                    request.machineId, request.engineId, request.name, if (request.hasAutostart()) request.autostart else true,
+                    request.rolesList, request.labelsMap,
+                ),
+            )
+        }
+
+        override suspend fun setEngineTags(request: cringle.management.v1.SetEngineTagsRequest): ManagedEngine = guard {
+            engineInfo(core.setEngineTags(request.engine.machineId, request.engine.engineId.value, request.rolesList, request.labelsMap))
+        }
+
+        override suspend fun deploy(request: cringle.management.v1.DeployProjectRequest): cringle.management.v1.DeployProjectResponse = guard {
+            val r = core.deploy(request.project, request.versionRange, if (request.hasStart()) request.start else true)
+            cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).build()
+        }
+
+        override suspend fun undeploy(request: cringle.management.v1.UndeployRequest): cringle.management.v1.UndeployResponse = guard {
+            cringle.management.v1.UndeployResponse.newBuilder().addAllRemoved(core.undeploy(request.project)).build()
+        }
+
+        override suspend fun cleanupCache(request: cringle.management.v1.CleanupCacheRequest): cringle.management.v1.CleanupCacheResponse = guard {
+            val (removed, problems) = core.cleanupCache(request.machineId, request.minUnusedSeconds)
+            cringle.management.v1.CleanupCacheResponse.newBuilder().addAllRemoved(removed).addAllProblems(problems).build()
         }
 
         override suspend fun startEngine(request: EngineRef): ManagedEngine = guard { engineInfo(core.startEngine(request.machineId, request.engineId.value)) }
@@ -248,6 +284,10 @@ public class ManagementServer(
             "DeleteEngine" to Permission.OPERATE,
             "ListEngines" to Permission.READ,
             "GetEngine" to Permission.READ,
+            "SetEngineTags" to Permission.OPERATE,
+            "Deploy" to Permission.OPERATE,
+            "Undeploy" to Permission.OPERATE,
+            "CleanupCache" to Permission.OPERATE,
             "DeployFabric" to Permission.OPERATE,
             "StartFabric" to Permission.OPERATE,
             "StopFabric" to Permission.OPERATE,

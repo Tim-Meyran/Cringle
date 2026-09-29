@@ -50,7 +50,17 @@ public data class RecoveryReport(val enginesStarted: Int, val fabricsRestored: I
 public data class MachineView(val record: MachineRecord, val reachable: Boolean, val lastError: String)
 
 /** An Engine as seen by the ManagementServer: Daemon view, own status (if reachable) and setting. */
-public data class EngineView(val machine: String, val process: EngineInfo, val status: GetStatusResponse?, val autostart: Boolean)
+public data class EngineView(
+    val machine: String,
+    val process: EngineInfo,
+    val status: GetStatusResponse?,
+    val autostart: Boolean,
+    val roles: List<String> = emptyList(),
+    val labels: Map<String, String> = emptyMap(),
+)
+
+/** The outcome of [ManagementCore.deploy]. */
+public data class DeployResult(val project: String, val version: String, val lock: String, val fabrics: List<FabricView>)
 
 /** A fabric with the wish of the ManagementServer. */
 public data class FabricView(val machine: String, val engineId: String, val info: FabricInfo, val desiredRunning: Boolean)
@@ -145,30 +155,57 @@ public class ManagementCore(
     // --- Engines ---
 
     /** Creates an Engine through the Daemon of [machineId]; it is not started. */
-    public suspend fun createEngine(machineId: String, engineId: String?, name: String?, autostart: Boolean): EngineView {
+    public suspend fun createEngine(
+        machineId: String,
+        engineId: String?,
+        name: String?,
+        autostart: Boolean,
+        roles: List<String> = emptyList(),
+        labels: Map<String, String> = emptyMap(),
+    ): EngineView {
         val m = machine(machineId)
         val info = daemon(m).createEngine(
             CreateEngineRequest.newBuilder().setEngineId(engineId.orEmpty()).setName(name.orEmpty()).build(),
         )
-        update { d -> d.copy(engines = d.engines.filter { !(it.machine == machineId && it.engineId == info.engineId.value) } + EngineRecord(machineId, info.engineId.value, autostart)) to Unit }
-        return EngineView(machineId, info, null, autostart)
+        update { d ->
+            d.copy(engines = d.engines.filter { !(it.machine == machineId && it.engineId == info.engineId.value) } + EngineRecord(machineId, info.engineId.value, autostart, roles.distinct(), labels)) to Unit
+        }
+        return view(machineId, info, null)
     }
 
-    private fun autostart(machineId: String, id: String): Boolean =
-        snapshot().engines.firstOrNull { it.machine == machineId && it.engineId == id }?.autostart ?: false
+    private fun record(machineId: String, id: String): EngineRecord? = snapshot().engines.firstOrNull { it.machine == machineId && it.engineId == id }
+
+    private fun autostart(machineId: String, id: String): Boolean = record(machineId, id)?.autostart ?: false
+
+    private fun view(machineId: String, info: EngineInfo, status: GetStatusResponse?): EngineView {
+        val r = record(machineId, info.engineId.value)
+        return EngineView(machineId, info, status, r?.autostart ?: false, r?.roles ?: emptyList(), r?.labels ?: emptyMap())
+    }
+
+    /** Sets the roles and labels of an Engine that was created through this server. */
+    public suspend fun setEngineTags(machineId: String, id: String, roles: List<String>, labels: Map<String, String>): EngineView {
+        val m = machine(machineId)
+        val info = daemon(m).getEngine(EngineRequest.newBuilder().setEngineId(engineId(id)).build())
+        update { d ->
+            val existing = d.engines.firstOrNull { it.machine == machineId && it.engineId == id }
+            val next = (existing ?: EngineRecord(machineId, id, false)).copy(roles = roles.distinct(), labels = labels)
+            d.copy(engines = d.engines.filter { it !== existing } + next) to Unit
+        }
+        return view(machineId, info, null)
+    }
 
     /** Starts an Engine and waits until it is up. */
     public suspend fun startEngine(machineId: String, id: String): EngineView {
         val m = machine(machineId)
         val info = daemon(m).startEngine(EngineRequest.newBuilder().setEngineId(engineId(id)).build())
-        return EngineView(machineId, info, statusOf(m, info), autostart(machineId, id))
+        return view(machineId, info, statusOf(m, info))
     }
 
     /** Stops an Engine. */
     public suspend fun stopEngine(machineId: String, id: String): EngineView {
         val m = machine(machineId)
         val info = daemon(m).stopEngine(EngineRequest.newBuilder().setEngineId(engineId(id)).build())
-        return EngineView(machineId, info, null, autostart(machineId, id))
+        return view(machineId, info, null)
     }
 
     /** Stops and removes an Engine and forgets its fabrics. */
@@ -192,7 +229,7 @@ public class ManagementCore(
         val machines = if (machineId.isNullOrEmpty()) snapshot().machines else listOf(machine(machineId))
         return machines.flatMap { m ->
             try {
-                daemon(m).listEngines(ListEnginesRequest.getDefaultInstance()).enginesList.map { EngineView(m.id, it, null, autostart(m.id, it.engineId.value)) }
+                daemon(m).listEngines(ListEnginesRequest.getDefaultInstance()).enginesList.map { view(m.id, it, null) }
             } catch (e: StatusException) {
                 if (machineId.isNullOrEmpty()) emptyList() else throw e
             }
@@ -203,7 +240,7 @@ public class ManagementCore(
     public suspend fun getEngine(machineId: String, id: String): EngineView {
         val m = machine(machineId)
         val info = daemon(m).getEngine(EngineRequest.newBuilder().setEngineId(engineId(id)).build())
-        return EngineView(machineId, info, statusOf(m, info), autostart(machineId, id))
+        return view(machineId, info, statusOf(m, info))
     }
 
     private suspend fun runningEngine(machineId: String, id: String): EngineManagementServiceCoroutineStub {
@@ -230,7 +267,7 @@ public class ManagementCore(
     public suspend fun deployFabric(machineId: String, id: String, request: DeployFabricRequest, start: Boolean): FabricView {
         val api = runningEngine(machineId, id)
         val fabricId = request.fabricId.value
-        var info = api.deployFabric(request)
+        var info = api.deployFabric(withToken(request))
         update { d ->
             d.copy(fabrics = d.fabrics.filter { !(it.machine == machineId && it.engineId == id && it.fabricId == fabricId) } + FabricRecord(machineId, id, fabricId, request.toByteArray(), false)) to Unit
         }
@@ -240,6 +277,10 @@ public class ManagementCore(
         }
         return FabricView(machineId, id, info, start)
     }
+
+    /** The token for the Repository is never stored; it is added whenever a request is sent. */
+    private fun withToken(request: DeployFabricRequest): DeployFabricRequest =
+        if (request.hasSource() && repositoryToken != null) request.toBuilder().apply { sourceBuilder.token = repositoryToken }.build() else request
 
     /** Starts a fabric and remembers that it should run. */
     public suspend fun startFabric(machineId: String, id: String, fabricId: String): FabricView {
@@ -348,7 +389,7 @@ public class ManagementCore(
                             var current = present[f.fabricId]
                             var changed = false
                             if (current == null) {
-                                current = api.deployFabric(DeployFabricRequest.parseFrom(f.deploy))
+                                current = api.deployFabric(withToken(DeployFabricRequest.parseFrom(f.deploy)))
                                 changed = true
                             }
                             if (f.desiredRunning && current.state != FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING) {
@@ -368,6 +409,180 @@ public class ManagementCore(
             }
         }
         return RecoveryReport(started, restored, problems)
+    }
+
+    // --- Deployment ---
+
+    private val repositories = ConcurrentHashMap<String, cringle.repository.RepositoryClient>()
+
+    private fun repositoryClient(address: String) = repositories.computeIfAbsent(address) { cringle.repository.RepositoryClient(it, repositoryToken) }
+
+    private fun repositoryOf(m: MachineRecord): String =
+        m.repositoryAddress ?: defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured for machine '${m.id}'")
+
+    private fun projectOf(f: FabricRecord): String = DeployFabricRequest.parseFrom(f.deploy).project.name
+
+    private fun fabricIdFor(project: String, blueprint: String, index: Int): String {
+        val base = "$project-$blueprint".lowercase().replace(Regex("[^a-z0-9-]"), "-").trimStart('-').ifEmpty { "fabric" }
+        val suffix = "-${index + 1}"
+        return base.take(63 - suffix.length) + suffix
+    }
+
+    /**
+     * Deploys [project] (version [range], default any release): resolves it against the Repository, writes the lock,
+     * places every fabric of the fabric configuration on running Engines with all required roles and labels (the
+     * least loaded first) and lets those Engines download what they miss. Fabrics of the project that are deployed
+     * already are replaced. If one fabric cannot be deployed, the ones deployed by this call are removed again.
+     */
+    public suspend fun deploy(project: String, range: String, start: Boolean): DeployResult {
+        val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
+        val repo = repositoryClient(defaultAddress)
+        val resolution = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cringle.packaging.Resolver.resolve(mapOf(project to range.ifBlank { "*" }), repo) }
+        } catch (e: cringle.packaging.ResolutionException) {
+            throw ManagementException(if (e.failure == cringle.packaging.ResolutionFailure.UNKNOWN_PACKAGE) Status.Code.NOT_FOUND else Status.Code.FAILED_PRECONDITION, e.message ?: "resolution failed")
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "repository: ${e.message}")
+        }
+        val rootInfo = resolution.packages.getValue(project)
+        val version = rootInfo.version.toString()
+        val lock = resolution.toLock()
+        val lockText = lock.encode()
+        val problems = lock.problems()
+        if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "inconsistent lock: " + problems.joinToString { "${it.path}: ${it.message}" })
+
+        val projectPackage = try {
+            val entry = repo.get(project, version)
+            if (entry.kind != cringle.packaging.PackageKind.PROJECT) throw ManagementException(Status.Code.INVALID_ARGUMENT, "'$project' is a plugin, not a project")
+            val file = java.nio.file.Files.createTempFile("cringle-deploy", ".cringle")
+            try {
+                repo.download(project, version, file)
+                cringle.packaging.PackageReader.readProject(file)
+            } finally {
+                java.nio.file.Files.deleteIfExists(file)
+            }
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "repository: ${e.message}")
+        }
+        val configs = projectPackage.manifest.fabrics
+        if (configs.isEmpty()) throw ManagementException(Status.Code.FAILED_PRECONDITION, "project $project@$version has no fabric configuration")
+        for (c in configs) {
+            if (projectPackage.blueprints.none { it.name == c.blueprint }) throw ManagementException(Status.Code.FAILED_PRECONDITION, "fabric configuration refers to unknown blueprint '${c.blueprint}'")
+        }
+
+        java.nio.file.Files.createDirectories(store.directory.resolve("locks"))
+        java.nio.file.Files.writeString(store.directory.resolve("locks").resolve("$project-$version.lock.json"), lockText)
+
+        // replace what is deployed, then place on what is left
+        undeploy(project)
+        val engines = listEngines(null).filter { it.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING }
+        val load = HashMap<Pair<String, String>, Int>()
+        snapshot().fabrics.forEach { load.merge(it.machine to it.engineId, 1, Int::plus) }
+        val plan = ArrayList<Triple<EngineView, String, String>>() // engine, fabric id, blueprint
+        for (config in configs) {
+            val candidates = engines
+                .filter { e -> e.roles.containsAll(config.roles) && config.labels.all { (k, v) -> e.labels[k] == v } }
+                .sortedWith(compareBy({ load[it.machine to it.process.engineId.value] ?: 0 }, { it.machine }, { it.process.engineId.value }))
+            if (candidates.size < config.instances) {
+                throw ManagementException(
+                    Status.Code.FAILED_PRECONDITION,
+                    "blueprint '${config.blueprint}' needs ${config.instances} running engine(s) with roles ${config.roles} and labels ${config.labels}, but only ${candidates.size} match",
+                )
+            }
+            for (i in 0 until config.instances) {
+                val e = candidates[i]
+                load.merge(e.machine to e.process.engineId.value, 1, Int::plus)
+                plan += Triple(e, fabricIdFor(project, config.blueprint, i), config.blueprint)
+            }
+        }
+        if (plan.map { it.second }.distinct().size != plan.size) throw ManagementException(Status.Code.FAILED_PRECONDITION, "the fabric configuration of $project@$version yields duplicate fabric ids")
+
+        val deployed = ArrayList<FabricView>()
+        try {
+            for ((engine, fabricId, blueprint) in plan) {
+                val machine = machine(engine.machine)
+                val address = repositoryOf(machine)
+                val client = repositoryClient(address)
+                val plugins = resolution.packages.values.filter { it.name != project }.sortedBy { it.name }
+                val builder = DeployFabricRequest.newBuilder()
+                    .setFabricId(FabricId.newBuilder().setValue(fabricId))
+                    .setProject(cringle.common.v1.ProjectRef.newBuilder().setName(project).setVersion(version))
+                    .setBlueprint(blueprint)
+                val source = cringle.engine.v1.PackageSource.newBuilder().setRepositoryAddress(address)
+                source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PROJECT, project, version, rootInfo.hash))
+                for (plugin in plugins) {
+                    val trust = try {
+                        client.get(plugin.name, plugin.version.toString()).trust
+                    } catch (e: cringle.repository.RepositoryClientException) {
+                        throw ManagementException(e.status, "repository $address: ${e.message}")
+                    }
+                    builder.addPlugins(
+                        cringle.engine.v1.DeployedPlugin.newBuilder()
+                            .setPlugin(cringle.common.v1.PluginRef.newBuilder().setName(plugin.name).setVersion(plugin.version.toString()))
+                            .setTrust(if (trust == cringle.repository.PluginTrust.TRUSTED) cringle.engine.v1.PluginTrust.PLUGIN_TRUST_TRUSTED else cringle.engine.v1.PluginTrust.PLUGIN_TRUST_UNTRUSTED),
+                    )
+                    source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PLUGIN, plugin.name, plugin.version.toString(), plugin.hash))
+                }
+                builder.setSource(source)
+                try {
+                    deployed += deployFabric(engine.machine, engine.process.engineId.value, builder.build(), start)
+                } catch (e: StatusException) {
+                    throw ManagementException(e.status.code, "deploying $fabricId on ${engine.machine}/${engine.process.engineId.value}: ${e.status.description ?: e.status.code.name}")
+                }
+            }
+        } catch (e: Exception) {
+            deployed.forEach { runCatching { removeFabricQuietly(it.machine, it.engineId, it.info.fabricId.value) } }
+            throw e
+        }
+        return DeployResult(project, version, lockText, deployed)
+    }
+
+    private fun artifact(kind: cringle.engine.v1.ArtifactKind, name: String, version: String, hash: String) =
+        cringle.engine.v1.PackageArtifact.newBuilder().setKind(kind).setName(name).setVersion(version).setSha256(hash).build()
+
+    private suspend fun removeFabricQuietly(machineId: String, engineId: String, fabricId: String) {
+        try {
+            val api = runningEngine(machineId, engineId)
+            runCatching { api.stopFabric(fabricRef(fabricId)) }
+            runCatching { api.removeFabric(fabricRef(fabricId)) }
+        } catch (_: StatusException) {
+            // the engine is gone, and so is the fabric
+        } catch (_: ManagementException) {
+        }
+        update { d -> d.copy(fabrics = d.fabrics.filter { !(it.machine == machineId && it.engineId == engineId && it.fabricId == fabricId) }) to Unit }
+    }
+
+    /** Stops and removes all fabrics of [project]; returns them as `<machine>/<engine>/<fabric>`. */
+    public suspend fun undeploy(project: String): List<String> {
+        val fabrics = snapshot().fabrics.filter { projectOf(it) == project }
+        for (f in fabrics) removeFabricQuietly(f.machine, f.engineId, f.fabricId)
+        return fabrics.map { "${it.machine}/${it.engineId}/${it.fabricId}" }
+    }
+
+    /** Removes unused package versions from the cache of [machineId], or of all machines. */
+    public suspend fun cleanupCache(machineId: String?, minUnusedSeconds: Long): Pair<List<String>, List<String>> {
+        val machines = if (machineId.isNullOrEmpty()) snapshot().machines else listOf(machine(machineId))
+        val removed = ArrayList<String>()
+        val problems = ArrayList<String>()
+        for (m in machines) {
+            val running = try {
+                daemon(m).listEngines(ListEnginesRequest.getDefaultInstance()).enginesList.firstOrNull { it.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING && it.managementPort != 0 }
+            } catch (e: StatusException) {
+                problems += "${m.id}: ${e.status.description ?: e.status.code.name}"
+                continue
+            }
+            if (running == null) {
+                problems += "${m.id}: no running engine to clean the cache with"
+                continue
+            }
+            try {
+                engineApi(m, running.managementPort).cleanupCache(cringle.engine.v1.CleanupCacheRequest.newBuilder().setMinUnusedSeconds(minUnusedSeconds).build())
+                    .removedList.forEach { removed += "${m.id}: $it" }
+            } catch (e: StatusException) {
+                problems += "${m.id}: ${e.status.description ?: e.status.code.name}"
+            }
+        }
+        return removed to problems
     }
 
     // --- Repository and Router (used by the gRPC facade) ---
@@ -396,6 +611,8 @@ public class ManagementCore(
     }
 
     override fun close() {
+        repositories.values.forEach { runCatching { it.close() } }
+        repositories.clear()
         channels.values.forEach { it.shutdownNow() }
         channels.clear()
     }

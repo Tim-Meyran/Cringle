@@ -46,6 +46,9 @@ service ManagementService {
   // Returns one Engine with its process state (Daemon) and its own status (Engine management API).
   rpc GetEngine(EngineRef) returns (ManagedEngine);
 
+  // Sets the roles and labels of an Engine; placement of fabrics uses them.
+  rpc SetEngineTags(SetEngineTagsRequest) returns (ManagedEngine);
+
   // --- Fabrics ---
 
   // Deploys a fabric on an Engine and remembers it, so that it is restored after a restart.
@@ -62,6 +65,19 @@ service ManagementService {
 
   // Lists the fabrics of one Engine, or of all known Engines if the reference is empty.
   rpc ListFabrics(ListFabricsRequest) returns (ListFabricsResponse);
+
+  // --- Deployment ---
+
+  // Deploys a project: resolves it and its plugins against the Repository, writes the lock, places every fabric of
+  // the project's fabric configuration on Engines with the required roles and labels, and lets the Engines download
+  // and unpack what they miss. Fabrics of the project that are already deployed are replaced (stop, remove, deploy).
+  rpc Deploy(DeployProjectRequest) returns (DeployProjectResponse);
+
+  // Stops and removes all fabrics of a project.
+  rpc Undeploy(UndeployRequest) returns (UndeployResponse);
+
+  // Removes unused package versions from the cache of a machine, or of all machines if machine_id is empty.
+  rpc CleanupCache(CleanupCacheRequest) returns (CleanupCacheResponse);
 
   // --- Logs ---
 
@@ -142,6 +158,15 @@ message CreateEngineRequest {
   string name = 3;
   // Whether the Engine is started again after a restart of the machine or the ManagementServer. Default: true.
   optional bool autostart = 4;
+  // Roles of the Engine, matched by the fabric configuration of projects.
+  repeated string roles = 5;
+  map<string, string> labels = 6;
+}
+
+message SetEngineTagsRequest {
+  EngineRef engine = 1;
+  repeated string roles = 2;
+  map<string, string> labels = 3;
 }
 
 message DeleteEngineRequest {
@@ -166,6 +191,8 @@ message ManagedEngine {
   // Status from the Engine itself; unset if the Engine is not running or not reachable.
   cringle.engine.v1.GetStatusResponse status = 3;
   bool autostart = 4;
+  repeated string roles = 5;
+  map<string, string> labels = 6;
 }
 
 message DeployFabricRequest {
@@ -230,4 +257,43 @@ message RecoverResponse {
   int32 fabrics_restored = 2;
   // What could not be restored.
   repeated string problems = 3;
+}
+
+message DeployProjectRequest {
+  string project = 1;
+  // Version range (npm style); empty means any release (the highest is used).
+  string version_range = 2;
+  // Start the fabrics after deploying them. Default: true.
+  optional bool start = 3;
+}
+
+message DeployProjectResponse {
+  string project = 1;
+  // The version that was resolved.
+  string version = 2;
+  // The lock file that was written (also stored by the ManagementServer).
+  string lock = 3;
+  repeated ManagedFabric fabrics = 4;
+}
+
+message UndeployRequest {
+  string project = 1;
+}
+
+message UndeployResponse {
+  // The removed fabrics as `<machine>/<engine>/<fabric>`.
+  repeated string removed = 1;
+}
+
+message CleanupCacheRequest {
+  string machine_id = 1;
+  // Only versions unused for at least this many seconds are removed; 0 removes all unused versions.
+  int64 min_unused_seconds = 2;
+}
+
+message CleanupCacheResponse {
+  // The removed versions as `<machine>: <kind>/<name>@<version>`.
+  repeated string removed = 1;
+  // Machines that could not be cleaned, with the reason.
+  repeated string problems = 2;
 }

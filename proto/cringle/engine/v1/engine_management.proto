@@ -39,6 +39,10 @@ service EngineManagementService {
 
   // Queries the persistent log store of the Engine (blocks log through the built-in logging driver).
   rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
+
+  // Removes package versions from the machine cache that no fabric of an Engine on this machine uses and that have
+  // not been used for the given time. The cache is shared by all Engines of the machine.
+  rpc CleanupCache(CleanupCacheRequest) returns (CleanupCacheResponse);
 }
 
 // Lifecycle state of an Engine process.
@@ -92,6 +96,44 @@ message DeployFabricRequest {
   string blueprint = 3;
   // Exact plugin versions (from the lock); each must be unpacked in the Cringle home.
   repeated DeployedPlugin plugins = 4;
+  // Where to download packages that are not yet in the machine cache. Unset: the packages must already be unpacked.
+  PackageSource source = 5;
+}
+
+// What a package in the cache is.
+enum ArtifactKind {
+  ARTIFACT_KIND_UNSPECIFIED = 0;
+  ARTIFACT_KIND_PROJECT = 1;
+  ARTIFACT_KIND_PLUGIN = 2;
+}
+
+// One package version with the hash it must have (from the lock).
+message PackageArtifact {
+  ArtifactKind kind = 1;
+  string name = 2;
+  string version = 3;
+  // SHA-256 of the package file, lower case hex.
+  string sha256 = 4;
+}
+
+// Repository and packages a deployment needs. The Engine downloads what is missing, verifies the hash and unpacks
+// each version once into the machine cache (shared by all Engines of the machine).
+message PackageSource {
+  // host:port of the Repository.
+  string repository_address = 1;
+  // Bearer token for the Repository; empty if it needs none. Never persisted by the Engine.
+  string token = 2;
+  repeated PackageArtifact artifacts = 3;
+}
+
+message CleanupCacheRequest {
+  // Only versions unused for at least this many seconds are removed; 0 removes all unused versions.
+  int64 min_unused_seconds = 1;
+}
+
+message CleanupCacheResponse {
+  // The removed versions as `<kind>/<name>@<version>`.
+  repeated string removed = 1;
 }
 
 message FabricRequest {

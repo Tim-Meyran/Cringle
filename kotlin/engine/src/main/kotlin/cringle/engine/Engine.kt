@@ -71,6 +71,9 @@ public class Engine private constructor(
 
     public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers))
 
+    /** The package cache of the machine (shared by all engines with the same Cringle home). */
+    public val cache: PackageCache = PackageCache(home).also { it.clearEngine(config.id) }
+
     private val lock = Any()
     private var currentConfig = config
     private val startedAt: Instant = Instant.now()
@@ -195,7 +198,40 @@ public class Engine private constructor(
             return ConfigureResponse.newBuilder().setRouterAddress(config.routerAddress.orEmpty()).build()
         }
 
-        override suspend fun deployFabric(request: DeployFabricRequest): FabricInfo = fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+        override suspend fun deployFabric(request: DeployFabricRequest): FabricInfo {
+            val artifacts = artifactsOf(request)
+            if (request.hasSource()) {
+                val source = request.source
+                val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() })
+                try {
+                    for (artifact in source.artifactsList.map(::artifactOf)) cache.ensure(artifact, fetcher)
+                } catch (e: PackageCacheException) {
+                    throw StatusException((if (e.hashMismatch) Status.DATA_LOSS else Status.FAILED_PRECONDITION).withDescription(e.message))
+                } finally {
+                    fetcher.close()
+                }
+            }
+            val info = deployLocal(request)
+            cache.recordUsage(config.id, request.fabricId.value, artifacts)
+            return info
+        }
+
+        private fun artifactOf(a: cringle.engine.v1.PackageArtifact) = Artifact(
+            if (a.kind == cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PROJECT) ArtifactType.PROJECT else ArtifactType.PLUGIN,
+            a.name, a.version, a.sha256,
+        )
+
+        /** The packages the fabric uses: the project and all plugins (hashes are unknown without a source and not needed then). */
+        private fun artifactsOf(request: DeployFabricRequest): List<Artifact> =
+            listOf(Artifact(ArtifactType.PROJECT, request.project.name, request.project.version, "")) +
+                request.pluginsList.map { Artifact(ArtifactType.PLUGIN, it.plugin.name, it.plugin.version, "") }
+
+        override suspend fun cleanupCache(request: cringle.engine.v1.CleanupCacheRequest): cringle.engine.v1.CleanupCacheResponse {
+            val removed = withContext(Dispatchers.IO) { cache.cleanup(Duration.ofSeconds(request.minUnusedSeconds.coerceAtLeast(0))) }
+            return cringle.engine.v1.CleanupCacheResponse.newBuilder().addAllRemoved(removed).build()
+        }
+
+        private suspend fun deployLocal(request: DeployFabricRequest): FabricInfo = fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
             val plugins = request.pluginsList.map {
                 DeployPlugin(
                     it.plugin.name,
@@ -215,6 +251,7 @@ public class Engine private constructor(
 
         override suspend fun removeFabric(request: FabricRequest): RemoveFabricResponse = fabricCall {
             fabrics.remove(request.fabricId.value)
+            cache.clearUsage(config.id, request.fabricId.value)
             RemoveFabricResponse.getDefaultInstance()
         }
 
