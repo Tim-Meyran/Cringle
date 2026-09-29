@@ -25,7 +25,7 @@ Every tether has bounded buffers (default 64 entries; every stream direction has
 
 ## Delivery guarantees (in process)
 
-- A message is delivered at most once. If the receiving block cannot take it (not running), it is dropped and logged (policy `drop`, the default). **Decided:** the policy is configurable per tether (for example `buffer`); this follows in #42. Retries and at-least-once delivery are open points.
+- Per tether the blueprint sets a delivery policy (`delivery`, default `DROP`) for a receiver that is not running. `DROP`: the message, request or stream opening is dropped and logged (at most once); a request fails with `TetherDeliveryException`. `BUFFER`: delivery is retried until the receiver runs again; the tether's bounded buffer fills up meanwhile and the sender suspends. A request under `BUFFER` is abandoned once its timeout has passed. Retries and at-least-once delivery across process boundaries are open points.
 - A request fails with `TetherDeliveryException` if it cannot be delivered and with `TetherTimeoutException` if no response arrives within the timeout (default 30 s).
 - Stopping the fabric fails waiting senders and closes open streams; starting it again reopens the tethers with the same handles.
 

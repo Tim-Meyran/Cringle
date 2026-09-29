@@ -129,4 +129,25 @@ class ManifestJsonTest {
         val ref = bad(pluginWith(""","blocks":[{"name":"b","schemas":["nonsense"]}]"""))
         assertEquals("$.blocks[0].schemas[0]", ref.path)
     }
+
+    @Test
+    fun tetherDeliveryPolicyDefaultsToDropAndRoundTrips() {
+        val text = """{"name":"m","blocks":[],"tethers":[
+            {"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"}},
+            {"type":"MESSAGE","from":{"block":"a","port":"p2"},"to":{"block":"b","port":"q2"},"delivery":"BUFFER"}]}"""
+        val blueprint = ManifestJson.parseBlueprint(text, "f.json")
+        assertEquals(listOf(DeliveryPolicy.DROP, DeliveryPolicy.BUFFER), blueprint.tethers.map { it.delivery })
+        val encoded = ManifestJson.encode(blueprint)
+        assertEquals(1, Regex("\"delivery\"").findAll(encoded).count(), "the default is not written")
+        assertEquals(blueprint, ManifestJson.parseBlueprint(encoded, "f.json"))
+    }
+
+    @Test
+    fun rejectsUnknownDeliveryPolicy() {
+        val e = bad("""{"name":"m","blocks":[],"tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"delivery":"RETRY"}]}""") {
+            ManifestJson.parseBlueprint(it, "f.json")
+        }
+        assertTrue(e.message!!.contains("unknown value 'RETRY'"), e.message)
+        assertTrue(e.path.endsWith("delivery"), e.path)
+    }
 }

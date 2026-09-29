@@ -12,8 +12,10 @@ import cringle.contract.TetherByteStream
 import cringle.contract.TetherEvent
 import cringle.contract.TetherStream
 import cringle.contract.TetherType
+import cringle.engine.fabric.FabricException
 import cringle.engine.fabric.PortWiring
 import cringle.packaging.Blueprint
+import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
 import cringle.schema.SchemaValidator
 import java.util.concurrent.CopyOnWriteArrayList
@@ -24,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.flow.Flow
@@ -55,7 +58,7 @@ public class TetherNetwork private constructor(
     private val connections: Map<String, Connection>,
     private val ports: Map<String, PortDefinition>,
     private val onDeliveryFailure: (TetherInfo, Throwable) -> Unit,
-) : PortWiring {
+) : PortWiring, AutoCloseable {
     private val validator = config.schemas?.let { SchemaValidator(it) }
 
     @Volatile private var deliverer: TetherDeliverer? = null
@@ -79,7 +82,7 @@ public class TetherNetwork private constructor(
     }
 
     /** Stops delivery, fails waiting senders and closes open streams. Safe to call more than once. */
-    public fun close() {
+    override fun close() {
         scope?.cancel()
         scope = null
         deliverer = null
@@ -88,7 +91,7 @@ public class TetherNetwork private constructor(
         streamChannels.clear()
     }
 
-    private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition) {
+    private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition, val policy: DeliveryPolicy) {
         @Volatile var queue: Channel<Envelope>? = null
     }
 
@@ -105,43 +108,62 @@ public class TetherNetwork private constructor(
         val port = PortRef(to.port, to.index)
         try {
             for (env in queue) {
-                try {
-                    val target = deliverer ?: return
-                    when (env) {
-                        is Envelope.Message -> {
-                            hook(c, TrafficKind.MESSAGE, env.value)
-                            target.deliver(to.block, TetherEvent.Message(port, env.value))
+                if (env is Envelope.Request && env.response.isCancelled) continue
+                var first = true
+                while (true) {
+                    try {
+                        val target = deliverer ?: return
+                        val isFirst = first
+                        first = false
+                        handle(c, env, target, port, isFirst)
+                        break
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        if (c.policy == DeliveryPolicy.BUFFER && e is FabricException) {
+                            // the receiver is not running: keep the value, the queue behind it fills up
+                            delay(RETRY_DELAY_MS)
+                            if (env is Envelope.Request && env.response.isCancelled) break
+                            continue
                         }
-                        is Envelope.Request -> {
-                            hook(c, TrafficKind.REQUEST, env.value)
-                            target.deliver(
-                                to.block,
-                                TetherEvent.Request(port, env.value) { response ->
-                                    val checked = validate(c, response, "response")
-                                    hook(c, TrafficKind.RESPONSE, checked)
-                                    check(env.response.complete(checked)) { "request on ${c.info.id} was already answered" }
-                                },
-                            )
-                        }
-                        is Envelope.Stream -> {
-                            hook(c, TrafficKind.STREAM_OPENED, null)
-                            target.deliver(to.block, TetherEvent.StreamOpened(port, ValueStream(c, env.fromReceiver, env.toReceiver)))
-                        }
-                        is Envelope.Bytes -> {
-                            hook(c, TrafficKind.STREAM_OPENED, null)
-                            target.deliver(to.block, TetherEvent.ByteStreamOpened(port, ByteStream(c, env.fromReceiver, env.toReceiver)))
-                        }
+                        val failure = TetherDeliveryException("tether ${c.info.id}: delivery to '${to.block}' failed: ${e.message}", e)
+                        if (env is Envelope.Request) env.response.completeExceptionally(failure)
+                        onDeliveryFailure(c.info, failure)
+                        break
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    val failure = TetherDeliveryException("tether ${c.info.id}: delivery to '${to.block}' failed: ${e.message}", e)
-                    if (env is Envelope.Request) env.response.completeExceptionally(failure)
-                    onDeliveryFailure(c.info, failure)
                 }
             }
         } catch (_: CancellationException) {
             // closed
+        }
+    }
+
+    private suspend fun handle(c: Connection, env: Envelope, target: TetherDeliverer, port: PortRef, first: Boolean) {
+        val to = c.info.to
+        when (env) {
+            is Envelope.Message -> {
+                if (first) hook(c, TrafficKind.MESSAGE, env.value)
+                target.deliver(to.block, TetherEvent.Message(port, env.value))
+            }
+            is Envelope.Request -> {
+                if (first) hook(c, TrafficKind.REQUEST, env.value)
+                target.deliver(
+                    to.block,
+                    TetherEvent.Request(port, env.value) { response ->
+                        val checked = validate(c, response, "response")
+                        hook(c, TrafficKind.RESPONSE, checked)
+                        check(env.response.complete(checked)) { "request on ${c.info.id} was already answered" }
+                    },
+                )
+            }
+            is Envelope.Stream -> {
+                if (first) hook(c, TrafficKind.STREAM_OPENED, null)
+                target.deliver(to.block, TetherEvent.StreamOpened(port, ValueStream(c, env.fromReceiver, env.toReceiver)))
+            }
+            is Envelope.Bytes -> {
+                if (first) hook(c, TrafficKind.STREAM_OPENED, null)
+                target.deliver(to.block, TetherEvent.ByteStreamOpened(port, ByteStream(c, env.fromReceiver, env.toReceiver)))
+            }
         }
     }
 
@@ -227,6 +249,7 @@ public class TetherNetwork private constructor(
             try {
                 return withTimeout(config.requestTimeout.toMillis()) { response.await() }
             } catch (e: TimeoutCancellationException) {
+                response.cancel()
                 throw TetherTimeoutException("tether ${c.info.id}: no response within ${config.requestTimeout}")
             }
         }
@@ -288,6 +311,8 @@ public class TetherNetwork private constructor(
     }
 
     public companion object {
+        private const val RETRY_DELAY_MS = 50L
+
         private fun key(block: String, port: String, index: Int?) = "$block/$port/${index ?: "-"}"
 
         /**
@@ -339,7 +364,7 @@ public class TetherNetwork private constructor(
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
                     if (!ok) problems += "tether $id: schema ${from.schema} is not assignable to ${to.schema}"
                 }
-                val c = Connection(TetherInfo(id, t.type, t.from, t.to), from, to)
+                val c = Connection(TetherInfo(id, t.type, t.from, t.to), from, to, t.delivery)
                 for (e in listOf(t.from, t.to)) {
                     val k = key(e.block, e.port, e.index)
                     if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"
