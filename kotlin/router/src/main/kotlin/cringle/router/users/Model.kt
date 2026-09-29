@@ -21,6 +21,9 @@ public enum class Permission {
 
     /** Use an application built with Cringle. */
     APPLICATION,
+
+    /** Change security-relevant settings, such as the trust status of plugins. */
+    ADMINISTER,
     ;
 
     public companion object {
