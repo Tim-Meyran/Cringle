@@ -19,11 +19,17 @@ repositories {
     mavenCentral()
 }
 
+// A dependency of the sample that the parent classloader does not provide, so that lib/ of the package contains more
+// than the JAR of the project itself. A real plugin project would depend on a library from a repository.
+val supportJar = tasks.register<Jar>("supportJar") {
+    archiveFileName = "acme-orders-support.jar"
+    destinationDirectory = layout.buildDirectory.dir("libs")
+}
+
 dependencies {
     // The parent classloader provides the contract module at runtime, so it is compiled against but never packaged.
     compileOnly("cringle:contract:" + providers.gradleProperty("cringleVersion").get())
-    // A dependency the parent classloader does not provide, so it belongs into lib/ of the package.
-    implementation(files("libs/acme-orders-support.jar"))
+    implementation(files(supportJar))
 }
 
 cringle {

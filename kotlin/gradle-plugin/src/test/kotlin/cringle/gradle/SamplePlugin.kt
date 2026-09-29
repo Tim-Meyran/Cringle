@@ -6,10 +6,7 @@ import org.gradle.testkit.runner.GradleRunner
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.LocalDateTime
 import java.util.Properties
-import java.util.jar.JarEntry
-import java.util.jar.JarOutputStream
 import kotlin.io.path.Path
 import kotlin.io.path.copyTo
 import kotlin.io.path.createDirectories
@@ -60,13 +57,12 @@ internal object SamplePlugin {
     val buildScript: Path get() = Path.of("build.gradle.kts")
 
     /**
-     * Copies the sample into [target]/[name] and returns that directory. The copy also gets a JAR of its own, so that
-     * `lib/` of the package has a dependency that the parent classloader does not provide.
+     * Copies the sample into [target]/[name] and returns that directory. Every test works on its own copy, so no test
+     * sees the build output of another one.
      */
     fun copyTo(target: Path, name: String): Path {
         val dir = target.resolve(name)
         copyDirectory(source, dir)
-        writeSupportJar(dir)
         return dir
     }
 
@@ -86,18 +82,6 @@ internal object SamplePlugin {
             "--offline",
             "--stacktrace",
         )
-
-    private fun writeSupportJar(dir: Path) {
-        val libs = dir.resolve("libs")
-        libs.createDirectories()
-        val entry = JarEntry("META-INF/MANIFEST.MF")
-        entry.setTimeLocal(LocalDateTime.of(1980, 1, 1, 0, 0))
-        JarOutputStream(Files.newOutputStream(libs.resolve("acme-orders-support.jar"))).use { out ->
-            out.putNextEntry(entry)
-            out.write("Manifest-Version: 1.0\r\n\r\n".toByteArray())
-            out.closeEntry()
-        }
-    }
 
     /** Replaces [from] by [to] in the `build.gradle.kts` of the copy in [dir]. */
     fun replaceInBuildScript(dir: Path, from: String, to: String) {
