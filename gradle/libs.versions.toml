@@ -1,6 +1,7 @@
 [versions]
 kotlin = "2.1.10"
 coroutines = "1.10.1"
+serialization-json = "1.8.0"
 junit = "5.11.4"
 spotless = "7.0.2"
 protobuf = "4.29.3"
@@ -11,6 +12,7 @@ grpc-kotlin = "1.4.1"
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization-json" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 
