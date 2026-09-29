@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.repository.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.repository.v1";
+
+// The Repository: stores Projects and Plugins with versions and hashes, and holds the central trust status of Plugins.
+// Package names are unique across Projects and Plugins.
+service RepositoryService {
+  // Publishes a package (a ZIP file, sent in chunks). The package is validated; the version becomes immutable.
+  rpc PublishPackage(stream PublishRequest) returns (PublishResponse);
+
+  // Lists every version of every package, optionally only of one kind.
+  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
+
+  // Lists the versions of one package.
+  rpc ListVersions(ListVersionsRequest) returns (ListVersionsResponse);
+
+  // Returns the metadata of one version.
+  rpc GetPackage(GetPackageRequest) returns (PackageMetadata);
+
+  // Sets the trust status of a Plugin (all versions). This is the only place where trust is set.
+  rpc SetPluginTrust(SetPluginTrustRequest) returns (PackageMetadataList);
+
+  // Downloads a package: first the metadata, then the file in chunks. The client checks the hash.
+  rpc DownloadPackage(DownloadRequest) returns (stream DownloadResponse);
+}
+
+enum PackageKind {
+  PACKAGE_KIND_UNSPECIFIED = 0;
+  PACKAGE_KIND_PROJECT = 1;
+  PACKAGE_KIND_PLUGIN = 2;
+}
+
+// Central trust status of a Plugin. New Plugins are untrusted until an operator says otherwise.
+enum PluginTrust {
+  PLUGIN_TRUST_UNSPECIFIED = 0;
+  PLUGIN_TRUST_TRUSTED = 1;
+  PLUGIN_TRUST_UNTRUSTED = 2;
+}
+
+message PackageMetadata {
+  PackageKind kind = 1;
+  string name = 2;
+  string version = 3;
+  // SHA-256 of the package file, lower case hex.
+  string sha256 = 4;
+  int64 size_bytes = 5;
+  // Dependency name to version range, as in the manifest.
+  map<string, string> dependencies = 6;
+  google.protobuf.Timestamp published_at = 7;
+  // Only set for Plugins.
+  PluginTrust trust = 8;
+}
+
+message PublishHeader {
+  // Optional: the hash the client computed; the publish fails if it differs from the received bytes.
+  string expected_sha256 = 1;
+}
+
+message PublishRequest {
+  oneof payload {
+    // Must be the first message.
+    PublishHeader header = 1;
+    bytes chunk = 2;
+  }
+}
+
+message PublishResponse {
+  PackageMetadata metadata = 1;
+}
+
+message ListPackagesRequest {
+  // Unspecified means all kinds.
+  PackageKind kind = 1;
+}
+
+message ListPackagesResponse {
+  repeated PackageMetadata packages = 1;
+}
+
+message ListVersionsRequest {
+  string name = 1;
+}
+
+message ListVersionsResponse {
+  repeated PackageMetadata versions = 1;
+}
+
+message GetPackageRequest {
+  string name = 1;
+  string version = 2;
+}
+
+message SetPluginTrustRequest {
+  string name = 1;
+  PluginTrust trust = 2;
+}
+
+message PackageMetadataList {
+  // All versions of the Plugin with the new status.
+  repeated PackageMetadata packages = 1;
+}
+
+message DownloadRequest {
+  string name = 1;
+  string version = 2;
+}
+
+message DownloadResponse {
+  oneof payload {
+    // The first message.
+    PackageMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
