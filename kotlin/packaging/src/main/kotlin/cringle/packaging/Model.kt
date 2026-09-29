@@ -77,6 +77,8 @@ public data class TetherDef(
     public val from: Endpoint,
     public val to: Endpoint,
     public val delivery: DeliveryPolicy = DeliveryPolicy.DROP,
+    /** The TCP port of a [TetherType.TCP] tether; `null` for every other type. */
+    public val port: Int? = null,
 )
 
 /**

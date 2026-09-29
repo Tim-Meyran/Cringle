@@ -150,4 +150,12 @@ class ManifestJsonTest {
         assertTrue(e.message!!.contains("unknown value 'RETRY'"), e.message)
         assertTrue(e.path.endsWith("delivery"), e.path)
     }
+
+    @Test
+    fun tcpTetherPortRoundTrips() {
+        val text = """{"name":"m","blocks":[],"tethers":[{"type":"TCP","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"port":9000}]}"""
+        val blueprint = ManifestJson.parseBlueprint(text, "f.json")
+        assertEquals(9000, blueprint.tethers.single().port)
+        assertEquals(blueprint, ManifestJson.parseBlueprint(ManifestJson.encode(blueprint), "f.json"))
+    }
 }

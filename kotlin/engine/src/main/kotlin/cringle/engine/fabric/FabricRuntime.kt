@@ -192,7 +192,15 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             publish()
             spec.paths.create(entries.map { it.instance.id })
             log(FabricLogger.Level.INFO, "starting fabric '${spec.id}' (blueprint '${spec.blueprint.name}')")
-            network?.open { blockId, event -> deliver(blockId, event) }
+            try {
+                network?.open { blockId, event -> deliver(blockId, event) }
+            } catch (e: TetherWiringException) {
+                val message = "fabric '${spec.id}' cannot be started: ${e.message}"
+                startFailure = message
+                phase = FabricState.STOPPED
+                publish()
+                throw FabricException(message)
+            }
             withContext(dispatcher) {
                 hosts.forEach { it.reset() }
                 for (host in hosts) host.bringUp()

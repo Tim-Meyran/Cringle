@@ -53,11 +53,11 @@ class DeliveryPolicyTest {
             mapOf("s" to src, "d" to dst),
             TetherConfig(SchemaRegistry(), capacity, Duration.ofSeconds(5)),
         ) { _, e -> receiver.failures += e.message.orEmpty() }
-        network.open { _, event ->
+        runBlocking { network.open { _, event ->
             if (!receiver.running) throw FabricException("block 'd' is not running")
             receiver.events += event
             if (event is TetherEvent.Request) event.respond("re:" + event.value)
-        }
+        } }
         return network
     }
 
@@ -134,9 +134,11 @@ class DeliveryPolicyTest {
             mapOf("s" to src, "d" to dst),
             TetherConfig(SchemaRegistry(), 8, Duration.ofMillis(200)),
         )
-        net.open { _, event ->
-            if (!r2.running) throw FabricException("not running")
-            r2.events += event
+        runBlocking {
+            net.open { _, event ->
+                if (!r2.running) throw FabricException("not running")
+                r2.events += event
+            }
         }
         net.use { n ->
             assertThrows<TetherTimeoutException> { runBlocking { out(n).request("late") } }

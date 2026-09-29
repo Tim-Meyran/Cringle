@@ -6,6 +6,7 @@ import cringle.contract.BlockDefinition
 import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
+import cringle.contract.TetherType
 import cringle.schema.SchemaConflictException
 import cringle.schema.SchemaParseException
 import cringle.schema.SchemaParser
@@ -102,6 +103,12 @@ public object PackageValidator {
             val to = endpoint(t.to, "$path.to", instances, unresolved, PortDirection.IN, ::problem)
             if (from != null && t.type !in from.tetherTypes) problem("$path.type", "port '${t.from.port}' does not support ${t.type}")
             if (to != null && t.type !in to.tetherTypes) problem("$path.type", "port '${t.to.port}' does not support ${t.type}")
+            if (t.type == TetherType.TCP) {
+                if (t.port == null || t.port !in 1..65535) problem("$path.port", "a TCP tether needs a 'port' between 1 and 65535")
+                if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a TCP tether only supports delivery DROP")
+            } else if (t.port != null) {
+                problem("$path.port", "only TCP tethers have a 'port'")
+            }
             if (from != null && to != null && !isAssignable(from.schema, to.schema, registry)) {
                 problem(path, "schema ${from.schema} of '${t.from.port}' is not assignable to ${to.schema} of '${t.to.port}'")
             }

@@ -86,7 +86,7 @@ fields, so it always runs entirely inside one engine (chapter 9.1); any such key
 - Tether: `type` (a tether type), `from` and `to`. An endpoint is `{"block": <id>, "port": <name>}` plus `"index"`
   for VarArg ports. The type is fixed here and never changes at runtime. Optional `delivery` (`DROP` default, or
   `BUFFER`) says what happens when the receiving block is not running: `DROP` drops and logs, `BUFFER` keeps the
-  value in the tether's bounded buffer until the receiver runs again (see `tether.md`).
+  value in the tether's bounded buffer until the receiver runs again (see `tether.md`). A `TCP` tether needs `"port"` (1 to 65535) and supports only `DROP`; no other type may set `port`.
 
 ## 6. Semantic validation
 

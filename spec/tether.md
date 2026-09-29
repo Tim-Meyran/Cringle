@@ -12,8 +12,13 @@ The type of a tether is fixed in the blueprint and never changes at runtime.
 | `REQUEST_RESPONSE` | request, sender suspends until the response arrives | `request` | `Request` (answer with `respond`) |
 | `STREAM` | bidirectional stream of values | `openStream` | `StreamOpened` |
 | `BYTE_STREAM` | bidirectional raw bytes | `openByteStream` | `ByteStreamOpened` |
+| `TCP` | raw bytes over a real TCP connection on loopback | `openByteStream` | `ByteStreamOpened` |
 
 A tether connects an `OUT` port to an `IN` port. Both ports must support the tether type. The `OUT` end's handle initiates traffic; the `IN` end's handle rejects all operations with `IllegalStateException`. An operation of the wrong type throws `IllegalStateException`. An endpoint can be part of one tether only. VarArg ports are wired per index; their size is fixed at start.
+
+### TCP tethers
+
+A `TCP` tether carries a byte stream over a real TCP connection. The blueprint gives the tether a `port` (1 to 65535, required). When the fabric starts, the engine has the receiving (IN) block listen on that loopback port through the TCP driver; the port registry makes a conflict with another block or fabric fail the start with a message that names the owner (`port N is already used by block 'x' of fabric 'y'`). `openByteStream()` at the sending (OUT) end connects; the receiver gets `ByteStreamOpened` for every connection. Only delivery `DROP` is allowed (a connection that cannot be handed over is closed). Listeners and connections are closed when the fabric stops. Byte data is not checked against a schema. Connections across engines are not covered (see #20).
 
 ## Schemas
 

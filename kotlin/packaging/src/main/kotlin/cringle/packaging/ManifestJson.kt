@@ -36,7 +36,7 @@ public object ManifestJson {
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
     private val blueprintKeys = setOf("name", "blocks", "tethers")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
-    private val tetherKeys = setOf("type", "from", "to", "delivery")
+    private val tetherKeys = setOf("type", "from", "to", "delivery", "port")
     private val endpointKeys = setOf("block", "port", "index")
 
     /** Parses `cringle-project.json`. */
@@ -151,7 +151,8 @@ public object ManifestJson {
         val from = endpoint(o["from"] ?: throw PackageFormatException(path, "missing key 'from'"), "$path.from")
         val to = endpoint(o["to"] ?: throw PackageFormatException(path, "missing key 'to'"), "$path.to")
         val delivery = o["delivery"]?.let { enumValue<DeliveryPolicy>(JsonReading.string(o, "delivery", path), "$path.delivery") } ?: DeliveryPolicy.DROP
-        return TetherDef(type, from, to, delivery)
+        val port = JsonReading.optInt(o, "port", path)
+        return TetherDef(type, from, to, delivery, port)
     }
 
     private fun endpoint(e: JsonElement, path: String): Endpoint {
@@ -243,6 +244,7 @@ public object ManifestJson {
                             put("from", endpoint(t.from))
                             put("to", endpoint(t.to))
                             if (t.delivery != DeliveryPolicy.DROP) put("delivery", t.delivery.name)
+                            t.port?.let { put("port", it) }
                         }
                     },
                 ),

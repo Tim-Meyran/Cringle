@@ -170,4 +170,17 @@ class PackageValidatorTest {
         )
         assertTrue(problems(bp).size >= 4)
     }
+
+    @Test
+    fun tcpPortRules() {
+        val notTcp = problems(Fixtures.main.copy(tethers = listOf(Fixtures.main.tethers[0].copy(port = 80))))
+        assertTrue(notTcp.any { it.path.endsWith("$.tethers[0].port") && it.message.contains("only TCP tethers have a 'port'") }, notTcp.toString())
+        val tcp = Fixtures.main.tethers[0].copy(type = TetherType.TCP)
+        val noPort = problems(Fixtures.main.copy(tethers = listOf(tcp)))
+        assertTrue(noPort.any { it.path.endsWith("$.tethers[0].port") && it.message.contains("between 1 and 65535") }, noPort.toString())
+        val buffered = problems(Fixtures.main.copy(tethers = listOf(tcp.copy(port = 9000, delivery = DeliveryPolicy.BUFFER))))
+        assertTrue(buffered.any { it.path.endsWith("$.tethers[0].delivery") && it.message.contains("only supports delivery DROP") }, buffered.toString())
+        val outOfRange = problems(Fixtures.main.copy(tethers = listOf(tcp.copy(port = 70000))))
+        assertTrue(outOfRange.any { it.path.endsWith("$.tethers[0].port") }, outOfRange.toString())
+    }
 }
