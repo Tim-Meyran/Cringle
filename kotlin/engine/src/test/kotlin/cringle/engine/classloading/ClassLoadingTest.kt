@@ -152,7 +152,8 @@ class ClassLoadingTest {
         FabricClassLoaders(contract).use { fabric ->
             fabric.openProviders("p", root, manifest)
             val loader = fabric.loaderFor("p", emptyList())
-            assertEquals("own", loader.getResource("config.txt")!!.readText())
+            // read through the loader so that closing the fabric releases the JAR (a plain URL would keep it locked on Windows)
+            assertEquals("own", loader.getResourceAsStream("config.txt")!!.use { String(it.readBytes()) })
             assertEquals(1, loader.getResources("config.txt").toList().size)
             assertNull(loader.getResource("does-not-exist.txt"))
         }
