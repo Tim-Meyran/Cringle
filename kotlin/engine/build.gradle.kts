@@ -10,4 +10,5 @@ dependencies {
     implementation(libs.bouncycastle.prov)
     implementation(libs.bouncycastle.pkix)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(project(":testkit"))
 }
