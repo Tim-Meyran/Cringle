@@ -8,6 +8,7 @@ import cringle.common.v1.BlockId
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.common.v1.FabricLifecycleState
+import cringle.engine.drivers.BuiltinDrivers
 import cringle.engine.fabric.BlockState
 import cringle.engine.fabric.DeployPlugin
 import cringle.engine.fabric.DeployRequest
@@ -61,7 +62,10 @@ public class Engine private constructor(
     private val heartbeatInterval: Duration,
 ) {
     /** The fabrics of this engine. */
-    public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir))
+    /** The built-in drivers of this engine (logging, filesystem, TCP). */
+    public val drivers: BuiltinDrivers = BuiltinDrivers(dir)
+
+    public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers))
 
     private val lock = Any()
     private var currentConfig = config
@@ -121,6 +125,7 @@ public class Engine private constructor(
     public fun stop() {
         state = EngineState.ENGINE_STATE_STOPPING
         fabrics.close()
+        drivers.close()
         synchronized(lock) {
             link?.stop()
             link = null

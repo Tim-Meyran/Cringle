@@ -6,6 +6,7 @@ import cringle.contract.Block
 import cringle.contract.BlockContext
 import cringle.contract.BlockId
 import cringle.contract.BlockPorts
+import cringle.contract.DriverSet
 import cringle.contract.IsolationLevel
 import cringle.contract.Tether
 import cringle.contract.TetherEvent
@@ -286,6 +287,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         private val policy = spec.restart[id] ?: spec.defaultRestart
         private val definition = entry.resolved.definition
         private var block: Block? = null
+        private var driverSet: DriverSet? = null
         private var restartJob: Job? = null
         private var generation = 0
 
@@ -349,6 +351,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             set(BlockState.STARTING)
             try {
                 val drivers = spec.drivers.driversFor(blockId, definition.requiredDrivers)
+                driverSet = drivers
                 val created = entry.resolved.provider.createBlock(definition.name, drivers)
                 block = created
                 call("init") { created.init(context) }
@@ -397,6 +400,17 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         }
 
         private suspend fun teardown() {
+            try {
+                teardownBlock()
+            } finally {
+                // releases what the drivers hold for this block (ports, connections)
+                val set = driverSet
+                driverSet = null
+                (set as? AutoCloseable)?.let { runCatching { it.close() } }
+            }
+        }
+
+        private suspend fun teardownBlock() {
             val b = block ?: return
             block = null
             try {

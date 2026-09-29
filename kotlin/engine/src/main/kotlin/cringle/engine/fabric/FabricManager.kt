@@ -5,6 +5,7 @@ package cringle.engine.fabric
 import cringle.contract.BlockId
 import cringle.contract.DriverSet
 import cringle.contract.Driver
+import cringle.engine.drivers.BuiltinDrivers
 import cringle.engine.tether.TetherConfig
 import cringle.engine.EngineArgs
 import cringle.engine.classloading.ContractClassLoader
@@ -110,6 +111,8 @@ public class LocalFabricDeployer(
     private val home: Path,
     private val engineDir: Path,
     private val drivers: DriverFactory = EmptyDriverFactory,
+    /** Built-in drivers of the engine; when set, they replace [drivers] (bound to each deployed fabric). */
+    private val builtin: BuiltinDrivers? = null,
     private val wiring: PortWiring = UnconnectedPorts,
     /** In-process tether settings; the schema registry of the deployment is filled in. `null` uses [wiring] instead. */
     private val tethers: TetherConfig? = TetherConfig(),
@@ -178,7 +181,7 @@ public class LocalFabricDeployer(
                     id = request.fabricId,
                     blueprint = blueprint,
                     resolver = BlockResolver { blocks[it] },
-                    drivers = drivers,
+                    drivers = builtin?.factoryFor(request.fabricId, paths) ?: drivers,
                     paths = paths,
                     wiring = wiring,
                     tethers = tethers?.let { TetherConfig(registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor) },
