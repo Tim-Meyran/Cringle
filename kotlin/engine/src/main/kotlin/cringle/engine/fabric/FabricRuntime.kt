@@ -33,6 +33,9 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.util.concurrent.Executors
+import cringle.engine.tether.TetherConfig
+import cringle.engine.tether.TetherNetwork
+import cringle.engine.tether.TetherWiringException
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.nanoseconds
@@ -51,6 +54,11 @@ public class FabricSpec(
     public val paths: FabricPaths,
     /** Creates the tethers behind the ports. */
     public val wiring: PortWiring = UnconnectedPorts,
+    /**
+     * Settings for the in-process tethers of the blueprint. When set, the runtime wires the blueprint's tethers itself
+     * and [wiring] is ignored; when `null`, [wiring] is used.
+     */
+    public val tethers: TetherConfig? = null,
     /** Restart policy per block id; blocks not listed use [defaultRestart]. */
     public val restart: Map<String, RestartPolicy> = emptyMap(),
     /** Restart policy for blocks without an entry in [restart]. */
@@ -77,6 +85,8 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     private class Entry(val instance: BlueprintBlock, val resolved: ResolvedBlock, val config: Map<String, Any?>)
 
     private val entries: List<Entry>
+    private val network: TetherNetwork?
+    private val wiring: PortWiring
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "fabric-${spec.id}").also { it.isDaemon = true } }
     private val dispatcher = executor.asCoroutineDispatcher()
     private val scope = CoroutineScope(dispatcher + SupervisorJob())
@@ -97,6 +107,16 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
 
     init {
         entries = resolveEntries()
+        network = spec.tethers?.let { config ->
+            try {
+                TetherNetwork.create(spec.blueprint, entries.associate { it.instance.id to it.resolved.definition }, config) { info, e ->
+                    log(FabricLogger.Level.WARN, "tether ${info.id}: ${e.message}")
+                }
+            } catch (e: TetherWiringException) {
+                throw FabricException("fabric '${spec.id}' cannot be created:\n${e.message}")
+            }
+        }
+        wiring = network ?: spec.wiring
         hosts = entries.map { BlockHost(it) }
         mutableStatus = MutableStateFlow(computeStatus())
         startWatchdog()
@@ -171,6 +191,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             publish()
             spec.paths.create(entries.map { it.instance.id })
             log(FabricLogger.Level.INFO, "starting fabric '${spec.id}' (blueprint '${spec.blueprint.name}')")
+            network?.open { blockId, event -> deliver(blockId, event) }
             withContext(dispatcher) {
                 hosts.forEach { it.reset() }
                 for (host in hosts) host.bringUp()
@@ -186,6 +207,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             if (phase == FabricState.CREATED || phase == FabricState.STOPPED) return
             phase = FabricState.STOPPING
             publish()
+            network?.close()
             withContext(dispatcher) { hosts.asReversed().forEach { it.stopHost() } }
             phase = FabricState.STOPPED
             log(FabricLogger.Level.INFO, "fabric '${spec.id}' stopped")
@@ -210,6 +232,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         try {
             runBlocking { stop() }
         } finally {
+            network?.close()
             watchdog?.shutdownNow()
             scope.cancel()
             executor.shutdown()
@@ -289,9 +312,9 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             for (p in definition.ports) {
                 if (p.varArg) {
                     val size = entry.instance.varArgCounts[p.name] ?: 0
-                    varArg[p.name] = List(size) { spec.wiring.tether(blockId, p, it) }
+                    varArg[p.name] = List(size) { wiring.tether(blockId, p, it) }
                 } else {
-                    plain[p.name] = spec.wiring.tether(blockId, p, null)
+                    plain[p.name] = wiring.tether(blockId, p, null)
                 }
             }
             return object : BlockPorts {
