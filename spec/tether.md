@@ -1,6 +1,6 @@
 # Tether specification (proposal)
 
-**Status: proposal.** Delivery guarantees, backpressure and wire format are open points of the architecture (chapter 10). This document describes what the in-process implementation does today; items marked `[Zu bestätigen]` need a decision.
+**Status: proposal.** Delivery guarantees, backpressure and wire format are open points of the architecture (chapter 10). This document describes what the in-process implementation does today.
 
 ## Modes
 
@@ -17,7 +17,7 @@ A tether connects an `OUT` port to an `IN` port. Both ports must support the tet
 
 ## Schemas
 
-Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). Byte streams are not checked. `[Zu bestätigen]` A response is validated against the same schema as the request.
+Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). Byte streams are not checked. **Decided:** a response is validated against the same schema as the request; a port has one schema for both directions.
 
 ## Backpressure and ordering
 
@@ -25,7 +25,7 @@ Every tether has bounded buffers (default 64 entries; every stream direction has
 
 ## Delivery guarantees (in process)
 
-- A message is delivered at most once. If the receiving block cannot take it (not running), it is dropped and logged. `[Zu bestätigen]` retries and at-least-once delivery are configuration matters for later.
+- A message is delivered at most once. If the receiving block cannot take it (not running), it is dropped and logged (policy `drop`, the default). **Decided:** the policy is configurable per tether (for example `buffer`); this follows in #42. Retries and at-least-once delivery are open points.
 - A request fails with `TetherDeliveryException` if it cannot be delivered and with `TetherTimeoutException` if no response arrives within the timeout (default 30 s).
 - Stopping the fabric fails waiting senders and closes open streams; starting it again reopens the tethers with the same handles.
 
