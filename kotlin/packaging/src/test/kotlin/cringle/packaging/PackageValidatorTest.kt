@@ -1,0 +1,173 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package cringle.packaging
+
+import cringle.contract.TetherType
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class PackageValidatorTest {
+    private val plugins = listOf(Fixtures.pluginPackage())
+
+    private fun problems(blueprint: Blueprint): List<PackageProblem> =
+        PackageValidator.validateProject(Fixtures.projectPackage(listOf(blueprint)), plugins)
+
+    private fun edit(json: String, from: String, to: String): Blueprint {
+        assertTrue(from in json, "fixture no longer contains '$from'")
+        return ManifestJson.parseBlueprint(json.replace(from, to), "blueprints/main.json")
+    }
+
+    private fun single(blueprint: Blueprint): PackageProblem = problems(blueprint).single()
+
+    @Test
+    fun specExampleIsValid() {
+        assertEquals(emptyList<PackageProblem>(), PackageValidator.validateProject(Fixtures.projectPackage(), plugins))
+        assertEquals(emptyList<PackageProblem>(), PackageValidator.validatePlugin(Fixtures.pluginPackage()))
+    }
+
+    @Test
+    fun unknownBlock() {
+        val p = single(edit(Fixtures.blueprint, "acme-orders/order-source", "acme-orders/nope"))
+        assertEquals("blueprints/main.json $.blocks[0].block", p.path)
+        assertTrue(p.message.contains("unknown block 'acme-orders/nope'"))
+    }
+
+    @Test
+    fun duplicateBlockIds() {
+        val p = problems(edit(Fixtures.blueprint, "\"id\": \"sink\"", "\"id\": \"source\""))
+        assertTrue(p.any { it.message == "duplicate block id 'source'" && it.path.endsWith("$.blocks[1].id") }, p.toString())
+    }
+
+    @Test
+    fun unknownBlockIdAndPortInTether() {
+        val p = single(edit(Fixtures.blueprint, "\"block\": \"source\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\"", "\"block\": \"ghost\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\""))
+        assertTrue(p.path.endsWith("$.tethers[0].from.block"))
+        val q = single(edit(Fixtures.blueprint, "\"port\": \"in\" }", "\"port\": \"inn\" }"))
+        assertTrue(q.path.endsWith("$.tethers[0].to.port") && q.message.contains("no port 'inn'"), q.toString())
+    }
+
+    @Test
+    fun directionIsChecked() {
+        val bp = Fixtures.main.copy(
+            tethers = listOf(Fixtures.main.tethers[0].copy(from = Endpoint("sink", "in"), to = Endpoint("source", "out"))),
+        )
+        val p = problems(bp)
+        assertEquals(2, p.size)
+        assertTrue(p.any { it.path.endsWith("$.tethers[0].from.port") && it.message.contains("is IN but must be OUT") })
+        assertTrue(p.any { it.path.endsWith("$.tethers[0].to.port") && it.message.contains("is OUT but must be IN") })
+    }
+
+    @Test
+    fun tetherTypeMustBeSupportedByBothPorts() {
+        val bp = Fixtures.main.copy(tethers = listOf(Fixtures.main.tethers[0].copy(type = TetherType.STREAM)))
+        val p = single(bp)
+        assertEquals("blueprints/main.json $.tethers[0].type", p.path)
+        assertEquals("port 'in' does not support STREAM", p.message)
+        val bp2 = Fixtures.main.copy(tethers = listOf(Fixtures.main.tethers[0].copy(type = TetherType.BYTE_STREAM)))
+        assertEquals(2, problems(bp2).size)
+    }
+
+    @Test
+    fun schemasMustBeAssignable() {
+        val bp = Fixtures.main.copy(
+            blocks = Fixtures.main.blocks + BlueprintBlock("text", "acme-orders/text-sink"),
+            tethers = listOf(
+                Fixtures.main.tethers[0].copy(to = Endpoint("text", "in")),
+            ),
+        )
+        val p = single(bp)
+        assertTrue(p.message.contains("acme.orders/Order") && p.message.contains("cringle.std/String") && p.message.contains("not assignable"), p.message)
+    }
+
+    @Test
+    fun varArgRules() {
+        val noCount = Fixtures.main.copy(
+            blocks = Fixtures.main.blocks.map { if (it.id == "sink") it.copy(varArgCounts = emptyMap()) else it },
+        )
+        assertTrue(problems(noCount).any { it.message == "missing size of VarArg port 'replicas'" })
+        val extra = Fixtures.main.copy(
+            blocks = Fixtures.main.blocks.map { if (it.id == "sink") it.copy(varArgCounts = mapOf("replicas" to 2, "in" to 1)) else it },
+        )
+        assertEquals("blueprints/main.json $.blocks[1].varArgCounts.in", single(extra).path)
+        val tooHigh = edit(Fixtures.blueprint, "\"index\": 1", "\"index\": 2")
+        assertEquals("index 2 is outside 0 until 2", single(tooHigh).message)
+        val noIndex = edit(Fixtures.blueprint, ", \"index\": 1", "")
+        assertEquals("VarArg port 'replicas' needs an index", single(noIndex).message)
+        val plainWithIndex = edit(Fixtures.blueprint, "\"port\": \"in\" }", "\"port\": \"in\", \"index\": 0 }")
+        assertEquals("port 'in' is not a VarArg port and takes no index", single(plainWithIndex).message)
+    }
+
+    @Test
+    fun configIsValidatedAgainstTheConfigSchema() {
+        val wrongType = edit(Fixtures.blueprint, "\"limit\": 10", "\"limit\": \"ten\"")
+        val p = single(wrongType)
+        assertEquals("blueprints/main.json $.blocks[1].config.limit", p.path)
+        assertTrue(p.message.contains("integer"), p.message)
+        val missing = edit(Fixtures.blueprint, "\"config\": { \"limit\": 10 },", "")
+        assertTrue(single(missing).message.contains("limit"), single(missing).message)
+        val unexpected = edit(Fixtures.blueprint, "\"id\": \"source\", \"block\": \"acme-orders/order-source\"", "\"id\": \"source\", \"block\": \"acme-orders/order-source\", \"config\": { \"x\": 1 }")
+        assertEquals("'acme-orders/order-source' takes no configuration", single(unexpected).message)
+    }
+
+    @Test
+    fun fabricMustReferenceExistingBlueprint() {
+        val manifest = Fixtures.project.copy(fabrics = listOf(FabricConfig("missing", 1, emptyList(), emptyMap())))
+        val p = PackageValidator.validateProject(Fixtures.projectPackage(manifest = manifest), plugins).single()
+        assertEquals("$.fabrics[0].blueprint", p.path)
+    }
+
+    @Test
+    fun blueprintsAreDefinedWithoutAnyEngineReference() {
+        // A blueprint cannot name an engine, role or label, so it cannot span engines.
+        val e = org.junit.jupiter.api.assertThrows<PackageFormatException> {
+            ManifestJson.parseBlueprint("""{"name":"m","engine":"e1","blocks":[]}""", "b.json")
+        }
+        assertTrue(e.message!!.contains("unknown key 'engine'"))
+    }
+
+    @Test
+    fun pluginSchemasMustResolveAndParse() {
+        val broken = PluginPackage(Fixtures.plugin, emptyMap(), emptyList())
+        val p = PackageValidator.validatePlugin(broken)
+        assertTrue(p.any { it.message == "schema 'acme.orders/Order' does not resolve" && it.path == "$.blocks[0].schemas[0]" }, p.toString())
+        val garbage = PluginPackage(Fixtures.plugin, mapOf("schemas/orders.json" to "{"), emptyList())
+        assertTrue(PackageValidator.validatePlugin(garbage).any { it.path == "acme-orders@1.2.0:schemas/orders.json" && it.message.contains("malformed JSON") })
+    }
+
+    @Test
+    fun schemasOfDependenciesAreUsed() {
+        val onlyBlocks = PluginPackage(Fixtures.plugin, emptyMap(), emptyList())
+        assertEquals(emptyList<PackageProblem>(), PackageValidator.validatePlugin(onlyBlocks, listOf(dependencyWithSchema())))
+    }
+
+    private fun dependencyWithSchema(): PluginPackage = PluginPackage(
+        ManifestJson.parsePlugin("""{"format":1,"kind":"plugin","name":"dep","version":"1.0.0"}"""),
+        mapOf("schemas/orders.json" to Fixtures.ordersSchema),
+        emptyList(),
+    )
+
+    @Test
+    fun conflictingSchemaNamespacesAreReported() {
+        val twice = PluginPackage(Fixtures.plugin, mapOf("schemas/orders.json" to Fixtures.ordersSchema), emptyList())
+        val p = PackageValidator.validatePlugin(twice, listOf(dependencyWithSchema()))
+        assertTrue(p.any { it.message.contains("acme.orders") }, p.toString())
+    }
+
+    @Test
+    fun pluginWithBlocksNeedsProviderAndUniqueNames() {
+        val noProvider = PluginPackage(Fixtures.plugin.copy(providers = emptyList()), Fixtures.pluginPackage().schemas, emptyList())
+        assertEquals("$.providers", PackageValidator.validatePlugin(noProvider).single().path)
+        val dup = PluginPackage(Fixtures.plugin.copy(blocks = Fixtures.plugin.blocks + Fixtures.plugin.blocks[0]), Fixtures.pluginPackage().schemas, emptyList())
+        assertEquals("duplicate block 'order-source'", PackageValidator.validatePlugin(dup).single().message)
+    }
+
+    @Test
+    fun problemsAreCollectedNotThrown() {
+        val bp = Fixtures.main.copy(
+            blocks = listOf(BlueprintBlock("a", "acme-orders/nope"), BlueprintBlock("b", "nope/nope")),
+            tethers = listOf(Fixtures.main.tethers[0]),
+        )
+        assertTrue(problems(bp).size >= 4)
+    }
+}

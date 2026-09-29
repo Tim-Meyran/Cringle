@@ -164,8 +164,11 @@ public object SchemaParser {
     }
 }
 
-/** Finds the first duplicate key of any object in a syntactically valid JSON text. */
-internal object JsonDuplicateKeys {
+/**
+ * Finds the first duplicate key of any object in a syntactically valid JSON text. Public so that other Cringle
+ * formats (packages, manifests) apply the same strictness as schema documents.
+ */
+public object JsonDuplicateKeys {
     private class Frame(val path: String, val isObject: Boolean) {
         val keys = HashSet<String>()
         var expectingKey = isObject
@@ -173,8 +176,8 @@ internal object JsonDuplicateKeys {
         var valuePath = path
     }
 
-    /** Returns the path of the object with the duplicate and the duplicated key, or `null`. */
-    fun find(text: String): Pair<String, String>? {
+    /** Returns `(path, key)` of the first duplicate key, or `null` if there is none. */
+    public fun find(text: String): Pair<String, String>? {
         val stack = ArrayList<Frame>()
         var i = 0
         while (i < text.length) {
