@@ -11,7 +11,7 @@ import kotlin.system.exitProcess
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... --insecure-dev-mode"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] --insecure-dev-mode"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -21,6 +21,7 @@ public fun main(args: Array<String>) {
     var token: String? = null
     var router: String? = null
     val machines = ArrayList<Pair<String, String>>()
+    var cacheDays: Long? = null
     var insecure = false
     var i = 0
     fun fail(message: String): Nothing {
@@ -45,6 +46,7 @@ public fun main(args: Array<String>) {
                 if ('=' !in v) fail("--machine needs <id>=<host:port>")
                 machines += v.substringBefore('=') to v.substringAfter('=')
             }
+            "--cache-max-unused-days" -> cacheDays = value(option).toLongOrNull()?.takeIf { it >= 0 } ?: fail("--cache-max-unused-days must be a number >= 0")
             "--insecure-dev-mode" -> insecure = true
             else -> fail("unknown argument '$option'")
         }
@@ -58,7 +60,7 @@ public fun main(args: Array<String>) {
     for ((id, address) in machines) {
         if (id !in known) kotlinx.coroutines.runBlocking { core.addMachine(id, address, null, null) }
     }
-    val server = ManagementServer(core, port)
+    val server = ManagementServer(core, port, cacheMaxUnusedDays = cacheDays)
     Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
     server.start()
     println("management-port=${server.port}")

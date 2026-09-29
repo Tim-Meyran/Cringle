@@ -5,6 +5,7 @@ dependencies {
     implementation(project(":contract"))
     implementation(project(":router"))
     implementation(project(":engine"))
+    implementation(project(":repository"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.grpc.netty.shaded)

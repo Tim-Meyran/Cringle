@@ -25,7 +25,13 @@ public data class MachineRecord(
 )
 
 /** An Engine that the ManagementServer created. */
-public data class EngineRecord(val machine: String, val engineId: String, val autostart: Boolean)
+public data class EngineRecord(
+    val machine: String,
+    val engineId: String,
+    val autostart: Boolean,
+    val roles: List<String> = emptyList(),
+    val labels: Map<String, String> = emptyMap(),
+)
 
 /** A fabric that was deployed through the ManagementServer; [deploy] is the serialized `DeployFabricRequest`. */
 public data class FabricRecord(
@@ -53,6 +59,9 @@ public class ManagementStoreException(message: String, cause: Throwable? = null)
 
 /** Persists [ManagementData] as JSON in [file], written atomically. */
 public class ManagementStore(private val file: Path) {
+    /** The directory of the state file; other files of the ManagementServer (locks) live below it. */
+    public val directory: Path get() = file.toAbsolutePath().parent
+
     /** Reads the state; an empty state if there is no file yet. */
     public fun load(): ManagementData {
         if (!Files.exists(file)) return ManagementData()
@@ -67,7 +76,11 @@ public class ManagementStore(private val file: Path) {
                 },
                 engines = (root["engines"] as JsonArray).map {
                     val o = it as JsonObject
-                    EngineRecord(o.text("machine"), o.text("engineId"), (o["autostart"] as JsonPrimitive).boolean)
+                    EngineRecord(
+                        o.text("machine"), o.text("engineId"), (o["autostart"] as JsonPrimitive).boolean,
+                        (o["roles"] as? JsonArray)?.map { r -> (r as JsonPrimitive).content } ?: emptyList(),
+                        (o["labels"] as? JsonObject)?.mapValues { (_, v) -> (v as JsonPrimitive).content } ?: emptyMap(),
+                    )
                 },
                 fabrics = (root["fabrics"] as JsonArray).map {
                     val o = it as JsonObject
@@ -101,6 +114,8 @@ public class ManagementStore(private val file: Path) {
                     put("machine", e.machine)
                     put("engineId", e.engineId)
                     put("autostart", e.autostart)
+                    putJsonArray("roles") { e.roles.forEach { add(JsonPrimitive(it)) } }
+                    put("labels", JsonObject(e.labels.toSortedMap().mapValues { JsonPrimitive(it.value) }))
                 })
             }
             putJsonArray("fabrics") {
