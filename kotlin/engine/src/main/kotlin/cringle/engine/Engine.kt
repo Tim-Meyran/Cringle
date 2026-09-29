@@ -7,6 +7,7 @@ import cringle.common.v1.CertificateInfo
 import cringle.common.v1.BlockId
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
+import cringle.common.v1.FabricLifecycleState
 import cringle.engine.fabric.BlockState
 import cringle.engine.fabric.DeployPlugin
 import cringle.engine.fabric.DeployRequest
@@ -17,6 +18,7 @@ import cringle.engine.fabric.FabricState
 import cringle.engine.fabric.FabricStatus
 import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
+import cringle.common.v1.FabricStateSummary
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.ConfigureResponse
 import cringle.engine.v1.EngineManagementServiceGrpcKt
@@ -40,6 +42,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -55,6 +58,7 @@ public class Engine private constructor(
     config: EngineConfig,
     requestedPort: Int,
     home: Path,
+    private val heartbeatInterval: Duration,
 ) {
     /** The fabrics of this engine. */
     public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir))
@@ -74,6 +78,30 @@ public class Engine private constructor(
         .addService(ManagementService())
         .build()
 
+    private var link: RegistryLink? = null
+    private var started = false
+
+    /** Supplies the fabric states that heartbeats to the router report; by default the fabrics of this engine. */
+    @Volatile
+    public var fabricStates: () -> List<FabricStateSummary> = {
+        fabrics.list().map {
+            FabricStateSummary.newBuilder()
+                .setFabricId(FabricId.newBuilder().setValue(it.id))
+                .setBlueprintName(it.blueprint)
+                .setState(
+                    when (it.state) {
+                        FabricState.CREATED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_INITIALIZING
+                        FabricState.STARTING -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_INITIALIZING
+                        FabricState.RUNNING -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_RUNNING
+                        FabricState.STOPPING -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_STOPPING
+                        FabricState.STOPPED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_STOPPED
+                        FabricState.FAILED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_FAILED
+                    },
+                )
+                .build()
+        }
+    }
+
     /** The engine's current configuration. */
     public val config: EngineConfig get() = synchronized(lock) { currentConfig }
 
@@ -83,7 +111,9 @@ public class Engine private constructor(
     /** Starts the management server and publishes its port in `<engine dir>/management.port`. */
     public fun start(): Engine {
         server.start()
+        started = true
         Files.writeString(dir.resolve(PORT_FILE), managementPort.toString() + "\n")
+        synchronized(lock) { restartLink() }
         return this
     }
 
@@ -91,9 +121,37 @@ public class Engine private constructor(
     public fun stop() {
         state = EngineState.ENGINE_STATE_STOPPING
         fabrics.close()
+        synchronized(lock) {
+            link?.stop()
+            link = null
+        }
         server.shutdown()
         if (!server.awaitTermination(5, TimeUnit.SECONDS)) server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
         Files.deleteIfExists(dir.resolve(PORT_FILE))
+    }
+
+    /** Sets (or, with `null`, clears) the router this engine registers at; persists the config and reconnects. */
+    public fun setRouterAddress(address: String?) {
+        synchronized(lock) {
+            currentConfig = currentConfig.copy(routerAddress = address).also { it.save(dir) }
+            restartLink()
+        }
+    }
+
+    /** Must be called with [lock] held. Registers at the configured router, if any and if the server is running. */
+    private fun restartLink() {
+        link?.stop()
+        link = null
+        val router = currentConfig.routerAddress
+        if (router != null && state != EngineState.ENGINE_STATE_STOPPING && started) {
+            link = RegistryLink(
+                currentConfig.id,
+                currentConfig.name,
+                "127.0.0.1:$managementPort",
+                router,
+                heartbeatInterval,
+            ) { fabricStates() }.also { it.start() }
+        }
     }
 
     /** Blocks until the management server has terminated. */
@@ -124,13 +182,8 @@ public class Engine private constructor(
         }
 
         override suspend fun configure(request: ConfigureRequest): ConfigureResponse {
-            synchronized(lock) {
-                if (request.hasRouterAddress()) {
-                    val address = request.routerAddress.takeIf { it.isNotEmpty() }
-                    currentConfig = currentConfig.copy(routerAddress = address).also { it.save(dir) }
-                }
-                return ConfigureResponse.newBuilder().setRouterAddress(currentConfig.routerAddress.orEmpty()).build()
-            }
+            if (request.hasRouterAddress()) setRouterAddress(request.routerAddress.takeIf { it.isNotEmpty() })
+            return ConfigureResponse.newBuilder().setRouterAddress(config.routerAddress.orEmpty()).build()
         }
 
         override suspend fun deployFabric(request: DeployFabricRequest): FabricInfo = fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
@@ -219,7 +272,11 @@ public class Engine private constructor(
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
          * started yet. Throws [EngineArgsException] if insecure dev mode is missing.
          */
-        public fun create(args: EngineArgs, env: Map<String, String> = System.getenv()): Engine {
+        public fun create(
+            args: EngineArgs,
+            env: Map<String, String> = System.getenv(),
+            heartbeatInterval: Duration = Duration.ofSeconds(5),
+        ): Engine {
             if (!args.insecureDevMode) {
                 throw EngineArgsException(
                     "secure (mTLS) management is not available yet (issue #13); start with --insecure-dev-mode",
@@ -229,7 +286,7 @@ public class Engine private constructor(
             Files.createDirectories(dir)
             val config = EngineConfig.loadOrCreate(dir, args.id, args.name)
             val identity = EngineIdentity.loadOrCreate(dir, args.id)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env))
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval)
         }
 
         private fun timestamp(i: Instant): Timestamp = Timestamp.newBuilder().setSeconds(i.epochSecond).setNanos(i.nano).build()

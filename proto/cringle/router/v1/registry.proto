@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.router.v1;
+
+import "cringle/common/v1/heartbeat.proto";
+import "cringle/common/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.router.v1";
+
+// Registry of a Router: which Engines exist, which Fabrics run on them, and which remote Routers are known.
+service RegistryService {
+  // Registers an Engine (or refreshes its registration). Counts as the first heartbeat.
+  rpc RegisterEngine(RegisterEngineRequest) returns (RegisterEngineResponse);
+
+  // Removes an Engine from the registry.
+  rpc UnregisterEngine(UnregisterEngineRequest) returns (UnregisterEngineResponse);
+
+  // Records a heartbeat. Fails with NOT_FOUND if the Engine is not registered, so that it can register again.
+  rpc SendHeartbeat(SendHeartbeatRequest) returns (SendHeartbeatResponse);
+
+  // Finds the Engine that runs a Fabric: local Engines first, then cached remote Engines.
+  rpc LookupFabric(LookupFabricRequest) returns (LookupFabricResponse);
+
+  // Lists Engines known to this Router.
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);
+
+  // Adds a remote Router and caches its Engines.
+  rpc AddRemoteRouter(AddRemoteRouterRequest) returns (AddRemoteRouterResponse);
+
+  // Removes a remote Router and its cached Engines.
+  rpc RemoveRemoteRouter(RemoveRemoteRouterRequest) returns (RemoveRemoteRouterResponse);
+
+  // Lists remote Routers.
+  rpc ListRemoteRouters(ListRemoteRoutersRequest) returns (ListRemoteRoutersResponse);
+}
+
+// Whether an Engine has sent a heartbeat recently.
+enum Reachability {
+  REACHABILITY_UNSPECIFIED = 0;
+  REACHABILITY_REACHABLE = 1;
+  REACHABILITY_UNREACHABLE = 2;
+}
+
+message EngineEntry {
+  cringle.common.v1.EngineId engine_id = 1;
+  string name = 2;
+  // Address of the Engine management API as host:port.
+  string management_address = 3;
+  Reachability reachability = 4;
+  google.protobuf.Timestamp last_heartbeat = 5;
+  repeated cringle.common.v1.FabricStateSummary fabrics = 6;
+  // Address of the remote Router this entry was learned from; empty for local Engines.
+  string origin_router = 7;
+}
+
+message RegisterEngineRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+  string name = 2;
+  string management_address = 3;
+}
+
+message RegisterEngineResponse {}
+
+message UnregisterEngineRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+}
+
+message UnregisterEngineResponse {}
+
+message SendHeartbeatRequest {
+  cringle.common.v1.EngineHeartbeat heartbeat = 1;
+}
+
+message SendHeartbeatResponse {}
+
+message LookupFabricRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+}
+
+message LookupFabricResponse {
+  EngineEntry engine = 1;
+}
+
+message ListEnginesRequest {
+  // Also return cached Engines of remote Routers.
+  bool include_remote = 1;
+  // Only return reachable Engines.
+  bool only_reachable = 2;
+}
+
+message ListEnginesResponse {
+  repeated EngineEntry engines = 1;
+}
+
+message RemoteRouterEntry {
+  // Address of the remote Router as host:port.
+  string address = 1;
+  // Number of cached Engines.
+  int32 cached_engines = 2;
+  // Last successful refresh; unset if never refreshed.
+  google.protobuf.Timestamp last_refresh = 3;
+  // Error of the last refresh, empty if it succeeded.
+  string last_error = 4;
+}
+
+message AddRemoteRouterRequest {
+  string address = 1;
+}
+
+message AddRemoteRouterResponse {
+  RemoteRouterEntry router = 1;
+}
+
+message RemoveRemoteRouterRequest {
+  string address = 1;
+}
+
+message RemoveRemoteRouterResponse {}
+
+message ListRemoteRoutersRequest {}
+
+message ListRemoteRoutersResponse {
+  repeated RemoteRouterEntry routers = 1;
+}
