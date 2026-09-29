@@ -6,7 +6,10 @@ import cringle.contract.BlockId
 import cringle.contract.BlockDefinition
 import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
+import cringle.contract.PortInUseException
 import cringle.contract.PortRef
+import cringle.contract.TcpConnection
+import cringle.contract.TcpDriver
 import cringle.contract.Tether
 import cringle.contract.TetherByteStream
 import cringle.contract.TetherEvent
@@ -65,20 +68,64 @@ public class TetherNetwork private constructor(
 
     @Volatile private var scope: CoroutineScope? = null
     private val streamChannels = CopyOnWriteArrayList<Channel<*>>()
+    private val tcpDrivers = CopyOnWriteArrayList<TcpDriver>()
 
     /** All tethers of the blueprint. */
     public val tethers: List<TetherInfo> = connections.values.map { it.info }.distinctBy { it.id }
 
     /** Starts the delivery of messages to [deliverer]. */
-    public fun open(deliverer: TetherDeliverer) {
+    public suspend fun open(deliverer: TetherDeliverer) {
         close()
         this.deliverer = deliverer
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope = s
         for (c in connections.values.distinctBy { it.info.id }) {
+            if (c.info.type == TetherType.TCP) continue
             c.queue = Channel(config.bufferCapacity)
             s.launch { pump(c) }
         }
+        try {
+            for (c in connections.values.distinctBy { it.info.id }) if (c.info.type == TetherType.TCP) openTcp(c, s, deliverer)
+        } catch (e: PortInUseException) {
+            close()
+            throw TetherWiringException("tether cannot start: ${e.message}")
+        } catch (e: java.io.IOException) {
+            close()
+            throw TetherWiringException("tether cannot start: ${e.message}")
+        }
+    }
+
+    private suspend fun openTcp(c: Connection, s: CoroutineScope, deliverer: TetherDeliverer) {
+        val provider = config.tcp ?: throw TetherWiringException("tether ${c.info.id}: this fabric has no TCP driver")
+        val port = checkNotNull(c.tcpPort)
+        val receiver = provider(c.info.to.block).also { tcpDrivers += it }
+        c.sender = provider(c.info.from.block).also { tcpDrivers += it }
+        val listener = receiver.listen(port)
+        val target = PortRef(c.info.to.port, c.info.to.index)
+        s.launch {
+            listener.connections.collect { connection ->
+                try {
+                    deliverer.deliver(c.info.to.block, TetherEvent.ByteStreamOpened(target, TcpByteStream(c, connection)))
+                } catch (e: CancellationException) {
+                    connection.close()
+                    throw e
+                } catch (e: Throwable) {
+                    connection.close()
+                    onDeliveryFailure(c.info, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
+                }
+            }
+        }
+    }
+
+    private inner class TcpByteStream(private val c: Connection, private val connection: TcpConnection) : TetherByteStream {
+        override val incoming: Flow<ByteArray> = connection.incoming
+
+        override suspend fun write(bytes: ByteArray) {
+            hook(c, TrafficKind.BYTES, bytes)
+            connection.write(bytes)
+        }
+
+        override suspend fun close() = connection.close()
     }
 
     /** Stops delivery, fails waiting senders and closes open streams. Safe to call more than once. */
@@ -89,10 +136,14 @@ public class TetherNetwork private constructor(
         for (c in connections.values.distinctBy { it.info.id }) c.queue?.cancel()
         for (ch in streamChannels) ch.cancel()
         streamChannels.clear()
+        for (d in tcpDrivers) (d as? AutoCloseable)?.close()
+        tcpDrivers.clear()
     }
 
-    private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition, val policy: DeliveryPolicy) {
+    private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition, val policy: DeliveryPolicy, val tcpPort: Int?) {
         @Volatile var queue: Channel<Envelope>? = null
+
+        @Volatile var sender: TcpDriver? = null
     }
 
     private sealed interface Envelope {
@@ -225,6 +276,12 @@ public class TetherNetwork private constructor(
             check(type == t) { "tether ${c.info.id} has type $type; $operation is only valid for $t" }
         }
 
+        private fun requireByteStream() {
+            check(type == TetherType.BYTE_STREAM || type == TetherType.TCP) {
+                "tether ${c.info.id} has type $type; openByteStream is only valid for BYTE_STREAM and TCP"
+            }
+        }
+
         private fun queue(): Channel<Envelope> = c.queue ?: throw IllegalStateException("tether ${c.info.id}: the fabric is not running")
 
         private suspend fun enqueue(e: Envelope) {
@@ -265,7 +322,16 @@ public class TetherNetwork private constructor(
         }
 
         override suspend fun openByteStream(): TetherByteStream {
-            require(TetherType.BYTE_STREAM, "openByteStream")
+            requireByteStream()
+            if (type == TetherType.TCP) {
+                val driver = c.sender ?: throw IllegalStateException("tether ${c.info.id}: the fabric is not running")
+                val connection = try {
+                    driver.connect("127.0.0.1", checkNotNull(c.tcpPort))
+                } catch (e: java.io.IOException) {
+                    throw TetherDeliveryException("tether ${c.info.id}: cannot connect to port ${c.tcpPort}: ${e.message}", e)
+                }
+                return TcpByteStream(c, connection)
+            }
             val toReceiver = Channel<ByteArray>(config.bufferCapacity)
             val fromReceiver = Channel<ByteArray>(config.bufferCapacity)
             streamChannels += toReceiver
@@ -359,12 +425,16 @@ public class TetherNetwork private constructor(
                 if (from == null || to == null) continue
                 if (t.type !in from.tetherTypes) problems += "tether $id: port '${t.from.port}' does not support ${t.type}"
                 if (t.type !in to.tetherTypes) problems += "tether $id: port '${t.to.port}' does not support ${t.type}"
-                if (t.type != TetherType.BYTE_STREAM) {
+                if (t.type != TetherType.BYTE_STREAM && t.type != TetherType.TCP) {
                     val registry = config.schemas
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
                     if (!ok) problems += "tether $id: schema ${from.schema} is not assignable to ${to.schema}"
                 }
-                val c = Connection(TetherInfo(id, t.type, t.from, t.to), from, to, t.delivery)
+                if (t.type == TetherType.TCP) {
+                    if (t.port == null) problems += "tether $id: a TCP tether needs a port"
+                    if (config.tcp == null) problems += "tether $id: this fabric has no TCP driver"
+                }
+                val c = Connection(TetherInfo(id, t.type, t.from, t.to), from, to, t.delivery, t.port)
                 for (e in listOf(t.from, t.to)) {
                     val k = key(e.block, e.port, e.index)
                     if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"

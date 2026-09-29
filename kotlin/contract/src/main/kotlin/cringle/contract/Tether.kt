@@ -20,6 +20,12 @@ public enum class TetherType {
 
     /** A raw byte stream. */
     BYTE_STREAM,
+
+    /**
+     * A raw byte stream carried over a real TCP connection on the loopback interface. The blueprint gives the port:
+     * the receiving (IN) end listens on it, the sending (OUT) end connects with [Tether.openByteStream].
+     */
+    TCP,
 }
 
 /**
@@ -46,7 +52,7 @@ public interface Tether {
     /** Opens a stream of values. Valid for [TetherType.STREAM]. */
     public suspend fun openStream(): TetherStream
 
-    /** Opens a raw byte stream. Valid for [TetherType.BYTE_STREAM]. */
+    /** Opens a raw byte stream. Valid for [TetherType.BYTE_STREAM] and [TetherType.TCP]. */
     public suspend fun openByteStream(): TetherByteStream
 }
 

@@ -67,7 +67,7 @@ public class InMemoryTether(override val type: TetherType) : Tether {
     }
 
     override suspend fun openByteStream(): TetherByteStream {
-        require(TetherType.BYTE_STREAM, "openByteStream")
+        check(type == TetherType.BYTE_STREAM || type == TetherType.TCP) { "openByteStream is not valid for a $type tether" }
         return InMemoryTetherByteStream().also { byteStreamList += it }
     }
 }

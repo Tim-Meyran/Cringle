@@ -184,7 +184,12 @@ public class LocalFabricDeployer(
                     drivers = builtin?.factoryFor(request.fabricId, paths) ?: drivers,
                     paths = paths,
                     wiring = wiring,
-                    tethers = tethers?.let { TetherConfig(registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor) },
+                    tethers = tethers?.let {
+                        TetherConfig(
+                            registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor,
+                            it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
+                        )
+                    },
                     defaultRestart = defaultRestart,
                     schemas = registry,
                     logger = paths.fileLogger(),

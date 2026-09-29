@@ -2,6 +2,7 @@
 
 package cringle.engine.tether
 
+import cringle.contract.TcpDriver
 import cringle.contract.TetherType
 import cringle.packaging.Endpoint
 import cringle.schema.SchemaRegistry
@@ -55,6 +56,11 @@ public class TetherConfig(
     public val observer: TetherObserver? = null,
     /** See [TetherInterceptor]. */
     public val interceptor: TetherInterceptor? = null,
+    /**
+     * Supplies the TCP driver of a block, used by tethers of type [TetherType.TCP]; the network closes the drivers it
+     * asked for. `null` means the fabric has no TCP tethers.
+     */
+    public val tcp: ((blockId: String) -> TcpDriver)? = null,
 ) {
     init {
         require(bufferCapacity >= 1) { "bufferCapacity must be at least 1" }
