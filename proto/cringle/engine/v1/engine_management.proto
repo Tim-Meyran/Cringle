@@ -18,6 +18,24 @@ service EngineManagementService {
 
   // Changes the Engine configuration. Only fields that are set are changed.
   rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+
+  // Creates a fabric instance of a blueprint from unpacked packages in the Cringle home. The fabric is not started.
+  rpc DeployFabric(DeployFabricRequest) returns (FabricInfo);
+
+  // Starts a deployed fabric.
+  rpc StartFabric(FabricRequest) returns (FabricInfo);
+
+  // Stops a running fabric; it can be started again.
+  rpc StopFabric(FabricRequest) returns (FabricInfo);
+
+  // Stops (if needed) and removes a fabric.
+  rpc RemoveFabric(FabricRequest) returns (RemoveFabricResponse);
+
+  // Lists all fabrics of this Engine.
+  rpc ListFabrics(ListFabricsRequest) returns (ListFabricsResponse);
+
+  // Returns the status of one fabric.
+  rpc GetFabricStatus(FabricRequest) returns (FabricInfo);
 }
 
 // Lifecycle state of an Engine process.
@@ -48,4 +66,79 @@ message ConfigureRequest {
 message ConfigureResponse {
   // Address of the local Router after the change.
   string router_address = 1;
+}
+
+// Trust status of a plugin, set centrally in the Repository.
+enum PluginTrust {
+  // Not specified; treated as untrusted (fail closed).
+  PLUGIN_TRUST_UNSPECIFIED = 0;
+  PLUGIN_TRUST_TRUSTED = 1;
+  PLUGIN_TRUST_UNTRUSTED = 2;
+}
+
+// A plugin version to load for a fabric, with its trust status.
+message DeployedPlugin {
+  cringle.common.v1.PluginRef plugin = 1;
+  PluginTrust trust = 2;
+}
+
+message DeployFabricRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  cringle.common.v1.ProjectRef project = 2;
+  // Name of the blueprint inside the project.
+  string blueprint = 3;
+  // Exact plugin versions (from the lock); each must be unpacked in the Cringle home.
+  repeated DeployedPlugin plugins = 4;
+}
+
+message FabricRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+}
+
+// Lifecycle state of a fabric.
+enum FabricRuntimeState {
+  FABRIC_RUNTIME_STATE_UNSPECIFIED = 0;
+  FABRIC_RUNTIME_STATE_CREATED = 1;
+  FABRIC_RUNTIME_STATE_STARTING = 2;
+  FABRIC_RUNTIME_STATE_RUNNING = 3;
+  FABRIC_RUNTIME_STATE_STOPPING = 4;
+  FABRIC_RUNTIME_STATE_STOPPED = 5;
+  FABRIC_RUNTIME_STATE_FAILED = 6;
+}
+
+// Lifecycle state of a block.
+enum BlockRuntimeState {
+  BLOCK_RUNTIME_STATE_UNSPECIFIED = 0;
+  BLOCK_RUNTIME_STATE_CREATED = 1;
+  BLOCK_RUNTIME_STATE_STARTING = 2;
+  BLOCK_RUNTIME_STATE_RUNNING = 3;
+  BLOCK_RUNTIME_STATE_RESTARTING = 4;
+  BLOCK_RUNTIME_STATE_STOPPING = 5;
+  BLOCK_RUNTIME_STATE_STOPPED = 6;
+  BLOCK_RUNTIME_STATE_FAILED = 7;
+}
+
+message BlockInfo {
+  cringle.common.v1.BlockId block_id = 1;
+  BlockRuntimeState state = 2;
+  int32 restarts = 3;
+  // Last crash, empty if none.
+  string last_error = 4;
+}
+
+message FabricInfo {
+  cringle.common.v1.FabricId fabric_id = 1;
+  string blueprint = 2;
+  FabricRuntimeState state = 3;
+  repeated BlockInfo blocks = 4;
+  // Why the fabric failed, empty if it did not.
+  string failure = 5;
+}
+
+message RemoveFabricResponse {}
+
+message ListFabricsRequest {}
+
+message ListFabricsResponse {
+  repeated FabricInfo fabrics = 1;
 }
