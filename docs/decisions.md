@@ -16,7 +16,7 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 
 ## Isolation
 
-- **Kind-JVM für untrusted Blocks wird zunächst nicht umgesetzt** (Issue 018 ist zurückgestellt). Die Isolationsregel wird trotzdem umgesetzt und ist fail-closed: Ergibt sie `process`, wird der Block nicht in-process gestartet, sondern der Start schlägt fehl.
+- **Kind-JVM für untrusted Blocks wird zunächst nicht umgesetzt** (Issue #18 ist zurückgestellt). Die Isolationsregel wird trotzdem umgesetzt und ist fail-closed: Ergibt sie `process`, wird der Block nicht in-process gestartet, sondern der Start schlägt fehl.
 - **Isolationsregel:** Es gewinnt die strengere von zwei Angaben: (1) dem Vertrauensstatus des Plugins (`trusted`/`untrusted`, zentral im Repository vom Betreiber gesetzt) und (2) dem Wunsch in der Block Config (vom Blueprint-Autor pro Block). Die Stufen sind aufsteigend geordnet von `shared` (normaler Fabric-Thread) bis `process` (eigener Kind-JVM-Prozess). Der Autor kann verschärfen, nie lockern.
 
 ## Repository und Vertrauen
@@ -25,11 +25,11 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 
 ## Nutzerverwaltung
 
-- Eine **frühe, einfache Nutzerverwaltung** kommt auf die frühe Roadmap (Issue 022). Während der Entwicklung authentifizieren sich Nutzer mit **Tokens**.
+- Eine **frühe, einfache Nutzerverwaltung** kommt auf die frühe Roadmap (Issue #22). Während der Entwicklung authentifizieren sich Nutzer mit **Tokens**.
 
 ## Roadmap
 
-- Ein einfaches **Cringle-Gradle-Plugin** für Plugin- und Project-Autoren gehört in die frühe Roadmap (Issue 021), ebenso ein Testkit (Issue 023).
+- Ein einfaches **Cringle-Gradle-Plugin** für Plugin- und Project-Autoren gehört in die frühe Roadmap (Issue #21), ebenso ein Testkit (Issue #23).
 
 ## Sonstiges
 
