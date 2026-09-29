@@ -66,6 +66,8 @@ public class EngineSupervisor(
         @Volatile var exitCode = 0
 
         @Volatile var lastError = ""
+
+        @Volatile var pump: Thread? = null
     }
 
     private val engines = LinkedHashMap<String, Managed>()
@@ -121,7 +123,8 @@ public class EngineSupervisor(
             }
             m.process = process
             val port = CompletableFuture<Int>()
-            Thread({ pumpOutput(m, process, port) }, "engine-out-${m.id}").apply { isDaemon = true }.start()
+            m.pump = Thread({ pumpOutput(m, process, port) }, "engine-out-${m.id}").apply { isDaemon = true }
+            m.pump?.start()
             process.onExit().thenAccept { p -> onExit(m, p) }
             val managementPort = try {
                 port.get(startTimeout.toMillis(), TimeUnit.MILLISECONDS)
@@ -206,6 +209,8 @@ public class EngineSupervisor(
                 p.waitFor(10, TimeUnit.SECONDS)
             }
             m.exitCode = if (p.isAlive) m.exitCode else p.exitValue()
+            // release the log files before returning (matters on Windows, where open files cannot be deleted)
+            m.pump?.join(5_000)
             m.state = ProcessState.STOPPED
             m.port = 0
             m.lastError = ""

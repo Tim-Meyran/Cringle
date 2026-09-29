@@ -28,12 +28,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.io.TempDir
 
 /** Integration tests: the daemon starts real engine processes. */
 class DaemonTest {
-    @TempDir
-    lateinit var home: Path
+    private lateinit var home: Path
 
     private lateinit var daemon: Daemon
     private lateinit var channel: ManagedChannel
@@ -46,13 +44,31 @@ class DaemonTest {
     }
 
     @BeforeEach
-    fun setUp() = startDaemon()
+    fun setUp() {
+        home = Files.createTempDirectory("cringle-daemon-test")
+        startDaemon()
+    }
 
     @AfterEach
     fun tearDown() {
+        stopDaemon()
+        // best effort: on Windows a just-ended process may still hold a file for a moment
+        repeat(10) {
+            if (runCatching { home.toFile().deleteRecursively() }.getOrDefault(false) || !Files.exists(home)) return
+            Thread.sleep(200)
+        }
+    }
+
+    private fun stopDaemon() {
         channel.shutdownNow()
         daemon.close()
     }
+
+    private fun logs(): String = runCatching {
+        Files.walk(home.resolve("daemon").resolve("logs")).use { s ->
+            s.filter { Files.isRegularFile(it) }.toList().joinToString("\n") { it.fileName.toString() + ":\n" + Files.readString(it) }
+        }
+    }.getOrDefault("(no logs)")
 
     private fun id(v: String) = EngineId.newBuilder().setValue(v).build()
 
@@ -140,7 +156,7 @@ class DaemonTest {
     fun registeredEnginesSurviveADaemonRestartAndStartAllStartsThem(): Unit = runBlocking {
         api.createEngine(CreateEngineRequest.newBuilder().setEngineId("a1").build())
         api.createEngine(CreateEngineRequest.newBuilder().setEngineId("b1").setName("B").build())
-        tearDown()
+        stopDaemon()
         startDaemon()
         val listed = api.listEngines(ListEnginesRequest.getDefaultInstance()).enginesList
         assertEquals(listOf("a1", "b1"), listed.map { it.engineId.value })
@@ -166,14 +182,14 @@ class DaemonTest {
 
     @Test
     fun combinedModeRegistersStartedEnginesAtTheEmbeddedRouter(): Unit = runBlocking {
-        tearDown()
+        stopDaemon()
         startDaemon(combined = true)
         api.createEngine(CreateEngineRequest.newBuilder().setEngineId("comb").setName("Combined").build())
         api.startEngine(req("comb"))
         val registry = daemon.router!!.registry
         val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
         while (registry.engines().none { it.record.id == "comb" }) {
-            check(System.nanoTime() < end) { "engine did not register at the router" }
+            check(System.nanoTime() < end) { "engine did not register at the router; logs:\n" + logs() }
             Thread.sleep(100)
         }
         assertEquals("Combined", registry.engines().single().record.name)
