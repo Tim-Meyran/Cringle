@@ -36,6 +36,9 @@ service EngineManagementService {
 
   // Returns the status of one fabric.
   rpc GetFabricStatus(FabricRequest) returns (FabricInfo);
+
+  // Queries the persistent log store of the Engine (blocks log through the built-in logging driver).
+  rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
 }
 
 // Lifecycle state of an Engine process.
@@ -141,4 +144,38 @@ message ListFabricsRequest {}
 
 message ListFabricsResponse {
   repeated FabricInfo fabrics = 1;
+}
+
+// Severity of a log entry.
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+message LogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string fabric = 2;
+  string block = 3;
+  LogLevel level = 4;
+  string message = 5;
+}
+
+message QueryLogsRequest {
+  // Only entries of this fabric; empty means all.
+  string fabric = 1;
+  // Only entries of this block; empty means all.
+  string block = 2;
+  // Only entries at or above this level; unspecified means DEBUG.
+  LogLevel min_level = 3;
+  // Only entries at or after this time; unset means no limit.
+  google.protobuf.Timestamp since = 4;
+  // At most this many entries (the newest ones, oldest first); 0 means the default of 1000.
+  int32 limit = 5;
+}
+
+message QueryLogsResponse {
+  repeated LogEntry entries = 1;
 }
