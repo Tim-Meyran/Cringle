@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.daemon.v1;
+
+import "cringle/common/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.daemon.v1";
+
+// The Daemon of a machine: creates Engines and runs and supervises their processes.
+service DaemonService {
+  // Registers a new Engine in the local engine register. Does not start it.
+  rpc CreateEngine(CreateEngineRequest) returns (EngineInfo);
+
+  // Starts the process of a registered Engine and waits until its management API is up.
+  rpc StartEngine(EngineRequest) returns (EngineInfo);
+
+  // Stops the Engine process gracefully (forcibly after a timeout).
+  rpc StopEngine(EngineRequest) returns (EngineInfo);
+
+  // Stops (if running) and starts an Engine.
+  rpc RestartEngine(EngineRequest) returns (EngineInfo);
+
+  // Stops an Engine and removes it from the register. Its data directory is kept unless delete_data is set.
+  rpc DeleteEngine(DeleteEngineRequest) returns (DeleteEngineResponse);
+
+  // Lists all registered Engines with their process state.
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);
+
+  // Returns one Engine.
+  rpc GetEngine(EngineRequest) returns (EngineInfo);
+
+  // Starts every registered Engine that is not running (used after a machine restart).
+  rpc StartAllEngines(StartAllEnginesRequest) returns (ListEnginesResponse);
+}
+
+// State of an Engine process as seen by the Daemon.
+enum EngineProcessState {
+  ENGINE_PROCESS_STATE_UNSPECIFIED = 0;
+  // Registered, no process.
+  ENGINE_PROCESS_STATE_STOPPED = 1;
+  ENGINE_PROCESS_STATE_STARTING = 2;
+  ENGINE_PROCESS_STATE_RUNNING = 3;
+  ENGINE_PROCESS_STATE_STOPPING = 4;
+  // The process ended without being asked to (killed or crashed); see exit_code.
+  ENGINE_PROCESS_STATE_CRASHED = 5;
+}
+
+message EngineInfo {
+  cringle.common.v1.EngineId engine_id = 1;
+  string name = 2;
+  EngineProcessState state = 3;
+  // Process id; 0 if there is no process.
+  int64 pid = 4;
+  // Port of the Engine management API on the loopback interface; 0 if not running.
+  int32 management_port = 5;
+  google.protobuf.Timestamp started_at = 6;
+  // Exit code of the last process that ended; only meaningful in STOPPED and CRASHED.
+  int32 exit_code = 7;
+  // Description of the last failure, empty if none.
+  string last_error = 8;
+}
+
+message CreateEngineRequest {
+  // Optional; the Daemon allocates an id if empty. Must match [a-z0-9][a-z0-9-]{0,62}.
+  string engine_id = 1;
+  // Optional display name; defaults to the id.
+  string name = 2;
+}
+
+message EngineRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+}
+
+message DeleteEngineRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+  // Also delete the Engine's data directory (config, identity, fabrics).
+  bool delete_data = 2;
+}
+
+message DeleteEngineResponse {}
+
+message ListEnginesRequest {}
+
+message ListEnginesResponse {
+  repeated EngineInfo engines = 1;
+}
+
+message StartAllEnginesRequest {}
