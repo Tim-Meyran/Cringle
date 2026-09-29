@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.management.v1;
+
+import "cringle/common/v1/identifiers.proto";
+import "cringle/daemon/v1/daemon.proto";
+import "cringle/engine/v1/engine_management.proto";
+import "cringle/repository/v1/repository.proto";
+import "cringle/router/v1/registry.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.management.v1";
+
+// The central control API. CLI and WebUI talk only to this service; it manages the Daemons, Engines and
+// fabrics of all known machines, the Repository and the Routers.
+service ManagementService {
+  // --- Machines ---
+
+  // Adds a machine (its Daemon) to the known machine park.
+  rpc AddMachine(AddMachineRequest) returns (MachineInfo);
+
+  // Forgets a machine. Its Engines are not touched.
+  rpc RemoveMachine(MachineRequest) returns (RemoveMachineResponse);
+
+  // Lists all known machines with their reachability.
+  rpc ListMachines(ListMachinesRequest) returns (ListMachinesResponse);
+
+  // --- Engines ---
+
+  // Creates an Engine on a machine through its Daemon.
+  rpc CreateEngine(CreateEngineRequest) returns (ManagedEngine);
+
+  rpc StartEngine(EngineRef) returns (ManagedEngine);
+
+  rpc StopEngine(EngineRef) returns (ManagedEngine);
+
+  // Stops an Engine and removes it, including its fabrics from the desired state.
+  rpc DeleteEngine(DeleteEngineRequest) returns (DeleteEngineResponse);
+
+  // Lists the Engines of one machine, or of all machines if machine is empty.
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);
+
+  // Returns one Engine with its process state (Daemon) and its own status (Engine management API).
+  rpc GetEngine(EngineRef) returns (ManagedEngine);
+
+  // --- Fabrics ---
+
+  // Deploys a fabric on an Engine and remembers it, so that it is restored after a restart.
+  // The packages must already be present in the Cringle home of the machine (placement is done by deployment).
+  rpc DeployFabric(DeployFabricRequest) returns (ManagedFabric);
+
+  rpc StartFabric(FabricRef) returns (ManagedFabric);
+
+  rpc StopFabric(FabricRef) returns (ManagedFabric);
+
+  rpc RemoveFabric(FabricRef) returns (RemoveFabricResponse);
+
+  rpc GetFabric(FabricRef) returns (ManagedFabric);
+
+  // Lists the fabrics of one Engine, or of all known Engines if the reference is empty.
+  rpc ListFabrics(ListFabricsRequest) returns (ListFabricsResponse);
+
+  // --- Logs ---
+
+  // Queries the logs of one Engine, or of all running Engines (fan-out).
+  rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
+
+  // --- Routers ---
+
+  // Points the local Router at another Router (federation of Routers).
+  rpc AddRemoteRouter(cringle.router.v1.AddRemoteRouterRequest) returns (cringle.router.v1.AddRemoteRouterResponse);
+
+  rpc RemoveRemoteRouter(cringle.router.v1.RemoveRemoteRouterRequest) returns (cringle.router.v1.RemoveRemoteRouterResponse);
+
+  rpc ListRemoteRouters(cringle.router.v1.ListRemoteRoutersRequest) returns (cringle.router.v1.ListRemoteRoutersResponse);
+
+  // --- Repository (proxy to the responsible Repository) ---
+
+  rpc PublishPackage(stream cringle.repository.v1.PublishRequest) returns (cringle.repository.v1.PublishResponse);
+
+  rpc ListPackages(cringle.repository.v1.ListPackagesRequest) returns (cringle.repository.v1.ListPackagesResponse);
+
+  rpc ListVersions(cringle.repository.v1.ListVersionsRequest) returns (cringle.repository.v1.ListVersionsResponse);
+
+  rpc GetPackage(cringle.repository.v1.GetPackageRequest) returns (cringle.repository.v1.PackageMetadata);
+
+  rpc SetPluginTrust(cringle.repository.v1.SetPluginTrustRequest) returns (cringle.repository.v1.PackageMetadataList);
+
+  rpc DownloadPackage(cringle.repository.v1.DownloadRequest) returns (stream cringle.repository.v1.DownloadResponse);
+
+  // --- Recovery ---
+
+  // Starts the registered Engines and restores their fabrics. Runs automatically when the server starts.
+  rpc Recover(RecoverRequest) returns (RecoverResponse);
+}
+
+message AddMachineRequest {
+  // Unique, [a-z0-9][a-z0-9-]{0,62}.
+  string machine_id = 1;
+  // host:port of the Daemon.
+  string daemon_address = 2;
+  // Optional: host of the machine as seen from the ManagementServer (for the Engine management APIs); defaults to the host of the Daemon.
+  string host = 3;
+  // Optional: host:port of the Repository that is responsible for this machine; empty means the default Repository.
+  string repository_address = 4;
+}
+
+message MachineRequest {
+  string machine_id = 1;
+}
+
+message MachineInfo {
+  string machine_id = 1;
+  string daemon_address = 2;
+  string host = 3;
+  string repository_address = 4;
+  // Whether the Daemon answered just now.
+  bool reachable = 5;
+  string last_error = 6;
+}
+
+message RemoveMachineResponse {}
+
+message ListMachinesRequest {}
+
+message ListMachinesResponse {
+  repeated MachineInfo machines = 1;
+}
+
+message EngineRef {
+  string machine_id = 1;
+  cringle.common.v1.EngineId engine_id = 2;
+}
+
+message CreateEngineRequest {
+  string machine_id = 1;
+  // Optional; the Daemon allocates an id if empty.
+  string engine_id = 2;
+  string name = 3;
+  // Whether the Engine is started again after a restart of the machine or the ManagementServer. Default: true.
+  optional bool autostart = 4;
+}
+
+message DeleteEngineRequest {
+  EngineRef engine = 1;
+  bool delete_data = 2;
+}
+
+message DeleteEngineResponse {}
+
+message ListEnginesRequest {
+  string machine_id = 1;
+}
+
+message ListEnginesResponse {
+  repeated ManagedEngine engines = 1;
+}
+
+// An Engine as seen by the ManagementServer.
+message ManagedEngine {
+  string machine_id = 1;
+  cringle.daemon.v1.EngineInfo process = 2;
+  // Status from the Engine itself; unset if the Engine is not running or not reachable.
+  cringle.engine.v1.GetStatusResponse status = 3;
+  bool autostart = 4;
+}
+
+message DeployFabricRequest {
+  EngineRef engine = 1;
+  cringle.engine.v1.DeployFabricRequest deploy = 2;
+  // Start the fabric right after deploying it, and again after restarts. Default: false.
+  bool start = 3;
+}
+
+message FabricRef {
+  EngineRef engine = 1;
+  cringle.common.v1.FabricId fabric_id = 2;
+}
+
+message ManagedFabric {
+  string machine_id = 1;
+  cringle.common.v1.EngineId engine_id = 2;
+  cringle.engine.v1.FabricInfo info = 3;
+  // Whether the ManagementServer wants the fabric to run.
+  bool desired_running = 4;
+}
+
+message RemoveFabricResponse {}
+
+message ListFabricsRequest {
+  // Unset or empty machine lists all fabrics; a machine without Engine lists the fabrics of that machine.
+  EngineRef engine = 1;
+}
+
+message ListFabricsResponse {
+  repeated ManagedFabric fabrics = 1;
+}
+
+message QueryLogsRequest {
+  // Unset machine and Engine: all running Engines of all machines.
+  EngineRef engine = 1;
+  string fabric = 2;
+  string block = 3;
+  cringle.engine.v1.LogLevel min_level = 4;
+  google.protobuf.Timestamp since = 5;
+  // At most this many entries (the newest ones); 0 means the default of 1000.
+  int32 limit = 6;
+}
+
+message ManagedLogEntry {
+  string machine_id = 1;
+  cringle.common.v1.EngineId engine_id = 2;
+  cringle.engine.v1.LogEntry entry = 3;
+}
+
+message QueryLogsResponse {
+  // Oldest first.
+  repeated ManagedLogEntry entries = 1;
+  // Engines that could not be asked, with the reason.
+  repeated string problems = 2;
+}
+
+message RecoverRequest {}
+
+message RecoverResponse {
+  int32 engines_started = 1;
+  int32 fabrics_restored = 2;
+  // What could not be restored.
+  repeated string problems = 3;
+}

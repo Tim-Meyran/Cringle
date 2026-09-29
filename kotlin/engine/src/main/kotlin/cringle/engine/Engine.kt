@@ -8,7 +8,9 @@ import cringle.common.v1.BlockId
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.common.v1.FabricLifecycleState
+import cringle.contract.LogLevel
 import cringle.engine.drivers.BuiltinDrivers
+import cringle.engine.drivers.LogQuery
 import cringle.engine.fabric.BlockState
 import cringle.engine.fabric.DeployPlugin
 import cringle.engine.fabric.DeployRequest
@@ -46,6 +48,8 @@ import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * One engine process: its directory, config, identity and management server.
@@ -218,6 +222,38 @@ public class Engine private constructor(
             ListFabricsResponse.newBuilder().addAllFabrics(fabrics.list().map { info(it) }).build()
 
         override suspend fun getFabricStatus(request: FabricRequest): FabricInfo = fabricCall { info(fabrics.status(request.fabricId.value)) }
+
+        override suspend fun queryLogs(request: cringle.engine.v1.QueryLogsRequest): cringle.engine.v1.QueryLogsResponse {
+            val minLevel = when (request.minLevel) {
+                cringle.engine.v1.LogLevel.LOG_LEVEL_INFO -> LogLevel.INFO
+                cringle.engine.v1.LogLevel.LOG_LEVEL_WARN -> LogLevel.WARN
+                cringle.engine.v1.LogLevel.LOG_LEVEL_ERROR -> LogLevel.ERROR
+                else -> LogLevel.DEBUG
+            }
+            val query = LogQuery(
+                fabric = request.fabric.takeIf { it.isNotEmpty() },
+                block = request.block.takeIf { it.isNotEmpty() },
+                minLevel = minLevel,
+                since = if (request.hasSince()) Instant.ofEpochSecond(request.since.seconds, request.since.nanos.toLong()) else null,
+                limit = if (request.limit > 0) request.limit else 1000,
+            )
+            val entries = withContext(Dispatchers.IO) { drivers.logging.query(query) }
+            return cringle.engine.v1.QueryLogsResponse.newBuilder().addAllEntries(
+                entries.map {
+                    cringle.engine.v1.LogEntry.newBuilder()
+                        .setTimestamp(timestamp(it.timestamp)).setFabric(it.fabric).setBlock(it.block).setMessage(it.message)
+                        .setLevel(
+                            when (it.level) {
+                                LogLevel.DEBUG -> cringle.engine.v1.LogLevel.LOG_LEVEL_DEBUG
+                                LogLevel.INFO -> cringle.engine.v1.LogLevel.LOG_LEVEL_INFO
+                                LogLevel.WARN -> cringle.engine.v1.LogLevel.LOG_LEVEL_WARN
+                                LogLevel.ERROR -> cringle.engine.v1.LogLevel.LOG_LEVEL_ERROR
+                            },
+                        )
+                        .build()
+                },
+            ).build()
+        }
     }
 
     private suspend fun <T> fabricCall(vararg mapping: Pair<Class<out Throwable>, Status>, body: suspend () -> T): T {
