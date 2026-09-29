@@ -27,11 +27,10 @@ val modules = listOf(
     "cli",
     "common",
     "testkit",
+    "gradle-plugin",
 )
 
 for (m in modules) {
     include(":$m")
     project(":$m").projectDir = file("kotlin/$m")
 }
-
-includeBuild("kotlin/gradle-plugin")
