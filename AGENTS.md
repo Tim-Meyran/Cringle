@@ -91,6 +91,7 @@ gh pr checks --watch --fail-fast
 - **Never edit** `docs/Architecture.md` or `docs/decisions.md` as part of an issue. Propose changes in a comment.
 - **Merging** is allowed only through `gh pr merge --auto` (or the fallback above) after all required checks are green. Never use `--admin`, never merge a pull request with a failing or missing check, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
+- **Technical guard rails.** For opencode, `opencode.json` enforces the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
 - One issue per branch and pull request. Do not start a second issue before the first pull request is merged or you have marked the issue `blocked`.
 
 ## Code conventions
