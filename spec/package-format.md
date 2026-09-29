@@ -84,7 +84,9 @@ fields, so it always runs entirely inside one engine (chapter 9.1); any such key
   default `{}`), optional `isolation` (`SHARED` default, or `PROCESS`), and `varArgCounts` (object from VarArg
   port name to a fixed size of at least 0).
 - Tether: `type` (a tether type), `from` and `to`. An endpoint is `{"block": <id>, "port": <name>}` plus `"index"`
-  for VarArg ports. The type is fixed here and never changes at runtime.
+  for VarArg ports. The type is fixed here and never changes at runtime. Optional `delivery` (`DROP` default, or
+  `BUFFER`) says what happens when the receiving block is not running: `DROP` drops and logs, `BUFFER` keeps the
+  value in the tether's bounded buffer until the receiver runs again (see `tether.md`).
 
 ## 6. Semantic validation
 

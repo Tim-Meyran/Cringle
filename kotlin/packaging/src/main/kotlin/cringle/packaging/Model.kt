@@ -62,8 +62,22 @@ public data class ProjectManifest(
 /** One end of a tether. [index] selects the slot of a VarArg port and must be `null` for plain ports. */
 public data class Endpoint(public val block: String, public val port: String, public val index: Int? = null)
 
-/** A tether of fixed [type] from an OUT port to an IN port. */
-public data class TetherDef(public val type: TetherType, public val from: Endpoint, public val to: Endpoint)
+/** What the engine does with a message, request or stream opening when the receiving block is not running. */
+public enum class DeliveryPolicy {
+    /** Drop it and log the event (at most once). The default. */
+    DROP,
+
+    /** Keep it in the tether's bounded buffer and deliver it when the receiver runs again; the sender suspends when the buffer is full. */
+    BUFFER,
+}
+
+/** A tether of fixed [type] from an OUT port to an IN port, with a [delivery] policy for a receiver that is not running. */
+public data class TetherDef(
+    public val type: TetherType,
+    public val from: Endpoint,
+    public val to: Endpoint,
+    public val delivery: DeliveryPolicy = DeliveryPolicy.DROP,
+)
 
 /**
  * A block instance in a blueprint. [block] is `pluginName/blockName`; [varArgCounts] gives the fixed size of every
