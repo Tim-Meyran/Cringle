@@ -110,6 +110,8 @@ public class BlockTcp internal constructor(private val service: TcpService, priv
         private val accepted = Channel<TcpConnection>(Channel.UNLIMITED)
         override val connections: Flow<TcpConnection> = accepted.receiveAsFlow()
 
+        private val stopped = java.util.concurrent.CountDownLatch(1)
+
         fun start() {
             service.scope.launch {
                 try {
@@ -123,19 +125,23 @@ public class BlockTcp internal constructor(private val service: TcpService, priv
                 } catch (_: IOException) {
                     // closed
                 } finally {
+                    // the port is free only once the accepting thread has let go of the socket
+                    runCatching { server.close() }
+                    service.ports.release(port)
                     accepted.close()
+                    listeners.remove(this@Listener)
+                    stopped.countDown()
                 }
             }
         }
 
+        /** Closes the socket and waits (briefly) until the port is really free. */
         fun closeNow() {
             runCatching { server.close() }
-            service.ports.release(port)
-            accepted.close()
-            listeners.remove(this)
+            stopped.await(2, java.util.concurrent.TimeUnit.SECONDS)
         }
 
-        override suspend fun close() = closeNow()
+        override suspend fun close() = withContext(Dispatchers.IO) { closeNow() }
     }
 
     private inner class Connection(private val socket: Socket) : TcpConnection {

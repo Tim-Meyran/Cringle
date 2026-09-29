@@ -2,7 +2,7 @@
 
 dependencies {
     api(project(":common"))
-    implementation(project(":contract"))
+    api(project(":contract"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.grpc.netty.shaded)
