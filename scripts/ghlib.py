@@ -66,6 +66,7 @@ MILESTONES = {
 
 LABELS = {
     "agent-task": ("1d76db", "Implementation task that an agent or human can pick up"),
+    "ready": ("0e8a16", "Defined by Claude, ready for implementation by opencode"),
     "in-progress": ("fbca04", "Claimed: a branch issue/<n>-... exists"),
     "blocked": ("d93f0b", "Cannot proceed; reason is in the comments"),
     "deferred": ("cfd3d7", "Postponed on purpose, do not pick up"),

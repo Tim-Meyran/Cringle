@@ -4,6 +4,35 @@ Cringle is a framework in which applications are assembled from **Blocks** that 
 
 You work by implementing **one GitHub issue at a time**. Tasks live as GitHub issues (label `agent-task`, grouped by milestones M0–M9), not as files in the repository. Read this file completely before you start.
 
+## Roles
+
+Two agents work on this project. Each has one job, and the owner decides everything else.
+
+| Who | Job |
+|---|---|
+| **Claude** | Defines tasks: turns issues into clear, implementable tasks and marks them `ready`. Creates and defines follow-up issues. Does not implement issues. |
+| **opencode** | Implements tasks: takes `ready` issues, implements exactly the defined scope and opens the pull request. Does not redefine tasks. |
+| **Owner** | Decides `[Offen]` points and everything labeled `needs-owner-decision`; can override any rule. |
+
+Handoff rules:
+
+- opencode only picks up issues labeled `ready`. An issue is `ready` only when it meets the *Definition of Ready* below.
+- opencode never changes an issue's Scope, Out of scope or Acceptance criteria. If the task is unclear, contradictory or impossible: comment what exactly is unclear, add the label `blocked`, remove `ready`, and stop. Claude sharpens the issue and sets `ready` again.
+- Findings while implementing (missing pieces, follow-up work) go into an issue comment and a follow-up issue (label `follow-up`, not `ready`). Claude defines it later.
+- The workflow, conventions and rules in the sections below are written for the implementer (opencode). Claude's planner procedure is in `CLAUDE.md`.
+
+### Definition of Ready
+
+An issue is ready when all of this is true:
+
+- [ ] **Context** explains why the issue exists and where it fits; the architecture chapters are referenced.
+- [ ] **Scope** is a concrete list (modules, packages, public API, behavior). No open choice is left to the implementer: the choice is made in **Design notes** (simplest reversible option, `[Zu bestätigen]` marked).
+- [ ] **Out of scope** names what belongs to other issues, by `#number`.
+- [ ] **Acceptance criteria** are verifiable: each one has a test or a documented command or manual check.
+- [ ] **Depends on** is correct and every dependency is closed or `ready`.
+- [ ] No `[Offen]` point is touched, or the owner has decided it.
+- [ ] Small enough for one pull request.
+
 ## Where to find things
 
 | What | Where |
@@ -30,7 +59,7 @@ The architecture and decision documents are in German, issues and code are in En
 python3 scripts/next-issue.py
 ```
 
-It lists issues that are open, labeled `agent-task`, not `in-progress`/`blocked`/`deferred`, not claimed by a branch, and whose `**Depends on:**` issues are all closed. Prefer the lowest milestone, then the lowest issue number.
+It lists issues that are open, labeled `agent-task` and `ready`, not `in-progress`/`blocked`/`deferred`, not claimed by a branch, and whose `**Depends on:**` issues are all closed. Prefer the lowest milestone, then the lowest issue number.
 
 ### 2. Claim it
 
@@ -91,7 +120,7 @@ gh pr checks --watch --fail-fast
 - **Never edit** `docs/Architecture.md` or `docs/decisions.md` as part of an issue. Propose changes in a comment.
 - **Merging** is allowed only through `gh pr merge --auto` (or the fallback above) after all required checks are green. Never use `--admin`, never merge a pull request with a failing or missing check, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
-- **Technical guard rails.** For opencode, `opencode.json` enforces the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
+- **Technical guard rails.** `opencode.json` (opencode) and `.claude/settings.json` (Claude Code) enforce the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
 - One issue per branch and pull request. Do not start a second issue before the first pull request is merged or you have marked the issue `blocked`.
 
 ## Code conventions
