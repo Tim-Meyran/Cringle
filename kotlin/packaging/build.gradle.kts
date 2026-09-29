@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 dependencies {
-    implementation(project(":contract"))
-    implementation(project(":schema"))
+    api(project(":contract"))
+    api(project(":schema"))
+}
+
+kotlin {
+    explicitApi()
 }
