@@ -11,4 +11,5 @@ dependencies {
     implementation(libs.bouncycastle.pkix)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(project(":testkit"))
+    testImplementation(project(":router"))
 }
