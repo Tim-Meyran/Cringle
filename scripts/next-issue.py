@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """List GitHub issues an agent can pick up.
 
-An issue is ready when it is open, labeled `agent-task`, not labeled
+An issue is ready when it is open, labeled `agent-task` and `ready`, not labeled
 `in-progress`/`blocked`/`deferred`, has no branch `issue/<number>-*` on origin, and all
 issues named in its `**Depends on:**` line are closed.
 """
@@ -48,7 +48,7 @@ def main():
     ready = []
     for i in issues:
         labels = {l["name"] for l in i["labels"]}
-        if i["state"] != "OPEN" or "agent-task" not in labels or labels & SKIP_LABELS:
+        if i["state"] != "OPEN" or not {"agent-task", "ready"} <= labels or labels & SKIP_LABELS:
             continue
         if i["number"] in claimed:
             continue
@@ -56,7 +56,7 @@ def main():
             ready.append(i)
     ready.sort(key=lambda i: (milestone_rank(i), i["number"]))
     if not ready:
-        print("No issue is ready (all done, claimed, blocked, deferred or waiting for dependencies).")
+        print("No issue is ready (all done, claimed, not yet defined, blocked, deferred or waiting for dependencies).")
         return
     print("Ready to pick up (milestone, issue, title):")
     for i in ready:

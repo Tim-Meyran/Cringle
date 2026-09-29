@@ -24,3 +24,6 @@ scratch/
 # One-time migration helper output
 .migration-map.json
 __pycache__/
+
+# Personal Claude Code settings
+.claude/settings.local.json

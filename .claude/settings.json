@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh issue create *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh auth status*)",
+      "Bash(python3 scripts/next-issue.py*)"
+    ],
+    "ask": [
+      "Edit(/.github/workflows/**)",
+      "Edit(/opencode.json)",
+      "Edit(/.claude/settings.json)",
+      "Bash(git reset --hard origin*)",
+      "Bash(gh auth login*)",
+      "Bash(gh auth logout*)",
+      "Bash(gh auth refresh*)",
+      "Bash(gh auth token*)",
+      "Bash(gh auth setup-git*)"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f)",
+      "Bash(git push --delete*)",
+      "Bash(git push * --delete*)",
+      "Bash(git push * master*)",
+      "Bash(git push * main*)",
+      "Bash(git push *:master*)",
+      "Bash(git push *:main*)",
+      "Bash(gh pr merge *--admin*)",
+      "Bash(gh repo edit *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh api *protection*)",
+      "Bash(gh workflow disable *)",
+      "Bash(gh secret *)",
+      "Edit(/docs/Architecture.md)",
+      "Edit(/docs/decisions.md)",
+      "Read(.env)",
+      "Read(.env.*)"
+    ]
+  }
+}
