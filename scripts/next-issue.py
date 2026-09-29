@@ -1,57 +1,68 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""List issues that can be picked up: status open and all dependencies done."""
+"""List GitHub issues an agent can pick up.
+
+An issue is ready when it is open, labeled `agent-task`, not labeled
+`in-progress`/`blocked`/`deferred`, has no branch `issue/<number>-*` on origin, and all
+issues named in its `**Depends on:**` line are closed.
+"""
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-ISSUES = ROOT / "docs" / "issues"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ghlib import GhError, gh  # noqa: E402
+
+SKIP_LABELS = {"in-progress", "blocked", "deferred"}
 
 
-def frontmatter(path):
-    text = path.read_text(encoding="utf-8")
-    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
-    if not m:
-        return None
-    data = {}
-    for line in m.group(1).splitlines():
-        line = line.split("#", 1)[0].rstrip()
-        if ":" in line:
-            k, v = line.split(":", 1)
-            data[k.strip()] = v.strip()
-    return data
+def depends_on(body):
+    m = re.search(r"^\*\*Depends on:\*\*(.*)$", body or "", re.M)
+    return [int(n) for n in re.findall(r"#(\d+)", m.group(1))] if m else []
 
 
-def ids(value):
-    return re.findall(r"\d+", value or "")
+def claimed_branches():
+    out = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", "issue/*"], capture_output=True, text=True
+    )
+    return {int(n) for n in re.findall(r"refs/heads/issue/(\d+)-", out.stdout)}
+
+
+def milestone_rank(issue):
+    m = re.match(r"M(\d+)", (issue.get("milestone") or {}).get("title", ""))
+    return int(m.group(1)) if m else 99
 
 
 def main():
-    issues = {}
-    for p in sorted(ISSUES.glob("[0-9][0-9][0-9]-*.md")):
-        fm = frontmatter(p)
-        if fm:
-            issues[fm["id"].zfill(3)] = (p, fm)
+    try:
+        issues = json.loads(
+            gh("issue", "list", "--state", "all", "--limit", "1000",
+               "--json", "number,title,state,labels,milestone,body")
+        )
+    except GhError as e:
+        sys.exit(f"error: {e}")
+    state = {i["number"]: i["state"] for i in issues}
+    claimed = claimed_branches()
     ready = []
-    for n, (p, fm) in issues.items():
-        if fm.get("status") != "open":
+    for i in issues:
+        labels = {l["name"] for l in i["labels"]}
+        if i["state"] != "OPEN" or "agent-task" not in labels or labels & SKIP_LABELS:
             continue
-        deps = [d.zfill(3) for d in ids(fm.get("depends_on"))]
-        missing = [d for d in deps if d not in issues]
-        if missing:
-            print(f"warning: {p.name} depends on unknown issue(s) {missing}", file=sys.stderr)
+        if i["number"] in claimed:
             continue
-        if all(issues[d][1].get("status") == "done" for d in deps):
-            ready.append((fm.get("milestone", "M?"), n, fm.get("title", ""), p.name))
-    ready.sort(key=lambda r: (int(r[0][1:]) if r[0][1:].isdigit() else 99, r[1]))
+        if all(state.get(d) == "CLOSED" for d in depends_on(i["body"])):
+            ready.append(i)
+    ready.sort(key=lambda i: (milestone_rank(i), i["number"]))
     if not ready:
-        print("No issue is ready (all done, claimed, blocked or waiting for dependencies).")
+        print("No issue is ready (all done, claimed, blocked, deferred or waiting for dependencies).")
         return
-    print("Ready to pick up (milestone, id, title, file):")
-    for ms, n, title, name in ready:
-        print(f"  {ms}  {n}  {title}  [docs/issues/{name}]")
-    print("\nClaim: check `git ls-remote --heads origin 'issue/NNN-*'`, then push branch issue/NNN-slug.")
+    print("Ready to pick up (milestone, issue, title):")
+    for i in ready:
+        ms = (i.get("milestone") or {}).get("title", "no milestone").split(" ")[0]
+        print(f"  {ms:<3} #{i['number']:<4} {i['title']}")
+    print("\nClaim: `git push origin <branch>` with the name issue/<number>-<slug> (see AGENTS.md).")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+name: Issue housekeeping
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  remove-in-progress:
+    name: Remove in-progress label
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --remove-label in-progress || true

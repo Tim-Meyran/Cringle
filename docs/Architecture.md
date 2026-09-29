@@ -9,7 +9,7 @@
 > - **[Zu bestätigen]** markiert Punkte, die aus einem Vorschlag entstanden sind und noch nicht ausdrücklich bestätigt wurden.
 > - **[Offen]** markiert bewusst geparkte Themen. Sie sind in Kapitel 30 gesammelt.
 > - Alles, was nicht so markiert ist, ist eine getroffene Entscheidung.
-> - Entscheidungen, die während der Entwicklung getroffen werden, sind hier eingearbeitet und zusätzlich in `decisions.md` gesammelt. Die Umsetzungsaufgaben liegen in `issues/`.
+> - Entscheidungen, die während der Entwicklung getroffen werden, sind hier eingearbeitet und zusätzlich in `decisions.md` gesammelt. Die Umsetzungsaufgaben liegen als GitHub Issues im Repository, gruppiert nach den Meilensteinen M0–M9.
 > - **Technische Basis:** Kotlin, Gradle, JDK 21.
 
 ---
@@ -464,7 +464,7 @@ Die genaue Driver-Schnittstelle und die Lifecycle-Details sind **[Offen]**. Der 
 - Schemas werden **zur Laufzeit geprüft**.
 - Über Prozessgrenzen hinweg dient das Schema als Serialisierungsvertrag (siehe 17 und 21).
 
-Die Schema-Definitionssprache ist ein **eigenes Cringle-Format**. Es wird nicht auf JSON Schema, Protobuf oder Ähnliches aufgesetzt. Die konkrete Syntax wird als Vorschlag in `spec/schema.md` erarbeitet (Issue 004). Das Wireformat über Prozessgrenzen ist **[Offen]**.
+Die Schema-Definitionssprache ist ein **eigenes Cringle-Format**. Es wird nicht auf JSON Schema, Protobuf oder Ähnliches aufgesetzt. Die konkrete Syntax wird als Vorschlag in `spec/schema.md` erarbeitet (Issue #4). Das Wireformat über Prozessgrenzen ist **[Offen]**.
 
 ---
 
@@ -1079,6 +1079,6 @@ Die Architekturübersicht (`Tethera.png`) sollte an folgenden Stellen angepasst 
 - Endgültiges Modell für die Auflösung von Shared Services: Capabilities, Prioritäten beim Failover, Auswahlregeln
 
 **Sonstiges**
-- Wireformat des Schemas über Prozessgrenzen (die Sprache ist ein eigenes Format, Syntax-Vorschlag in Issue 004)
+- Wireformat des Schemas über Prozessgrenzen (die Sprache ist ein eigenes Format, Syntax-Vorschlag in Issue #4)
 - Aufteilung der `.proto`-Dateien und der API-Oberfläche
 - Verzeichnislayout unter `~/.cringle/`
