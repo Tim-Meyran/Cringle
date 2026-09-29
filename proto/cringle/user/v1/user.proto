@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.user.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.user.v1";
+
+// Users, groups and access tokens of the Registry. Every call needs an access token in the `authorization` header
+// (`Bearer <token>`); creating, listing and revoking needs the admin role, WhoAmI works for every valid token.
+service UserService {
+  // Creates a user.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // Lists all users.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // Deletes a user and revokes the user's tokens.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  // Creates a group with roles.
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+
+  // Lists all groups.
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+
+  // Creates a token for a user. The token itself is only returned by this call.
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+
+  // Lists the tokens of a user (without the token values).
+  rpc ListTokens(ListTokensRequest) returns (ListTokensResponse);
+
+  // Revokes a token.
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+
+  // Returns the user the presented token belongs to.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  // Everything, including user management.
+  ROLE_ADMIN = 1;
+  // Deploy, start and stop, read.
+  ROLE_OPERATOR = 2;
+  // Read only.
+  ROLE_VIEWER = 3;
+  // End user of an application built with Cringle; no management rights.
+  ROLE_END_USER = 4;
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  // Roles given to the user directly.
+  repeated Role roles = 3;
+  repeated string groups = 4;
+  // Roles the user has including those of its groups.
+  repeated Role effective_roles = 5;
+}
+
+message Group {
+  string name = 1;
+  repeated Role roles = 2;
+}
+
+message TokenInfo {
+  string id = 1;
+  string user_id = 2;
+  string label = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // Unset if the token does not expire.
+  google.protobuf.Timestamp expires_at = 5;
+  bool revoked = 6;
+}
+
+message CreateUserRequest {
+  string name = 1;
+  repeated Role roles = 2;
+  repeated string groups = 3;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message DeleteUserResponse {}
+
+message CreateGroupRequest {
+  string name = 1;
+  repeated Role roles = 2;
+}
+
+message CreateGroupResponse {
+  Group group = 1;
+}
+
+message ListGroupsRequest {}
+
+message ListGroupsResponse {
+  repeated Group groups = 1;
+}
+
+message CreateTokenRequest {
+  string user_id = 1;
+  string label = 2;
+  // Lifetime in seconds; 0 means the token does not expire.
+  int64 ttl_seconds = 3;
+}
+
+message CreateTokenResponse {
+  // The token value. It cannot be retrieved again.
+  string token = 1;
+  TokenInfo info = 2;
+}
+
+message ListTokensRequest {
+  string user_id = 1;
+}
+
+message ListTokensResponse {
+  repeated TokenInfo tokens = 1;
+}
+
+message RevokeTokenRequest {
+  string token_id = 1;
+}
+
+message RevokeTokenResponse {}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  User user = 1;
+}

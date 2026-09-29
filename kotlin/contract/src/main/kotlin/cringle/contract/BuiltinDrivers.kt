@@ -16,7 +16,10 @@ public object BuiltinDriverTypes {
     /** [TcpDriver]. */
     public val TCP: DriverType = DriverType("tcp", IsolationLevel.SHARED)
 
-    /** All built-in types by id. */
+    /** [UserManagementDriver]; provided by the daemon, not by every engine. */
+    public val USER_MANAGEMENT: DriverType = DriverType("user-management", IsolationLevel.SHARED)
+
+    /** The types every engine ships, by id. */
     public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP).associateBy { it.id }
 }
 
@@ -122,3 +125,33 @@ public data class LogEntry(
     public val level: LogLevel,
     public val message: String,
 )
+
+/** The roles of the first version of user management. Roles apply globally; scopes can be added later. */
+public enum class UserRole {
+    /** Everything, including user management. */
+    ADMIN,
+
+    /** Deploy, start and stop, read. */
+    OPERATOR,
+
+    /** Read only. */
+    VIEWER,
+
+    /** End user of an application built with Cringle; no management rights. */
+    END_USER,
+}
+
+/** A user whose token was accepted. [roles] include the roles of the user's groups. */
+public data class AuthenticatedUser(public val id: String, public val name: String, public val roles: Set<UserRole>)
+
+/**
+ * Minimal engine-wide access to user management for blocks: authenticate a token and check a role. The engine wires an
+ * implementation once user management is available in the daemon.
+ */
+public interface UserManagementDriver : Driver {
+    /** Returns the user the [token] belongs to, or `null` if the token is unknown, revoked or expired. */
+    public suspend fun authenticate(token: String): AuthenticatedUser?
+
+    /** Whether [user] has [role]. */
+    public suspend fun hasRole(user: AuthenticatedUser, role: UserRole): Boolean
+}
