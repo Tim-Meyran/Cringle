@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 dependencies {
-    implementation(project(":contract"))
+    api(project(":contract"))
+    api(libs.kotlinx.serialization.json)
+}
+
+kotlin {
+    explicitApi()
 }
