@@ -51,6 +51,8 @@ public class EngineSupervisor(
     private val routerAddress: () -> String? = { null },
     private val startTimeout: Duration = Duration.ofSeconds(90),
     private val stopTimeout: Duration = Duration.ofSeconds(30),
+    /** Called after the daemon stopped an engine process, with the engine id. */
+    private val onStopped: (String) -> Unit = {},
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -214,6 +216,7 @@ public class EngineSupervisor(
             m.state = ProcessState.STOPPED
             m.port = 0
             m.lastError = ""
+            runCatching { onStopped(m.id) }
             return snapshot(m)
         }
     }

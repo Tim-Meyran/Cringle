@@ -44,6 +44,8 @@ public class Daemon(
         { router?.let { "127.0.0.1:${it.port}" } ?: routerAddress },
         startTimeout,
         stopTimeout,
+        // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
+        onStopped = { id -> router?.registry?.unregister(id) },
     )
 
     private val server: Server = NettyServerBuilder
