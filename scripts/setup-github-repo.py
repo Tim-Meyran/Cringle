@@ -2,8 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """One-time repository setup for the agent workflow (run by the repository owner).
 
-Configures squash-only merges, auto-merge, branch deletion after merge, labels,
-milestones M0..M9, and branch protection that requires the CI checks and a pull request.
+Configures squash-only merges, branch deletion after merge, labels, milestones M0..M9 and
+branch protection that requires the CI checks and a pull request. Auto-merge is enabled LAST
+and only if the branch protection was set and verified: without required checks, auto-merge
+merges a pull request immediately instead of waiting for CI. If the protection cannot be set
+(e.g. private repository on a free plan), auto-merge is switched OFF (fail closed) and agents
+use the fallback from AGENTS.md (wait for green checks, then merge).
 Dry run by default; pass --apply to change the repository. Safe to run repeatedly.
 """
 import argparse
@@ -14,6 +18,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ghlib import LABELS, MILESTONES, GhError, api, api_list, default_branch, gh, repo_name  # noqa: E402
 
 CI_CHECKS = ["Build & Test (ubuntu-latest)", "Build & Test (windows-latest)"]
+
+
+def protect(repo, branch, protection):
+    """Set branch protection and verify it. Returns None on success, otherwise a reason."""
+    try:
+        api(f"repos/{repo}/branches/{branch}/protection", "PUT", protection)
+        current = api(f"repos/{repo}/branches/{branch}/protection") or {}
+    except GhError as e:
+        return str(e)
+    contexts = set((current.get("required_status_checks") or {}).get("contexts", []))
+    missing = [c for c in CI_CHECKS if c not in contexts]
+    return f"protection was set, but these required checks are missing: {missing}" if missing else None
 
 
 def main():
@@ -31,7 +47,6 @@ def main():
     print(f"[{mode}] repository {repo}, default branch {branch}")
 
     settings = {
-        "allow_auto_merge": True,
         "delete_branch_on_merge": True,
         "allow_squash_merge": True,
         "allow_merge_commit": False,
@@ -48,9 +63,10 @@ def main():
         "allow_force_pushes": False,
         "allow_deletions": False,
     }
-    print(f"branch protection on {branch}:", protection)
     print("labels:", ", ".join(LABELS))
     print("milestones:", ", ".join(t for t, _ in MILESTONES.values()))
+    print(f"branch protection on {branch}:", protection)
+    print("auto-merge: enabled only after the branch protection was set and verified")
     if not a.apply:
         print("\nNothing changed. Re-run with --apply.")
         return
@@ -71,14 +87,19 @@ def main():
             api(f"repos/{repo}/milestones", "POST", body)
     print("ok: milestones")
 
-    try:
-        api(f"repos/{repo}/branches/{branch}/protection", "PUT", protection)
-        print("ok: branch protection")
-    except GhError as e:
-        print(f"WARNING: branch protection could not be set:\n{e}\n"
-              "Private repositories on a free plan do not support it. Without protection, "
-              "auto-merge merges immediately instead of waiting for CI.", file=sys.stderr)
+    reason = protect(repo, branch, protection)
+    if reason:
+        api(f"repos/{repo}", "PATCH", {"allow_auto_merge": False})
+        print(f"WARNING: branch protection is NOT active:\n{reason}\n"
+              "Auto-merge has been left DISABLED, because without required checks it would merge "
+              "immediately instead of waiting for CI. Agents use the fallback from AGENTS.md "
+              "(wait for green checks, then `gh pr merge --squash --delete-branch`). "
+              "Private repositories on a free plan do not support branch protection.", file=sys.stderr)
         sys.exit(1)
+    print("ok: branch protection (verified)")
+
+    api(f"repos/{repo}", "PATCH", {"allow_auto_merge": True})
+    print("ok: auto-merge enabled")
 
 
 if __name__ == "__main__":
