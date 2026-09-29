@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.engine.v1;
+
+import "cringle/common/v1/cert.proto";
+import "cringle/common/v1/identifiers.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "cringle.engine.v1";
+
+// Management API of a single Engine (skeleton: status and configuration).
+service EngineManagementService {
+  // Returns the current status of the Engine.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // Changes the Engine configuration. Only fields that are set are changed.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+}
+
+// Lifecycle state of an Engine process.
+enum EngineState {
+  ENGINE_STATE_UNSPECIFIED = 0;
+  ENGINE_STATE_RUNNING = 1;
+  ENGINE_STATE_STOPPING = 2;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  cringle.common.v1.EngineId engine_id = 1;
+  string name = 2;
+  EngineState state = 3;
+  google.protobuf.Timestamp started_at = 4;
+  // Public certificate metadata of the Engine identity. Never contains key material.
+  cringle.common.v1.CertificateInfo certificate = 5;
+  // Address of the local Router; empty until configured.
+  string router_address = 6;
+}
+
+message ConfigureRequest {
+  // Address of the local Router as host:port. Unset leaves the value unchanged; an empty string clears it.
+  optional string router_address = 1;
+}
+
+message ConfigureResponse {
+  // Address of the local Router after the change.
+  string router_address = 1;
+}
