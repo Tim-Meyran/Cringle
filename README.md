@@ -23,7 +23,7 @@ Cringle/
 │   ├── cli/               # Command-line interface
 │   ├── testkit/           # In-memory test harness and fakes
 │   └── gradle-plugin/     # Included build for cringle.plugin and cringle.project Gradle plugins
-├── docs/            # Architecture (Architecture.md), decisions, and issues
+├── docs/            # Architecture (Architecture.md) and decisions
 ├── scripts/         # Development helper scripts
 └── .github/         # CI workflows and issue/PR templates
 ```
@@ -32,7 +32,9 @@ Cringle/
 
 - **Architecture:** See [docs/Architecture.md](docs/Architecture.md) for detailed architectural documentation.
 - **Project Decisions:** See [docs/decisions.md](docs/decisions.md) for binding design decisions.
-- **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and issue processing rules.
+- **Tasks:** Work items are GitHub issues (label `agent-task`), grouped by milestones M0–M9.
+- **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and the issue → pull request → auto-merge flow.
+- **Documentation index:** [docs/README.md](docs/README.md).
 
 ## Building & Testing
 

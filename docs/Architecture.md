@@ -9,7 +9,7 @@
 > - **[Zu bestätigen]** markiert Punkte, die aus einem Vorschlag entstanden sind und noch nicht ausdrücklich bestätigt wurden.
 > - **[Offen]** markiert bewusst geparkte Themen. Sie sind in Kapitel 30 gesammelt.
 > - Alles, was nicht so markiert ist, ist eine getroffene Entscheidung.
-> - Entscheidungen, die während der Entwicklung getroffen werden, sind hier eingearbeitet und zusätzlich in `decisions.md` gesammelt. Die Umsetzungsaufgaben liegen in `issues/`.
+> - Entscheidungen, die während der Entwicklung getroffen werden, sind hier eingearbeitet und zusätzlich in `decisions.md` gesammelt. Die Umsetzungsaufgaben liegen als GitHub Issues im Repository, gruppiert nach den Meilensteinen M0–M9.
 > - **Technische Basis:** Kotlin, Gradle, JDK 21.
 
 ---

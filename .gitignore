@@ -20,3 +20,7 @@ Thumbs.db
 # Logs and scratch
 *.log
 scratch/
+
+# One-time migration helper output
+.migration-map.json
+__pycache__/

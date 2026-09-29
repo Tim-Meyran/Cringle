@@ -38,4 +38,6 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 
 - **CI-Anbieter:** GitHub (GitHub Actions).
 - **Lizenz:** Apache License 2.0 (`LICENSE`, `NOTICE`). Jede Quelldatei trägt den SPDX-Header `Apache-2.0`. Neue Abhängigkeiten nur mit Apache-2.0-, MIT-, BSD- oder EPL-2.0-Lizenz, alles andere nach Rückfrage.
-- **Arbeit mit LLM-Agenten:** Agenten arbeiten Issues aus `docs/issues/` ab, ein Issue pro Branch (`issue/NNN-slug`) und Pull Request. Die Regeln stehen in `AGENTS.md` im Repository-Root (`CLAUDE.md` verweist darauf). `scripts/next-issue.py` listet abholbereite Issues.
+- **Aufgaben auf GitHub:** Alle Umsetzungsaufgaben sind GitHub Issues (Label `agent-task`) mit Meilensteinen M0–M9. Abhängigkeiten stehen in der Zeile `**Depends on:**` und als „blocked by“-Beziehung. Es gibt keine Issue-Dateien mehr im Repository.
+- **Automatischer Merge:** Ein Pull Request wird per Auto-Merge (Squash) gemergt, sobald alle erforderlichen CI-Checks grün sind. Branch Protection auf `master` erzwingt einen Pull Request und beide CI-Checks (Linux und Windows), auch für Administratoren. Eingerichtet wird das einmalig mit `scripts/setup-github-repo.py`.
+- **Arbeit mit LLM-Agenten (Details in `AGENTS.md`):** Agenten arbeiten Issues ab, ein Issue pro Branch (`issue/<Nummer>-slug`) und Pull Request. Sie erstellen den Pull Request selbst mit `gh` und aktivieren Auto-Merge; `scripts/next-issue.py` listet abholbereite Issues.
