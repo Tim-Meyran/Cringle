@@ -2,11 +2,13 @@
 
 The ManagementServer is the central control instance: CLI and WebUI talk only to it (`proto/cringle/management/v1/management.proto`). It keeps the list of known machines (their Daemons), creates and controls Engines through the Daemons, deploys and controls fabrics through the Engine management API, proxies the Repository and the Router, and answers log queries (fan-out to the running Engines).
 
-Start: `management-server --insecure-dev-mode [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] [--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>]` (prints `management-port=N`). Without `--insecure-dev-mode` it refuses to start until mTLS (#13) exists.
+Start: `management-server --insecure-dev-mode [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] [--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth]` (prints `management-port=N`). Without `--insecure-dev-mode` it refuses to start until mTLS (#13) exists.
 
 State (`<home>/management/state.json`): machines, Engines it created (with `autostart`, default true) and fabrics it deployed (the complete deploy request and whether the fabric should run). This is what recovery uses.
 
 Recovery runs when the server starts (and on demand with `Recover`): Engines with `autostart` are re-registered at their Daemon if needed and started; the fabrics of running Engines are deployed again if the Engine lost them, and started if they should run. A machine that is not reachable is reported in the result, it does not stop the recovery. Stopping a fabric or removing it is remembered; stopping an Engine is not (`autostart` is a setting, not the current state).
+
+With `--auth` the API needs user tokens (user management #22, stored in `<home>/management/users.json`); the very first start prints `bootstrap-token=...` once, a token of the admin user. The ManagementServer then also serves `cringle.user.v1.UserService`, so the CLI needs one address only. Without `--auth` every caller may do everything.
 
 Permissions (user management, #22): `READ` for lists, status, logs and package downloads; `OPERATE` for Engines, fabrics, publishing and `Recover`; `ADMINISTER` for machines, remote routers and plugin trust.
 

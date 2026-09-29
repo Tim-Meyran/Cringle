@@ -72,7 +72,7 @@ import kotlinx.coroutines.flow.flow
 /**
  * The gRPC facade of the [ManagementCore]. Without [users] the API is open (insecure dev mode); with [users] every
  * method needs the permission listed in [REQUIRED_PERMISSIONS]. On [start] the recorded Engines and fabrics are
- * recovered in the background if [recoverOnStart] is set; [recovery] gives the result.
+ * recovered in the background if [recoverOnStart] is set. With [users] it also serves the user management service (`cringle.user.v1.UserService`); [recovery] gives the result.
  */
 public class ManagementServer(
     public val core: ManagementCore,
@@ -93,6 +93,12 @@ public class ManagementServer(
                 if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS))
             },
         )
+        .apply {
+            // user management (#22) is served here, so that clients need one address only
+            if (users != null) {
+                addService(ServerInterceptors.intercept(cringle.router.users.UserGrpcService(users).bindService(), AuthInterceptor(users, cringle.router.users.UserGrpcService.REQUIRED_PERMISSIONS)))
+            }
+        }
         .build()
 
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
