@@ -63,14 +63,17 @@ public fun main(args: Array<String>) {
         if (id !in known) kotlinx.coroutines.runBlocking { core.addMachine(id, address, null, null) }
     }
     var users: UserManager? = null
+    var bootstrapFile: BootstrapTokenFile? = null
     if (auth) {
         users = UserManager(FileUserStore(base.resolve("users.json")))
-        // shown once, on the very first start
-        users.bootstrap()?.let { println("bootstrap-token=$it") }
+        // shown once, on the very first start; the file keeps it if the output is lost, until the first login with it
+        bootstrapFile = BootstrapTokenFile(base.resolve("bootstrap-token"))
+        users.bootstrap(bootstrapFile::write)?.let { println("bootstrap-token=$it") }
+        if (bootstrapFile.exists()) System.err.println("the bootstrap token is also in ${bootstrapFile.file}; the file is deleted at the first login with that token")
     } else {
         System.err.println("WARNING: no --auth: everybody who can reach the port is administrator")
     }
-    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays)
+    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) })
     Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
     server.start()
     println("management-port=${server.port}")

@@ -2,39 +2,33 @@
 
 package cringle.cli
 
+import cringle.common.OwnerOnlyFiles
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermissions
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The connection profile in `<home>/cli.json`: address of the ManagementServer and the user token that `login`
- * stored. A client certificate will be added with mTLS (issue #13).
+ * The connection profile in `<home>/cli.json`: address of the ManagementServer, the user token that `login` stored and
+ * whether the user accepted an unencrypted connection (`login --insecure-dev-mode`). A client certificate will be added
+ * with mTLS (issue #13). The file holds a secret and is written with owner-only rights from the start.
  */
-internal data class Profile(val server: String? = null, val token: String? = null) {
+internal data class Profile(val server: String? = null, val token: String? = null, val insecure: Boolean = false) {
     fun save(file: Path) {
         val json = JsonObject(
             buildMap {
                 put("server", server?.let { JsonPrimitive(it) } ?: JsonNull)
                 put("token", token?.let { JsonPrimitive(it) } ?: JsonNull)
+                if (insecure) put("insecure", JsonPrimitive(true))
             },
         )
-        Files.createDirectories(file.toAbsolutePath().parent)
-        val tmp = file.resolveSibling(file.fileName.toString() + ".tmp")
-        Files.writeString(tmp, Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), json) + "\n")
-        try {
-            // the token is a secret
-            Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"))
-        } catch (_: Exception) {
-            // not a POSIX file system
-        }
-        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
+        // the token is a secret: the file never exists with other rights than the owner's
+        OwnerOnlyFiles.writeAtomically(file, Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), json) + "\n")
     }
 
     companion object {
@@ -46,7 +40,7 @@ internal data class Profile(val server: String? = null, val token: String? = nul
                 throw IllegalStateException("$file is not a valid profile: ${e.message}")
             }
             fun text(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
-            return Profile(text("server"), text("token"))
+            return Profile(text("server"), text("token"), (o["insecure"] as? JsonPrimitive)?.booleanOrNull == true)
         }
     }
 }

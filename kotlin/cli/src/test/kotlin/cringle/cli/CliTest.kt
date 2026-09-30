@@ -78,14 +78,23 @@ class CliTest {
 
     private val address get() = "127.0.0.1:${server.port}"
 
-    private fun cli(vararg args: String, token: String? = adminToken, stdin: String = "", server: Boolean = true): Result {
+    private fun cli(
+        vararg args: String,
+        token: String? = adminToken,
+        stdin: String = "",
+        server: Boolean = true,
+        insecure: Boolean = true,
+        extraEnvironment: Map<String, String> = emptyMap(),
+    ): Result {
         val out = ByteArrayOutputStream()
         val err = ByteArrayOutputStream()
         val env = buildMap {
             put("CRINGLE_HOME", cliHome.toString())
             if (token != null) put("CRINGLE_TOKEN", token)
+            putAll(extraEnvironment)
         }
-        val list = (if (server) listOf("--server", address) else emptyList()) + args.toList()
+        // the test server is not encrypted, which the CLI only accepts when it is told to
+        val list = (if (server) listOf("--server", address) else emptyList()) + (if (insecure) listOf("--insecure-dev-mode") else emptyList()) + args.toList()
         val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(stdin.toByteArray()), env).run(list)
         return Result(code, out.toString().trim(), err.toString().trim())
     }
@@ -148,6 +157,81 @@ class CliTest {
         val after = cli("whoami", token = null)
         assertEquals(1, after.code)
         assertTrue(after.err.contains("cringle login"))
+    }
+
+    @Test
+    fun withoutTheInsecureSwitchTheCliDoesNotConnect() {
+        val refused = cli("machine", "list", insecure = false)
+        assertEquals(2, refused.code)
+        assertTrue(refused.err.contains("--insecure-dev-mode"), refused.err)
+        assertEquals(0, cli("machine", "list").code, "the switch allows it")
+        assertEquals(0, cli("machine", "list", insecure = false, extraEnvironment = mapOf("CRINGLE_INSECURE_DEV_MODE" to "1")).code, "so does the environment")
+        assertEquals(2, cli("machine", "list", insecure = false, extraEnvironment = mapOf("CRINGLE_INSECURE_DEV_MODE" to "0")).code)
+        // commands that do not connect need no switch
+        assertEquals(0, cli("--help", server = false, insecure = false).code)
+        assertEquals(0, cli("logout", server = false, token = null, insecure = false).code)
+
+        // login without the switch does not connect and writes nothing
+        Files.deleteIfExists(cliHome.resolve("cli.json"))
+        val login = cli("login", token = null, stdin = "$adminToken\n", insecure = false)
+        assertEquals(2, login.code)
+        assertFalse(Files.exists(cliHome.resolve("cli.json")))
+
+        // login with the switch stores it; the stored profile needs no switch any more
+        assertEquals(0, cli("login", token = null, stdin = "$adminToken\n").code)
+        assertTrue(Files.readString(cliHome.resolve("cli.json")).contains("\"insecure\": true"))
+        assertEquals(0, cli("machine", "list", server = false, token = null, insecure = false).code)
+        // logging out removes the token, not the decision
+        assertEquals(0, cli("logout", server = false, token = null, insecure = false).code)
+        assertTrue(Files.readString(cliHome.resolve("cli.json")).contains("\"insecure\": true"))
+    }
+
+    @Test
+    fun loginReadsTheTokenFromAFileOrStandardInputAndWarnsAboutTheArgument() {
+        val file = dir.resolve("token.txt")
+        Files.writeString(file, "$adminToken\n")
+        val fromFile = cli("login", "--token-file", file.toString(), token = null)
+        assertEquals(0, fromFile.code, fromFile.err)
+        assertFalse(fromFile.err.contains("warning"), fromFile.err)
+        assertEquals(0, cli("login", token = null, stdin = "$adminToken\n").code)
+
+        val argument = cli("login", "--token", adminToken, token = null)
+        assertEquals(0, argument.code, argument.err)
+        assertTrue(argument.err.contains("warning") && argument.err.contains("history"), argument.err)
+        assertFalse(argument.err.contains(adminToken), "the warning must not repeat the token")
+
+        assertEquals(2, cli("login", "--token", adminToken, "--token-file", file.toString(), token = null).code)
+        assertEquals(2, cli("login", "--token-file", dir.resolve("missing.txt").toString(), token = null).code)
+        val empty = dir.resolve("empty.txt")
+        Files.writeString(empty, "\n")
+        assertEquals(2, cli("login", "--token-file", empty.toString(), token = null).code)
+    }
+
+    @Test
+    fun theProfileIsWrittenWithOwnerOnlyRights() {
+        val profile = cliHome.resolve("cli.json")
+        assertEquals(0, cli("login", token = null, stdin = "$adminToken\n").code)
+        assertOwnerOnly(profile)
+        // a second login replaces the file and it keeps the rights
+        assertEquals(0, cli("login", token = null, stdin = "$adminToken\n").code)
+        assertOwnerOnly(profile)
+        assertEquals(0, cli("logout", server = false, token = null).code)
+        assertOwnerOnly(profile)
+        assertEquals(listOf("cli.json"), Files.list(cliHome).use { s -> s.map { it.fileName.toString() }.toList() })
+    }
+
+    /** Only the owner may access [file]: `rw-------` on POSIX, one ACL entry for the owner on Windows. */
+    private fun assertOwnerOnly(file: Path) {
+        val views = file.fileSystem.supportedFileAttributeViews()
+        when {
+            "posix" in views -> assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(file)))
+            "acl" in views -> {
+                val acl = Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView::class.java).acl
+                assertEquals(1, acl.size, "the access list has other entries: $acl")
+                assertEquals(Files.getOwner(file), acl.single().principal())
+            }
+            else -> org.junit.jupiter.api.Assertions.fail<Unit>("no POSIX permissions and no ACLs on this file system: $views")
+        }
     }
 
     @Test

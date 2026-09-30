@@ -7,12 +7,14 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.fail
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.Signature
 import java.time.Instant
@@ -98,13 +100,29 @@ class EngineConfigAndIdentityTest {
         assertNotEquals(a.fingerprint, b.fingerprint)
     }
 
+    /** Only the owner may access [file]: `rw-------` on POSIX, one ACL entry for the owner on Windows. */
+    private fun assertOwnerOnly(file: Path) {
+        val views = file.fileSystem.supportedFileAttributeViews()
+        when {
+            "posix" in views -> assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file)))
+            "acl" in views -> {
+                val acl = Files.getFileAttributeView(file, AclFileAttributeView::class.java).acl
+                assertEquals(1, acl.size, "the access list of the private key has other entries: $acl")
+                assertEquals(AclEntryType.ALLOW, acl.single().type())
+                assertEquals(Files.getOwner(file), acl.single().principal())
+            }
+            else -> fail("no POSIX permissions and no ACLs on this file system: $views")
+        }
+    }
+
     @Test
-    fun privateKeyFileIsOwnerOnlyOnPosixFileSystems() {
-        assumeTrue(dir.fileSystem.supportedFileAttributeViews().contains("posix"))
+    fun privateKeyFileIsOwnerOnly() {
         EngineIdentity.loadOrCreate(dir, "e1")
         val key = dir.resolve("certs/identity.key")
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(key)))
+        assertOwnerOnly(key)
         EngineIdentity.loadOrCreate(dir, "e1").renew()
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(key)))
+        assertOwnerOnly(key)
+        // the certificate is public and is not restricted; no temporary file is left behind
+        assertEquals(emptyList<String>(), Files.list(dir.resolve("certs")).use { s -> s.map { it.fileName.toString() }.filter { it.endsWith(".tmp") }.toList() })
     }
 }

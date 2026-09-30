@@ -49,15 +49,22 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     /**
      * On the first start, creates the user `admin` with the admin role and returns its token, which is not shown
      * anywhere else. Returns `null` on every later start (the token keeps working until it is revoked).
+     *
+     * [persistSecret] gets the token before the user and the hash of the token are stored, so that a crash after the
+     * storing can never leave a token that exists nowhere: whatever [persistSecret] wrote (for example a file with
+     * owner-only rights) is there when the user is. If it throws, nothing is stored and the call can be repeated.
      */
-    public fun bootstrap(): String? = synchronized(lock) {
+    public fun bootstrap(persistSecret: (String) -> Unit = {}): String? = synchronized(lock) {
         if (data.bootstrapped || data.users.isNotEmpty()) {
             if (!data.bootstrapped) update { it.copy(bootstrapped = true) }
             return null
         }
         val admin = User(UUID.randomUUID().toString(), "admin", setOf(UserRole.ADMIN), emptySet())
-        update { it.copy(users = it.users + admin, bootstrapped = true) }
-        createToken(admin.id, "bootstrap", null).secret
+        val secret = newSecret()
+        persistSecret(secret)
+        val record = TokenRecord(UUID.randomUUID().toString(), admin.id, "bootstrap", hash(secret), clock.instant(), null, false)
+        update { it.copy(users = it.users + admin, tokens = it.tokens + record, bootstrapped = true) }
+        secret
     }
 
     /** Returns the user of [token], or `null` for an unknown, revoked or expired token. */

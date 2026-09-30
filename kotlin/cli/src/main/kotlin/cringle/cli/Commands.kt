@@ -55,10 +55,33 @@ import java.time.Instant
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 
-/** What a command can use: the connection (opened on first use) and the profile. */
-internal class Env(val connection: () -> Connection, val profile: Profile, val profileFile: Path, val readSecret: () -> String?, val save: (Profile) -> Unit) {
+/**
+ * What a command can use: the connection (opened on first use) and the profile. [insecure] says whether an unencrypted
+ * connection is accepted (option, environment or profile); [insecureOption] is whether the option was given on this
+ * command line, which `login` stores in the profile. [warn] prints a warning to the error stream.
+ */
+internal class Env(
+    val connection: () -> Connection,
+    val profile: Profile,
+    val profileFile: Path,
+    val readSecret: () -> String?,
+    val save: (Profile) -> Unit,
+    val insecure: Boolean = true,
+    val insecureOption: Boolean = false,
+    val warn: (String) -> Unit = {},
+) {
     val m get() = connection().management
     val users get() = connection().users
+
+    /** Fails with a usage error (exit code 2) unless an unencrypted connection was accepted explicitly. */
+    fun requireInsecure() {
+        if (!insecure) {
+            throw UsageException(
+                "the connection to the server is not encrypted (secure operation with mTLS is not available yet, issue #13); " +
+                    "accept that with --insecure-dev-mode or CRINGLE_INSECURE_DEV_MODE=1, or store it with 'cringle login --insecure-dev-mode'",
+            )
+        }
+    }
 }
 
 /** One command: its words, arguments, options and what it does. */
@@ -190,13 +213,33 @@ private val tagOptions = listOf(
 internal val COMMANDS: List<Command> = listOf(
     // --- connection ---
     Command(
-        listOf("login"), "", "Store server address and user token in the profile",
-        listOf(opt("token", "user token; read from CRINGLE_TOKEN or standard input if not given", "TOKEN")),
+        listOf("login"), "", "Store server address and user token in the profile; --insecure-dev-mode stores that an unencrypted connection is accepted",
+        listOf(
+            opt("token-file", "file with the user token", "FILE"),
+            opt("token", "user token (ends up in the shell history; prefer --token-file or standard input)", "TOKEN"),
+        ),
         needsServer = false,
     ) { env, a ->
         val server = env.profile.server ?: throw UsageException("no server: use --server host:port or CRINGLE_SERVER")
-        val token = a.option("token") ?: env.readSecret()?.trim()?.takeIf { it.isNotEmpty() }
-            ?: throw UsageException("no token: use --token, CRINGLE_TOKEN or pipe it to standard input")
+        if (a.option("token") != null && a.option("token-file") != null) throw UsageException("use either --token or --token-file, not both")
+        val token = when {
+            a.option("token") != null -> {
+                env.warn("the token is now in the history of your shell and visible to other users in the process list; use --token-file or pipe it to standard input instead")
+                a.option("token")!!.trim().takeIf { it.isNotEmpty() } ?: throw UsageException("--token is empty")
+            }
+            a.option("token-file") != null -> {
+                val file = Paths.get(a.option("token-file")!!)
+                val text = try {
+                    Files.readString(file)
+                } catch (e: java.io.IOException) {
+                    throw UsageException("cannot read the token file $file: ${e.message}")
+                }
+                text.trim().takeIf { it.isNotEmpty() } ?: throw UsageException("the token file $file is empty")
+            }
+            else -> env.readSecret()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: throw UsageException("no token: use --token-file, or pipe it to standard input")
+        }
+        env.requireInsecure()
         // the server checks the token; a server without user management does not know the call and accepts anything
         val connection = Connection(server, token)
         val who = try {
@@ -206,11 +249,11 @@ internal val COMMANDS: List<Command> = listOf(
         } finally {
             connection.close()
         }
-        env.save(Profile(server, token))
+        env.save(Profile(server, token, insecure = env.insecureOption || env.profile.insecure))
         Output.Message(if (who == null) "stored profile for $server (the server does not use logins)" else "logged in to $server as $who", mapOf("server" to server, "user" to who))
     },
     Command(listOf("logout"), "", "Remove the stored token from the profile", needsServer = false) { env, _ ->
-        env.save(Profile(env.profile.server, null))
+        env.save(Profile(env.profile.server, null, env.profile.insecure))
         Output.Message("logged out")
     },
     Command(listOf("whoami"), "", "Show the user the token belongs to") { env, _ ->

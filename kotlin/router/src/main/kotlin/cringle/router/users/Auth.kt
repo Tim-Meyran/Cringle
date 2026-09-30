@@ -23,6 +23,12 @@ public class AuthInterceptor(
     private val users: UserManager,
     private val required: Map<String, Permission>,
     private val open: Set<String> = emptySet(),
+    /**
+     * Called with the token of every call that was authenticated and authorized, before the method runs (the
+     * ManagementServer uses it to delete the file with the bootstrap token after its first use). It must not log the
+     * token and must not throw; if it does, the call fails as if the credentials were not accepted.
+     */
+    private val onAuthenticated: (token: String) -> Unit = {},
 ) : ServerInterceptor {
     override fun <ReqT, RespT> interceptCall(
         call: ServerCall<ReqT, RespT>,
@@ -39,6 +45,11 @@ public class AuthInterceptor(
             ?: return reject(call, Status.UNAUTHENTICATED.withDescription("missing or invalid credentials"))
         if (permission !in users.permissions(user)) {
             return reject(call, Status.PERMISSION_DENIED.withDescription("insufficient rights"))
+        }
+        try {
+            onAuthenticated(token)
+        } catch (_: Exception) {
+            return reject(call, Status.UNAUTHENTICATED.withDescription("missing or invalid credentials"))
         }
         return Contexts.interceptCall(Context.current().withValue(CURRENT_USER, user), call, headers, next)
     }

@@ -2,6 +2,7 @@
 
 package cringle.engine
 
+import cringle.common.OwnerOnlyFiles
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -11,8 +12,6 @@ import java.io.ByteArrayInputStream
 import java.math.BigInteger
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.PosixFilePermissions
 import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -112,21 +111,11 @@ public class EngineIdentity private constructor(
             Base64.getMimeDecoder().decode(text.lines().filterNot { it.startsWith("-----") }.joinToString(""))
 
         private fun write(file: Path, content: String, secret: Boolean) {
+            // a secret gets its owner-only rights when the file is created, not afterwards
+            if (secret) return OwnerOnlyFiles.writeAtomically(file, content)
             val tmp = file.resolveSibling(file.fileName.toString() + ".tmp")
             Files.deleteIfExists(tmp)
-            if (secret && file.fileSystem.supportedFileAttributeViews().contains("posix")) {
-                Files.createFile(tmp, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
-            } else {
-                Files.createFile(tmp)
-                if (secret) {
-                    val f = tmp.toFile()
-                    f.setReadable(false, false)
-                    f.setWritable(false, false)
-                    f.setReadable(true, true)
-                    f.setWritable(true, true)
-                }
-            }
-            Files.writeString(tmp, content, StandardOpenOption.WRITE)
+            Files.writeString(tmp, content)
             Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
         }
     }
