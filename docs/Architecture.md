@@ -765,10 +765,10 @@ Ziel: Typisierte Kommunikation über verschiedene Transporte.
 - VarArg-Ports als Listen, Anzahl beim Start festgelegt
 - Tether-Modi: synchron, asynchron, Streaming einschließlich roher Byte-Streams
 - Non-Blocking-Garantie pro Block-Ausführung
-- TCP-Tether, Serial-Tether, Filesystem-Tether
+- TCP-Tether (Byte-Transport für externe Kommunikation), Serial-Tether; Filesystem ist ein Driver, kein Tether-Typ
 - Backpressure- und Retry-Konfiguration pro Tether
 
-**Fertig, wenn:** zwei Blocks über TCP typisierte Nachrichten austauschen und ein Schema-Verstoß zur Laufzeit erkannt wird.
+**Fertig, wenn:** zwei Blocks über TCP Bytes austauschen und ein Schema-Verstoß an lokalen Tethers zur Laufzeit erkannt wird. Schema-Nachrichten für alle Tether-Typen folgen mit dem gemeinsamen Wire-Format (M6, Cross-Engine-Tether).
 
 ### M3 – Artefakte und Repository (0.4.0)
 

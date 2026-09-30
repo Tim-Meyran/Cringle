@@ -1,6 +1,6 @@
 # Cringle – Entscheidungen
 
-Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architecture.md` und haben bei Widersprüchen Vorrang vor den dortigen Vorschlägen (**[Zu bestätigen]**). Stand: 2026-09-28. Die Entscheidungen sind in `Architecture.md` v0.3 eingearbeitet.
+Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architecture.md` und haben bei Widersprüchen Vorrang vor den dortigen Vorschlägen (**[Zu bestätigen]**). Stand: 2026-09-30. Die Entscheidungen sind in `Architecture.md` v0.3 eingearbeitet.
 
 ## Technik
 
@@ -26,6 +26,27 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 ## Nutzerverwaltung
 
 - Eine **frühe, einfache Nutzerverwaltung** kommt auf die frühe Roadmap (Issue #22). Während der Entwicklung authentifizieren sich Nutzer mit **Tokens**.
+
+## Tether
+
+- **TCP ist ein Byte-Transport** für externe Kommunikation (Geräte, fremde Systeme). Jeder Tether-Typ soll später Schema-Nachrichten tragen; das **Wire-Format wird einmal für alle Typen** festgelegt (Cross-Engine, IPC, TCP; Issue #76, gemeinsam mit #20).
+- **Serial ist ein Tether-Typ, Filesystem ein Driver** (Issue #75). Das Blueprint-Format des Serial-Tethers ist noch festzulegen.
+- Tethers öffnen vor dem Start der Blöcke; Nachrichten an einen noch nicht laufenden Block folgen der `delivery`-Policy des Tethers (`DROP` verwirft und loggt, `BUFFER` stellt zu, sobald der Block läuft).
+
+## Blueprints, Dependencies und Deploy
+
+- **Blueprints sind JSON, Cringle hat keine eigene DSL.** Ein späterer Blueprint-Editor liest und schreibt dasselbe Format.
+- **Cringle-Dependencies werden beim Deploy aufgelöst und gelockt.** Ein Redeploy derselben Version nutzt das Lock, `--relock` löst neu auf; die Platzierung wird geprüft, bevor bestehende Fabrics ersetzt werden (Issue #68). **Java-/Gradle-Dependencies löst Gradle beim Build auf.**
+- Das Gradle-Plugin prüft beim Build gegen das Repository, sofern eines erreichbar ist, und warnt sonst (Issue #72).
+
+## Gradle-Plugin
+
+- Das Plugin wird **nur über Maven Local** verteilt, Version `0.0.0-SNAPSHOT` (Issue #56).
+- `cringlePublish` nutzt `RepositoryClient` direkt, löst Adresse und Token wie das CLI auf und läuft nie automatisch mit `build`. `cringlePackage` hängt von `cringleValidate` ab. Die Option heißt `--dryRun`. Bei `--debug` darf das Token im gRPC-Header-Dump stehen.
+
+## Auslieferung
+
+- Ein gemeinsames Release-Archiv je Plattform, keine mitgelieferte JRE (JDK 21), kein Code-Signing. Installer als Skripte (Linux: systemd, Windows: PowerShell mit WinSW), Updates manuell (Issues #57 bis #60).
 
 ## Roadmap
 
