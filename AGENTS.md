@@ -142,3 +142,11 @@ gh pr merge --squash --delete-branch
 - [ ] Pull request contains `Closes #<n>`, follows the template, and has no unrelated changes.
 - [ ] Findings and follow-ups are written down (issue comment, follow-up issues).
 - [ ] The pull request is merged and the issue is closed.
+
+## Token economy (applies to every agent)
+
+- Read only what the task needs: the issue, the documents it names, and the files you change; use line ranges, `grep -n` and `git show` instead of whole files. Do not re-read files you just wrote.
+- Keep command output small: `--jq` for `gh`, `| tail -n 40` for build logs (read the full log only for a failure), `--tests <name>` for a single test while iterating; run the full `./gradlew build` once before the pull request, not after every edit.
+- Write short commits, pull request texts and comments: the result, deviations, and what could not be checked. No recap of steps, no restating the issue.
+- Do not generate files, tests or documentation beyond the scope of the issue.
+
