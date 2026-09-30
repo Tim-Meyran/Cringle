@@ -25,8 +25,11 @@ That writes the group `cringle` at the version `0.0.0-SNAPSHOT` (the one definit
 | `cringle:contract:0.0.0-SNAPSHOT` | The language-independent contract, needed to compile a plugin against. |
 | `cringle:schema:0.0.0-SNAPSHOT` | The schema module, a dependency of `packaging`. |
 | `cringle:packaging:0.0.0-SNAPSHOT` | The packaging module, which the plugin uses to read and write packages. |
+| `cringle:repository:0.0.0-SNAPSHOT` | The repository module, which the plugin uses to publish a package (`cringlePublish`). |
+| `cringle:common:0.0.0-SNAPSHOT` | The gRPC types, a dependency of `repository`. |
+| `cringle:router:0.0.0-SNAPSHOT` | The router module, which `repository` needs at runtime for `AuthInterceptor`. |
 
-The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
+The last three are there because the plugin publishes with `RepositoryClient` (see “Publishing a plugin” below). The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
 
 ```bash
 ./gradlew publishToMavenLocal -Dmaven.repo.local=/tmp/cringle-maven-local
@@ -34,15 +37,18 @@ find /tmp/cringle-maven-local -name '*.pom'
 ```
 
 ```
+/tmp/cringle-maven-local/cringle/common/0.0.0-SNAPSHOT/common-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/contract/0.0.0-SNAPSHOT/contract-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/gradle-plugin/0.0.0-SNAPSHOT/gradle-plugin-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/packaging/0.0.0-SNAPSHOT/packaging-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/plugin/cringle.plugin.gradle.plugin/0.0.0-SNAPSHOT/cringle.plugin.gradle.plugin-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/project/cringle.project.gradle.plugin/0.0.0-SNAPSHOT/cringle.project.gradle.plugin-0.0.0-SNAPSHOT.pom
+/tmp/cringle-maven-local/cringle/repository/0.0.0-SNAPSHOT/repository-0.0.0-SNAPSHOT.pom
+/tmp/cringle-maven-local/cringle/router/0.0.0-SNAPSHOT/router-0.0.0-SNAPSHOT.pom
 /tmp/cringle-maven-local/cringle/schema/0.0.0-SNAPSHOT/schema-0.0.0-SNAPSHOT.pom
 ```
 
-The same six publications, the plugin, both markers and the three libraries. `samples/external-plugin-example` and `samples/external-project-example` are two complete projects that do exactly this, one per plugin id, and `MavenLocalPublicationTest` checks the same file set in every build. Their `settings.gradle.kts` list `mavenCentral()` behind the plugin portal because the functional tests build them offline, where the plugin portal cannot serve the libraries the plugin itself needs (coroutines, serialization); a project with a network gets them from the portal.
+The same nine publications, the plugin, both markers and the six libraries. `samples/external-plugin-example` and `samples/external-project-example` are two complete projects that do exactly this, one per plugin id, and `MavenLocalPublicationTest` checks the same file set in every build. Their `settings.gradle.kts` list `mavenCentral()` behind the plugin portal because the functional tests build them offline, where the plugin portal cannot serve the libraries the plugin itself needs (coroutines, serialization); a project with a network gets them from the portal.
 
 **Using it in a project.** The plugin comes from `mavenLocal()`, so the build has to look there before the plugin portal. The version belongs into `settings.gradle.kts`, next to the repositories:
 
@@ -96,6 +102,65 @@ cringle {
 
 `./gradlew cringlePackage` writes `build/distributions/acme-orders-1.2.0.cringle`; `cringleValidate` checks the same package against the contract without writing it. Everything the `cringle { }` block contributes has to exist in the project: the provider and driver classes, a schema document per schema, and whatever goes into `lib/` and `binaries/`. The example project has all of it and is the shortest path from nothing to a working package.
 
+## Publishing a plugin
+
+`cringlePublish` hands the package of the build to a Cringle repository. It runs `cringlePackage` first, reads and validates the package, uploads it unchanged with `RepositoryClient` and checks the SHA-256 the repository reports against the SHA-256 of the local file:
+
+```bash
+./gradlew cringlePublish
+```
+
+The task belongs to neither `build` nor `check` and never runs on its own. The version of the package is the one in `cringle { version }`, the repository takes a version once: publishing the same version a second time fails the build.
+
+**Where the address comes from.** The first of these four that names a repository wins:
+
+| Source | Example |
+| --- | --- |
+| The task property | `./gradlew cringlePublish -Pcringle.server=host:9090` |
+| The `cringle { }` block | `cringle { publish { server = "host:9090" } }` |
+| The environment | `CRINGLE_SERVER=host:9090` |
+| The profile of `cringle login` | `$CRINGLE_HOME/cli.json`, else `~/.cringle/cli.json`, with its `server` entry |
+
+```kotlin
+cringle {
+    publish { server = "host:9090" }
+    name = "acme-orders"
+    // …
+}
+```
+
+The same ranking as in the CLI, so that a `cringle login` also holds for a Gradle build. Without an address anywhere the build fails with a message that names all four ways to set one.
+
+**The token.** A repository that knows users wants a token with the right `Permission.OPERATE`. The task takes it from `CRINGLE_TOKEN` or from the `token` entry of the profile, never from a build script and never from a command line, so a token cannot end up in a `build.gradle.kts` or in a log of a build that failed. A repository that needs a token and gets none fails the build with a message that names `CRINGLE_TOKEN` and `cringle login`.
+
+**What a build says.** On success the task reports name, version, SHA-256 and the repository it published to:
+
+```text
+cringlePublish: published acme-orders 1.2.0 (SHA-256 7596afcb…) to 127.0.0.1:9090
+```
+
+A repository that refuses the package fails the build with one line and no stack trace:
+
+| Case | Message names |
+| --- | --- |
+| The version is already there | `already published` |
+| The server is not reachable | The address, and that the server is not reachable |
+| No token, or one that may not publish | `Permission.OPERATE`, `CRINGLE_TOKEN` and `cringle login` |
+
+**A build without a repository.** `--dryRun` builds and validates the package, connects to nothing and names what it would publish:
+
+```bash
+./gradlew cringlePublish --dryRun
+```
+
+```text
+cringlePublish: would publish acme-orders 1.2.0 to 127.0.0.1:9090 (--dryRun sent nothing)
+```
+
+> **The name of the option is `--dryRun`, not `--dry-run`.** Gradle reserves `--dry-run` for the whole build and takes it before any task sees it, also when a task declares an option of that name: `cringlePublish --dry-run` builds nothing and reports `:cringlePublish SKIPPED`. The option of the task is therefore written in camel case, the way Gradle writes `--no-daemon` beside `--dry-run`.
+
+The connection is unencrypted, like the one of the CLI; TLS and mTLS come with #13.
+
 ## A project project
 
 A project is assembled from blueprints, tethers and the plugins that contribute blocks — and holds **no code**. So the plugin that packages one needs no Kotlin plugin, no repository and no dependency at all: it only assembles what the project has under `src/main/cringle` into a package.
@@ -146,4 +211,4 @@ and fail the build with one line per finding as `<path>: <message>`, where the t
 
 Nothing in a project package is resolved at build time: the dependencies are Cringle plugins, and the deploy resolves them against the Cringle repository (chapter 8.4), so `cringleValidate` runs without a network. Of a tether only the port number and the `delivery` are checked, and only against the contract: the blocks a blueprint names are declared by the plugins the deploy installs.
 
-**What is not there yet.** The plugin is nowhere but in Maven Local: no Gradle Plugin Portal, no Maven Central, and no Cringle repository of its own (that is #51, and a project will take its blueprints, schemas and binaries from there instead of from `mavenLocal()`).
+**What is not there yet.** The plugin is nowhere but in Maven Local: no Gradle Plugin Portal, no Maven Central. A plugin project publishes into a Cringle repository of its own, with `cringlePublish` (see above). A project project has no publish task yet, so its blueprints, schemas and binaries reach an engine through the CLI, and the build of a project project needs no repository at all.

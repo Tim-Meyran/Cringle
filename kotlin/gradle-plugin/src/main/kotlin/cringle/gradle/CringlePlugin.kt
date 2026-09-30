@@ -20,8 +20,9 @@ import java.io.File
 import java.util.concurrent.Callable
 
 /**
- * The `cringle.plugin` plugin. It adds the `cringle { }` extension and the tasks `cringlePackage` and
- * `cringleValidate`, which turn a normal Kotlin project into a Cringle plugin package (chapter 8.5).
+ * The `cringle.plugin` plugin. It adds the `cringle { }` extension and the tasks `cringlePackage`, `cringleValidate`
+ * and `cringlePublish`, which turn a normal Kotlin project into a Cringle plugin package (chapter 8.5) and publish it
+ * to a repository.
  *
  * At runtime the `contract` module comes from the parent classloader, so a project adds it as `compileOnly`
  * dependency and it never becomes part of the package.
@@ -59,6 +60,17 @@ public class CringlePlugin : Plugin<Project> {
             group = TASK_GROUP
             description = "Builds the Cringle plugin package."
             packageFile.set(packageFile(project, manifest))
+        }
+
+        project.tasks.register(TASK_PUBLISH, PublishPluginTask::class.java).configure {
+            dependsOn(packagePlugin)
+            packageFile.set(packagePlugin.flatMap { it.packageFile })
+            // A property of the command line wins over the block of the build script, and both win over the
+            // environment and the profile, which the task itself resolves.
+            server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
+            dryRun.convention(false)
+            group = TASK_GROUP
+            description = "Publishes the Cringle plugin package to a repository."
         }
     }
 
@@ -141,6 +153,12 @@ public class CringlePlugin : Plugin<Project> {
 
         /** Name of the task that writes the package. */
         public const val TASK_PACKAGE: String = "cringlePackage"
+
+        /** Name of the task that publishes the package to a repository. */
+        public const val TASK_PUBLISH: String = "cringlePublish"
+
+        /** The project property that names the repository, as `-Pcringle.server=host:port`. */
+        public const val PROPERTY_SERVER: String = "cringle.server"
 
         /** The task group both tasks appear under. */
         public const val TASK_GROUP: String = "cringle"

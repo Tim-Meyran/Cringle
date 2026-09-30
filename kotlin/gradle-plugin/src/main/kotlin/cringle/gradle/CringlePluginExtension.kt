@@ -52,6 +52,19 @@ public abstract class CringlePluginExtension @Inject constructor(objects: Object
     public val blocks: List<BlockDefinition>
         get() = blockSpecs.map { it.build() }
 
+    private val publishSpec: PublishSpec = objects.newInstance(PublishSpec::class.java)
+
+    /**
+     * Declares where `cringlePublish` publishes to, as `publish { server = "host:port" }`. The token is not part of
+     * the block: it is a secret and comes from `CRINGLE_TOKEN` or from the profile of `cringle login`.
+     */
+    public fun publish(action: Action<in PublishSpec>) {
+        action.execute(publishSpec)
+    }
+
+    /** The block the [publish] method writes into, which the plugin hands to the task. */
+    internal val publishSettings: PublishSpec get() = publishSpec
+
     /** Declares a dependency on [name] that accepts the npm-style range [range]. */
     public fun dependency(name: String, range: String) {
         dependencies.put(name, range)
@@ -76,6 +89,16 @@ public abstract class CringlePluginExtension @Inject constructor(objects: Object
         action.execute(spec)
         blockSpecs += spec
     }
+}
+
+/**
+ * The `cringle { publish { } }` block: the repository `cringlePublish` publishes to. The token belongs to neither this
+ * block nor any other part of the build: it comes from `CRINGLE_TOKEN` or from the profile of `cringle login`.
+ */
+public abstract class PublishSpec @Inject constructor(objects: ObjectFactory) {
+
+    /** Address of the repository as `host:port`; without it the task asks `CRINGLE_SERVER` and then the profile. */
+    public val server: Property<String> = objects.property(String::class.java)
 }
 
 /** Collects the parts of one [BlockDefinition] before it is built. */

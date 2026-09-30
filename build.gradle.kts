@@ -71,6 +71,26 @@ localPublishModules.forEach { path ->
     }
 }
 
+// The task `cringlePublish` uploads with `RepositoryClient` (#51), so a project outside this build that applies the
+// plugin needs the repository module and the two modules it needs at runtime (`:common` for the gRPC types, `:router`
+// for `AuthInterceptor`). They are no sample dependency, so they go into the test folder and into Maven Local (the
+// standard `publishToMavenLocal` of every module that applies `maven-publish`) and not into `build/cringle-repo`, which
+// stays the way it is: contract, schema and packaging, and nothing else.
+val pluginRuntimeModules = listOf(":common", ":router", ":repository")
+
+pluginRuntimeModules.forEach { path ->
+    val module = project(path)
+    module.group = "cringle"
+    module.version = localPublishVersion
+    module.apply(plugin = "maven-publish")
+    module.extensions.configure<PublishingExtension> {
+        publications { register<MavenPublication>("maven") { from(module.components["java"]) } }
+        repositories {
+            maven { name = "cringleTestMavenLocal"; url = testMavenLocalRepo.get().asFile.toURI() }
+        }
+    }
+}
+
 // `java-gradle-plugin` creates the publications of the Cringle Gradle plugin: the plugin JAR and one marker per
 // plugin id in `gradlePlugin { }`. The build script of the module sets its own coordinates, the folder its
 // publications are written to and the marker it leaves out; `build/cringle-repo` stays the way it is for the samples.
@@ -90,13 +110,15 @@ val deleteTestMavenLocal = tasks.register<Delete>("deleteTestMavenLocal") {
     delete(testMavenLocalRepo)
 }
 
-// The plugin publishes itself, `java-gradle-plugin` creates its publications and its marker.
-val testMavenLocalModules = localPublishModules + ":gradle-plugin"
+// The plugin publishes itself, `java-gradle-plugin` creates its publications and its marker. Since #51 it publishes
+// with `RepositoryClient`, so the modules it needs at runtime go with it.
+val testMavenLocalModules = localPublishModules + pluginRuntimeModules + ":gradle-plugin"
 
 tasks.register("publishToTestMavenLocal") {
     group = "build"
-    description = "Publishes contract, schema, packaging and the Cringle Gradle plugin in the layout of Maven Local " +
-        "into build/cringle-test-maven-local, for the tests of samples/external-plugin-example."
+    description = "Publishes contract, schema, packaging, the repository modules and the Cringle Gradle plugin in the " +
+        "layout of Maven Local into build/cringle-test-maven-local, for the tests of " +
+        "samples/external-plugin-example."
     dependsOn(testMavenLocalModules.map { "$it:publishAllPublicationsToCringleTestMavenLocalRepository" })
     dependsOn(deleteTestMavenLocal)
 }

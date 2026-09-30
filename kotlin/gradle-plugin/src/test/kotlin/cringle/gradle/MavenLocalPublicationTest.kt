@@ -14,9 +14,10 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 
 /**
- * AC 1: `publishToTestMavenLocal` writes the plugin, the markers of `cringle.plugin` and `cringle.project`, the three
- * libraries the plugin needs and nothing else into `build/cringle-test-maven-local`, a folder with the layout of
- * Maven Local. The test reads that folder; it never looks at `~/.m2`, which no test of this build touches.
+ * AC 1: `publishToTestMavenLocal` writes the plugin, the markers of `cringle.plugin` and `cringle.project` and the six
+ * libraries the plugin needs — contract, schema and packaging for a package, common, router and repository for
+ * `cringlePublish` — and nothing else into `build/cringle-test-maven-local`, a folder with the layout of Maven Local.
+ * The test reads that folder; it never looks at `~/.m2`, which no test of this build touches.
  *
  * The publications of a snapshot repository carry a timestamp in the name of the files, so the tests look for
  * `<artifactId>-*<extension>` instead of the plain name that `./gradlew publishToMavenLocal` writes. The version
@@ -35,10 +36,12 @@ class MavenLocalPublicationTest {
         val dir = moduleDir("gradle-plugin")
         publishedFile(dir, "gradle-plugin", ".jar")
         val pom = publishedFile(dir, "gradle-plugin", ".pom").readText()
+        // Since #51 the plugin publishes with RepositoryClient, so its POM names the repository module. A POM holds
+        // the direct dependencies only, and the order in which it lists them is not part of the contract.
         assertEquals(
-            listOf("packaging:$version", "contract:$version"),
-            cringleDependencies(pom),
-            "the plugin has to depend on packaging and contract, but its POM has $pom",
+            setOf("packaging:$version", "contract:$version", "repository:$version"),
+            cringleDependencies(pom).toSet(),
+            "the plugin has to depend on packaging, contract and repository, but its POM has $pom",
         )
         // The module metadata tells a consumer that the JAR and the POM belong to the same module.
         val metadata = publishedFile(dir, "gradle-plugin", ".module").readText()
@@ -74,7 +77,8 @@ class MavenLocalPublicationTest {
 
     @Test
     fun theLibrariesThePluginNeedsArePublished() {
-        for (library in listOf("contract", "schema", "packaging")) {
+        // contract, schema and packaging for the package, common, router and repository for `cringlePublish` (#51).
+        for (library in listOf("contract", "schema", "packaging", "common", "router", "repository")) {
             val dir = moduleDir(library)
             publishedFile(dir, library, ".jar")
             publishedFile(dir, library, ".pom")
@@ -85,9 +89,9 @@ class MavenLocalPublicationTest {
     @Test
     fun theFolderHoldsNothingButThePublicationsOfThisBuild() {
         assertEquals(
-            listOf("contract", "gradle-plugin", "packaging", "plugin", "project", "schema"),
+            listOf("common", "contract", "gradle-plugin", "packaging", "plugin", "project", "repository", "router", "schema"),
             childDirectories(mavenLocal.resolve("cringle")),
-            "build/cringle-test-maven-local must hold the plugin, the two markers and the three libraries only",
+            "build/cringle-test-maven-local must hold the plugin, the two markers and the six libraries only",
         )
     }
 
