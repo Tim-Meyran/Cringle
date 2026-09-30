@@ -285,4 +285,32 @@ class TrustApiTest {
         assertEquals(Status.Code.OK, register(r, e2, e2, "eng2", "s2".toByteArray()))
         assertEquals(Status.Code.PERMISSION_DENIED, register(r, e1, e1, "eng2", null))
     }
+
+    @Test fun rolesAndPeersDecideWhoMayCallWhat() {
+        val r = node("r")
+        val daemon = peer("daemon", ComponentKind.DAEMON)
+        val stranger = peer("stranger", ComponentKind.DAEMON)
+        val other = peer("other", ComponentKind.ENGINE)
+        r.trust.add(TrustEntry(daemon.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
+        r.trust.add(TrustEntry(other.publicKeyFingerprint, "other", TrustKind.ENGINE))
+        val admin = token(r, UserRole.ADMIN); val viewer = token(r, UserRole.VIEWER); val operator = token(r, UserRole.OPERATOR)
+        val anyFp = "0".repeat(64)
+        fun add(t: String?) = outcome { api(channel(r, null), t).addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:9").setExpectedFingerprint(anyFp).build()) }.status.code
+        fun trust(t: String?) = outcome { api(channel(r, null), t).trustRemoteRouter(TrustRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:9").setExpectedFingerprint(anyFp).build()) }.status.code
+        fun revoke(t: String?) = outcome { api(channel(r, null), t).revokeRemoteRouter(RevokeRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:9").build()) }.status.code
+        fun list(t: String?) = outcome { api(channel(r, null), t).listTrust(ListTrustRequest.getDefaultInstance()) }.status.code
+        for (code in listOf(add(null), trust(null), revoke(null), list(null))) assertEquals(Status.Code.UNAUTHENTICATED, code)
+        for (t in listOf(viewer, operator)) for (code in listOf(add(t), trust(t), revoke(t))) assertEquals(Status.Code.PERMISSION_DENIED, code)
+        for (code in listOf(add(admin), trust(admin), revoke(admin))) assertTrue(code != Status.Code.PERMISSION_DENIED && code != Status.Code.UNAUTHENTICATED, code.toString())
+        for (t in listOf(viewer, operator, admin)) assertEquals(Status.Code.OK, list(t))
+        assertEquals(2, outcome { api(channel(r, null), viewer).listTrust(ListTrustRequest.getDefaultInstance()) }.value!!.entriesList.size)
+        fun prepare(me: Identity?) = outcome { api(channel(r, me)).prepareEngine(PrepareEngineRequest.newBuilder().setEngineId(EngineId.newBuilder().setValue("x")).setEnrollmentSecretHash(sha256("s".toByteArray())).build()) }.status.code
+        assertEquals(Status.Code.OK, prepare(daemon))
+        assertEquals(Status.Code.PERMISSION_DENIED, prepare(other))
+        assertEquals(Status.Code.UNAUTHENTICATED, prepare(stranger))
+        assertEquals(Status.Code.UNAUTHENTICATED, prepare(null))
+        assertEquals(Status.Code.OK, listEngines(r, daemon).status.code)
+        assertEquals(Status.Code.UNAUTHENTICATED, listEngines(r, stranger).status.code)
+        assertEquals(Status.Code.UNAUTHENTICATED, listEngines(r, null).status.code)
+    }
 }
