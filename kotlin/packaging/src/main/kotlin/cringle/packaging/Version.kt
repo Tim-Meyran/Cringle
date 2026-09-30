@@ -19,6 +19,10 @@ public class Version(
         require(this.prerelease.all { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() && c.code < 128 || c == '-' } }) {
             "invalid prerelease identifiers $prerelease"
         }
+        // Without this, "1.0.0-1" and "1.0.0-01" would be equal but have different hash codes.
+        require(this.prerelease.none { it.length > 1 && it.all(Char::isDigit) && it.startsWith('0') }) {
+            "numeric prerelease identifiers must not have leading zeros: $prerelease"
+        }
     }
 
     /** Whether this is a prerelease. */
@@ -51,6 +55,10 @@ public class Version(
 
     internal fun sameTuple(other: Version): Boolean = major == other.major && minor == other.minor && patch == other.patch
 
+    /**
+     * Two versions are the same when they order the same, which for valid versions means they are written the same
+     * (no leading zeros, no build metadata). The hash code uses the same parts, so equal versions always hash alike.
+     */
     override fun equals(other: Any?): Boolean = other is Version && compareTo(other) == 0
 
     override fun hashCode(): Int = listOf(major, minor, patch, prerelease).hashCode()
@@ -58,13 +66,12 @@ public class Version(
     override fun toString(): String = "$major.$minor.$patch" + if (prerelease.isEmpty()) "" else "-" + prerelease.joinToString(".")
 
     public companion object {
-        /** Parses [text]; throws [IllegalArgumentException] if it does not match [PackageNames.version]. */
+        /** Parses [text]; throws [IllegalArgumentException] if it is not a version of [PackageNames]. */
         public fun parse(text: String): Version {
-            require(PackageNames.version.matches(text)) { "invalid version '$text': expected MAJOR.MINOR.PATCH[-prerelease]" }
+            val problem = PackageNames.versionProblem(text)
+            if (problem != null) throw IllegalArgumentException(problem)
             val core = text.substringBefore('-')
-            val (major, minor, patch) = core.split('.').map {
-                it.toIntOrNull() ?: throw IllegalArgumentException("version number too large in '$text'")
-            }
+            val (major, minor, patch) = core.split('.').map { it.toInt() }
             val pre = if ('-' in text) text.substringAfter('-').split('.') else emptyList()
             return Version(major, minor, patch, pre)
         }

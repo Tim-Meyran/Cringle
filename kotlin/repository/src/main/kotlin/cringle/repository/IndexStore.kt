@@ -3,6 +3,7 @@
 package cringle.repository
 
 import cringle.packaging.PackageKind
+import cringle.packaging.PackageNames
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -31,20 +32,32 @@ internal data class IndexData(val records: List<IndexRecord> = emptyList(), val 
 /** Thrown when the index exists but cannot be read; the repository refuses to start instead of losing content. */
 public class RepositoryIndexException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-internal class IndexStore(private val file: Path) {
+/**
+ * The index of a repository as JSON. An entry whose version cannot be parsed is left out with a warning, because one
+ * such entry would otherwise make [PackageRepository.list] fail for everybody; the rest of the file stays strict, so a
+ * broken index still keeps the repository from starting instead of losing content silently.
+ */
+internal class IndexStore(private val file: Path, private val warn: (String) -> Unit) {
     fun load(): IndexData {
         if (!Files.exists(file)) return IndexData()
         try {
             val root = Json.parseToJsonElement(Files.readString(file)) as JsonObject
             if ((root["format"] as? JsonPrimitive)?.contentOrNull != "1") throw RepositoryIndexException("$file: unsupported index format")
-            val records = (root["packages"] as JsonArray).map {
-                val o = it as JsonObject
+            val records = ArrayList<IndexRecord>()
+            for (element in root["packages"] as JsonArray) {
+                val o = element as JsonObject
                 fun text(k: String) = (o[k] as JsonPrimitive).content
-                IndexRecord(
+                val record = IndexRecord(
                     PackageKind.valueOf(text("kind")), text("name"), text("version"), text("sha256"), text("sizeBytes").toLong(),
                     (o["dependencies"] as JsonObject).mapValues { (_, v) -> (v as JsonPrimitive).content },
                     Instant.parse(text("publishedAt")),
                 )
+                val problem = PackageNames.versionProblem(record.version)
+                if (problem == null) {
+                    records += record
+                } else {
+                    warn("$file: leaving out ${record.name}@${record.version} of the index: $problem")
+                }
             }
             val trust = (root["trust"] as JsonObject).mapValues { (_, v) -> PluginTrust.valueOf((v as JsonPrimitive).content) }
             return IndexData(records, trust)

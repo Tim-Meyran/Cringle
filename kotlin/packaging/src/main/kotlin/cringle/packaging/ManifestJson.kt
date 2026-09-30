@@ -26,8 +26,19 @@ public object PackageNames {
      */
     public val identifier: Regex = Regex("[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?")
 
-    /** Semantic version `MAJOR.MINOR.PATCH` with optional `-prerelease`. */
-    public val version: Regex = Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?")
+    /**
+     * Semantic version `MAJOR.MINOR.PATCH` with optional `-prerelease` (`spec/versioning.md`, section 1): a numeric
+     * prerelease identifier has no leading zeros, and build metadata is not part of a version.
+     */
+    public val version: Regex = Regex(
+        "(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-($PRERELEASE(\\.$PRERELEASE)*))?",
+    )
+
+    /** One prerelease identifier: `0`, a decimal without leading zeros, or something that is not all digits. */
+    private const val PRERELEASE: String = "(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+
+    /** The largest number [Version] holds; the grammar alone does not say it. */
+    private const val MAX_NUMBER: String = "2147483647"
 
     /** Names Windows refuses as a file or directory name, whatever the extension. */
     private val windowsReserved: Regex = Regex("(aux|con|nul|prn|com[1-9]|lpt[1-9])", RegexOption.IGNORE_CASE)
@@ -47,9 +58,21 @@ public object PackageNames {
         else -> reserved(value)
     }
 
-    /** Why [value] is not a valid [version], or `null` if it is. */
-    public fun versionProblem(value: String): String? =
-        if (version.matches(value)) null else "invalid version '$value': expected MAJOR.MINOR.PATCH[-prerelease]"
+    /**
+     * Why [value] is not a valid [version], or `null` if it is. The numbers of `MAJOR.MINOR.PATCH` must also fit in
+     * the [Int] that [Version] holds them in; prerelease identifiers are only compared, as `BigInteger`, and are not
+     * limited.
+     */
+    public fun versionProblem(value: String): String? = when {
+        !version.matches(value) -> "invalid version '$value': expected MAJOR.MINOR.PATCH[-prerelease] without leading zeros"
+        !fitsNumber(value) -> "invalid version '$value': MAJOR.MINOR.PATCH must not be larger than $MAX_NUMBER"
+        else -> null
+    }
+
+    /** Without leading zeros a shorter number is always smaller, and equal lengths compare as text. */
+    private fun fitsNumber(value: String): Boolean = value.substringBefore('-').split('.').all { n ->
+        n.length < MAX_NUMBER.length || (n.length == MAX_NUMBER.length && n <= MAX_NUMBER)
+    }
 
     /** Windows also refuses `con.txt`, so the part before the first `.` decides. */
     private fun reserved(value: String): String? = value.substringBefore('.').takeIf { windowsReserved.matches(it) }

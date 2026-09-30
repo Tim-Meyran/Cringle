@@ -7,7 +7,9 @@ versions and ranges are defined in `package-format.md`.
 ## 1. Versions
 
 `MAJOR.MINOR.PATCH` with optional `-prerelease`; numbers are non-negative decimals without leading zeros;
-prerelease is a dot separated list of `[0-9A-Za-z-]+` identifiers. Build metadata (`+build`) is not allowed.
+prerelease is a dot separated list of `[0-9A-Za-z-]+` identifiers, and a prerelease identifier that is a number has
+no leading zeros either (`1.0.0-01` is invalid, `1.0.0-0` and `1.0.0-0a` are valid). Build metadata (`+build`) is not
+allowed.
 
 Ordering is Semantic Versioning 2.0: compare major, minor, patch numerically; a version with a prerelease is
 lower than the same version without; prereleases compare identifier by identifier, numeric identifiers numerically
