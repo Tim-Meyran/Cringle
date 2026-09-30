@@ -169,7 +169,7 @@ class TcpTetherTest {
             fabric("f", drivers, listOf(tcp(freePort())), s, d, capacity = 1).use { f ->
                 f.start()
                 val streams = (1..4).map { s.context.ports.port("out").openByteStream() }.toMutableList()
-                withTimeout(20.seconds) { while (warnings.isEmpty()) delay(10) }
+                withTimeout(20.seconds) { while (warnings.size < 2) delay(10) }
                 assertEquals(2, warnings.size, "one connection is in the block and one in the buffer of 1: $warnings")
                 assertTrue(warnings.all { it.contains("accept buffer of 1 is full") }, warnings.toString())
                 gate.complete(Unit)
