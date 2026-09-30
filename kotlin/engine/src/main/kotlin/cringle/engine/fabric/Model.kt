@@ -176,8 +176,10 @@ public fun interface FabricLogger {
 
 /** The directories of a fabric instance below the engine directory (Architecture 15.1). */
 public class FabricPaths(engineDir: Path, fabricId: String) {
+    private val fabrics: Path = engineDir.resolve("fabrics")
+
     /** `<engine dir>/fabrics/<fabric id>`. */
-    public val root: Path = engineDir.resolve("fabrics").resolve(fabricId)
+    public val root: Path = contained(fabrics, fabrics.resolve(fabricId))
 
     /** Working directory of the fabric. */
     public val working: Path = root.resolve("working")
@@ -186,10 +188,10 @@ public class FabricPaths(engineDir: Path, fabricId: String) {
     public val logs: Path = root.resolve("logs")
 
     /** Working directory of one block. */
-    public fun blockWorking(blockId: String): Path = working.resolve(blockId)
+    public fun blockWorking(blockId: String): Path = contained(working, working.resolve(blockId))
 
     /** Log directory of one block. */
-    public fun blockLogs(blockId: String): Path = logs.resolve(blockId)
+    public fun blockLogs(blockId: String): Path = contained(logs, logs.resolve(blockId))
 
     /** Creates the fabric and block directories. */
     public fun create(blockIds: List<String>) {
@@ -211,6 +213,12 @@ public class FabricPaths(engineDir: Path, fabricId: String) {
             java.nio.file.StandardOpenOption.APPEND,
         )
     }
+}
+
+/** A name that is no name at all must not be able to build a path outside [root], whatever the file system does with it. */
+private fun contained(root: Path, path: Path): Path {
+    if (!path.normalize().startsWith(root.normalize())) throw FabricException("path '$path' leaves '$root'")
+    return path
 }
 
 /** Watchdog settings: every [interval] a heartbeat is posted to the fabric thread; no answer within [threshold] is reported. */

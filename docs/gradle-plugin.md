@@ -206,6 +206,9 @@ The manifest is derived from those files: the list of blueprints, schemas and bi
 * a tether that points at a block or a port that the blueprint does not have,
 * a dependency whose version range is not a version range, and
 * a port that is not a TCP port or a `delivery` that is not one of `fire-and-forget`, `at-least-once` or `exactly-once`,
+* a block id, port name or blueprint reference that is not a name a directory can have: letters, digits, `.`, `-`
+  and `_`, 1 to 64 characters, never starting or ending with a separator, and never a name Windows reserves
+  (`con`, `nul`, `com1` to `com9`, …), whatever its extension.
 
 and fail the build with one line per finding as `<path>: <message>`, where the text is the one of the `packaging` module. `samples/sample-project` is a complete project of this kind and the shortest path from nothing to a working package.
 

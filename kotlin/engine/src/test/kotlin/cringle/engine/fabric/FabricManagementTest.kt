@@ -97,11 +97,19 @@ class FabricManagementTest {
 
     private fun fabricRequest(id: String) = FabricRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(id)).build()
 
-    private fun deploy(id: String, trust: ProtoTrust, project: String = "demo", blueprint: String = "main") = DeployFabricRequest.newBuilder()
+    private fun deploy(
+        id: String,
+        trust: ProtoTrust,
+        project: String = "demo",
+        projectVersion: String = "0.1.0",
+        blueprint: String = "main",
+        plugin: String = "acme-demo",
+        pluginVersion: String = "1.0.0",
+    ) = DeployFabricRequest.newBuilder()
         .setFabricId(FabricId.newBuilder().setValue(id))
-        .setProject(ProjectRef.newBuilder().setName(project).setVersion("0.1.0"))
+        .setProject(ProjectRef.newBuilder().setName(project).setVersion(projectVersion))
         .setBlueprint(blueprint)
-        .addPlugins(DeployedPlugin.newBuilder().setPlugin(PluginRef.newBuilder().setName("acme-demo").setVersion("1.0.0")).setTrust(trust))
+        .addPlugins(DeployedPlugin.newBuilder().setPlugin(PluginRef.newBuilder().setName(plugin).setVersion(pluginVersion)).setTrust(trust))
         .build()
 
     private fun withEngine(body: suspend (EngineManagementServiceCoroutineStub, Path, Path) -> Unit) {
@@ -202,4 +210,34 @@ class FabricManagementTest {
         assertEquals(Status.Code.NOT_FOUND, code { stub.startFabric(fabricRequest("nope")) })
         assertEquals(Status.Code.NOT_FOUND, code { stub.removeFabric(fabricRequest("nope")) })
     }
+
+    @Test
+    fun namesAndVersionsOfADeployRequestAreCheckedBeforeAnyPathIsBuilt() = withEngine { stub, _, _ ->
+        fun failure(request: DeployFabricRequest): StatusException = assertThrows { runBlocking { stub.deployFabric(request) } }
+        val home = dir.resolve("home")
+        val before = namesUnder(dir) to namesUnder(home)
+        for (bad in listOf("..", "a/b", "C:x")) {
+            val project = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, project = bad))
+            assertEquals(Status.Code.INVALID_ARGUMENT, project.status.code)
+            assertTrue(project.status.description!!.contains("project name: invalid name"), "${project.status.description}")
+            val projectVersion = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, projectVersion = bad))
+            assertEquals(Status.Code.INVALID_ARGUMENT, projectVersion.status.code)
+            assertTrue(projectVersion.status.description!!.contains("project version: invalid version"), "${projectVersion.status.description}")
+            val plugin = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, plugin = bad))
+            assertEquals(Status.Code.INVALID_ARGUMENT, plugin.status.code)
+            assertTrue(plugin.status.description!!.contains("plugin name: invalid name"), "${plugin.status.description}")
+            val pluginVersion = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, pluginVersion = bad))
+            assertEquals(Status.Code.INVALID_ARGUMENT, pluginVersion.status.code)
+            assertTrue(pluginVersion.status.description!!.contains("plugin version: invalid version"), "${pluginVersion.status.description}")
+        }
+        val reserved = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, project = "con"))
+        assertEquals(Status.Code.INVALID_ARGUMENT, reserved.status.code)
+        assertTrue(reserved.status.description!!.contains("'con' is reserved on Windows"), "${reserved.status.description}")
+        assertEquals(listOf("demo"), namesUnder(home.resolve("projects")))
+        assertEquals(listOf("acme-demo"), namesUnder(home.resolve("plugins")))
+        assertEquals(before, namesUnder(dir) to namesUnder(home))
+    }
+
+    private fun namesUnder(dir: Path): List<String> =
+        Files.list(dir).use { it.map { p -> p.fileName.toString() }.sorted().toList() }
 }

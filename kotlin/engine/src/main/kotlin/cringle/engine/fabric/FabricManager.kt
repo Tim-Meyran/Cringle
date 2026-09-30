@@ -13,6 +13,7 @@ import cringle.engine.classloading.FabricClassLoaders
 import cringle.packaging.Blueprint
 import cringle.packaging.ManifestJson
 import cringle.packaging.PackageFormatException
+import cringle.packaging.PackageNames
 import cringle.packaging.PackageValidator
 import cringle.packaging.PluginManifest
 import cringle.packaging.PluginPackage
@@ -123,7 +124,9 @@ public class LocalFabricDeployer(
     private class LoadedPlugin(val root: Path, val manifest: PluginManifest, val schemas: Map<String, String>, val trust: PluginTrust)
 
     override fun create(request: DeployRequest): FabricRuntime {
-        val projectRoot = home.resolve("projects").resolve(request.projectName).resolve(request.projectVersion)
+        val projectRoot = home.resolve("projects")
+            .resolve(nameOf(request.projectName, "project name"))
+            .resolve(versionOf(request.projectVersion, "project version"))
         val projectManifest = try {
             ManifestJson.parseProject(read(projectRoot.resolve("cringle-project.json"), "project ${request.projectName}@${request.projectVersion}"))
         } catch (e: PackageFormatException) {
@@ -204,8 +207,10 @@ public class LocalFabricDeployer(
     }
 
     private fun load(plugin: DeployPlugin): LoadedPlugin {
-        val root = home.resolve("plugins").resolve(plugin.name).resolve(plugin.version)
         val label = "plugin ${plugin.name}@${plugin.version}"
+        val root = home.resolve("plugins")
+            .resolve(nameOf(plugin.name, "plugin name"))
+            .resolve(versionOf(plugin.version, "plugin version"))
         val manifest = try {
             ManifestJson.parsePlugin(read(root.resolve("cringle-plugin.json"), label))
         } catch (e: PackageFormatException) {
@@ -215,6 +220,18 @@ public class LocalFabricDeployer(
             throw FabricException("$label directory contains ${manifest.name}@${manifest.version}")
         }
         return LoadedPlugin(root, manifest, manifest.schemas.associateWith { read(root.resolve(it), it) }, plugin.trust)
+    }
+
+    /** The names and versions of a deploy request become directories of the Cringle home, so they are checked first. */
+    private fun nameOf(value: String, what: String): String = checked(value, what) { PackageNames.nameProblem(it) }
+
+    /** @see nameOf */
+    private fun versionOf(value: String, what: String): String = checked(value, what) { PackageNames.versionProblem(it) }
+
+    private inline fun checked(value: String, what: String, problem: (String) -> String?): String {
+        val p = problem(value)
+        if (p != null) throw FabricException("$what: $p")
+        return value
     }
 
     private fun read(file: Path, what: String): String {

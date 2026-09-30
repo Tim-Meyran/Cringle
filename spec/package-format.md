@@ -41,6 +41,21 @@ file), `name`, `version`, `dependencies`. Missing optional keys mean empty.
 - **dependencies**: object from package name to a version range string. The range is npm-style and only checked
   to be non-blank here; its syntax and resolution belong to the versioning specification (issue #6).
 
+Package names, block names and blueprint names use the `name` grammar above. Names that become a file or directory
+name of a fabric, and references to such names, use the **identifier** grammar below, which is looser but excludes
+everything that could leave a directory:
+
+- **identifier**: `[A-Za-z0-9]([A-Za-z0-9._-]{0,62}[A-Za-z0-9])?` — 1 to 64 characters from letters, digits, `.`,
+  `-` and `_`, never starting or ending with a separator.
+- Not allowed are the names Windows reserves for files and directories (`aux`, `con`, `nul`, `prn`, `com1` to
+  `com9`, `lpt1` to `lpt9`), whatever the extension: Windows refuses `con.txt` just like `con`.
+
+Identifiers are the block `id` and the `block` and `port` of a tether endpoint in a blueprint, the port `name` of a
+block definition, and the `blueprint` a fabric config refers to. They are rejected when a package is read and again
+when it is validated, with the path of the offending value and a message; the engine additionally checks every
+name and version of a deploy request against the same rules before it builds a path, and refuses a path that would
+leave the directory it belongs to.
+
 ### 3.1 Plugin manifest
 
 | Key | Type | Meaning |
@@ -66,9 +81,9 @@ Projects and plugins have **no** JAR list: only plugins carry code.
 
 Object with keys `name` (block name, same grammar as package names), `schemas` (schema references the block
 uses, `namespace/Name`), `ports`, `requiredDrivers` (driver ids, unique) and optional `configSchema`. A port has
-`name` (unique per block), `direction` (`IN` or `OUT`), `tetherTypes` (non-empty, values `REQUEST_RESPONSE`,
-`MESSAGE`, `STREAM`, `BYTE_STREAM`), `schema` and optional `varArg` (boolean, default `false`). This is exactly
-the model of `cringle.contract.BlockDefinition`. Within a project a block is addressed as
+`name` (identifier grammar of section 3, unique per block), `direction` (`IN` or `OUT`), `tetherTypes` (non-empty,
+values `REQUEST_RESPONSE`, `MESSAGE`, `STREAM`, `BYTE_STREAM`), `schema` and optional `varArg` (boolean, default
+`false`). This is exactly the model of `cringle.contract.BlockDefinition`. Within a project a block is addressed as
 `<pluginName>/<blockName>`.
 
 ## 5. Fabric config and blueprint
@@ -77,8 +92,9 @@ A fabric config entry is `{"blueprint": <name>, "instances": <n>, "roles": [...]
 (default 1, at least 1) copies of the blueprint on engines that have all listed logical roles and labels.
 Fabric configs never name concrete engines. This is the **only** place where placement is expressed.
 
-A blueprint is `{"name", "blocks", "tethers"}`. It has no version of its own and no engine, role or label
-fields, so it always runs entirely inside one engine (chapter 9.1); any such key is rejected as unknown.
+A blueprint is `{"name", "blocks", "tethers"}`; its `name` uses the package-name grammar of section 3. It has no
+version of its own and no engine, role or label fields, so it always runs entirely inside one engine
+(chapter 9.1); any such key is rejected as unknown.
 
 - Block: `id` (unique within the blueprint), `block` (`pluginName/blockName`), optional `config` (object,
   default `{}`), optional `isolation` (`SHARED` default, or `PROCESS`), and `varArgCounts` (object from VarArg
@@ -93,8 +109,9 @@ fields, so it always runs entirely inside one engine (chapter 9.1); any such key
 Validators return a list of problems, each with a path and a message, and never stop at the first one. Plugin
 validation checks that every schema reference of every block resolves in the plugin's own schemas, the schemas of its
 dependencies and `cringle.std`, that schema documents parse and do not conflict, that block, provider and driver
-entries are unique, and that a plugin with blocks lists a provider. Project validation is given the already
-resolved plugins and checks, per blueprint:
+entries are unique, that a plugin with blocks lists a provider, and that every block name, port name and package
+name follows the grammar of section 3. Project validation is given the already resolved plugins and checks, per
+blueprint:
 
 1. every `block` exists; block ids are unique;
 2. `varArgCounts` has an entry for every VarArg port of the block and no entry for any other name;
@@ -104,7 +121,11 @@ resolved plugins and checks, per blueprint:
 5. the tether `type` is in the `tetherTypes` of both ports;
 6. the `schema` of the OUT port is assignable to the `schema` of the IN port (`schema.md`, section 7);
 7. `index` is present and below the `varArgCounts` size for a VarArg port, and absent for any other port;
-8. every fabric config names an existing blueprint.
+8. every fabric config names an existing blueprint;
+9. every block id, port name and blueprint reference follows the identifier grammar of section 3.
+
+Validation reports all of these together; reading a package reports the first violation it meets, because parsing
+stops there.
 
 ## 7. Hash
 

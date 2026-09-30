@@ -39,6 +39,48 @@ class PackageValidatorTest {
         assertTrue(p.any { it.message == "duplicate block id 'source'" && it.path.endsWith("$.blocks[1].id") }, p.toString())
     }
 
+    /** The finding for the id of the first block of the example blueprint, whatever the id is. */
+    private fun blockIdProblem(id: String): PackageProblem = problems(
+        Fixtures.main.copy(blocks = listOf(Fixtures.main.blocks[0].copy(id = id)) + Fixtures.main.blocks[1]),
+    ).single { it.path.endsWith("$.blocks[0].id") }
+
+    @Test
+    fun blockIdWithParentDirectoryIsRejected() {
+        assertTrue(blockIdProblem("../x").message.startsWith("invalid identifier '../x'"), "wrong message")
+    }
+
+    @Test
+    fun blockIdWithSlashIsRejected() {
+        assertTrue(blockIdProblem("a/b").message.startsWith("invalid identifier 'a/b'"), "wrong message")
+    }
+
+    @Test
+    fun blockIdWithBackslashIsRejected() {
+        assertTrue(blockIdProblem("a\\b").message.startsWith("invalid identifier 'a\\b'"), "wrong message")
+    }
+
+    @Test
+    fun blockIdReservedOnWindowsIsRejected() {
+        assertTrue(blockIdProblem("con").message.contains("'con' is reserved on Windows"), "wrong message")
+    }
+
+    @Test
+    fun emptyBlockIdIsRejected() {
+        assertTrue(blockIdProblem("").message.startsWith("invalid identifier ''"), "wrong message")
+    }
+
+    @Test
+    fun tooLongBlockIdIsRejected() {
+        val long = "x".repeat(65)
+        assertTrue(blockIdProblem(long).message.startsWith("invalid identifier '$long'"), "wrong message")
+    }
+
+    @Test
+    fun identifiersMayUseDotsDashesAndUnderscores() {
+        val renamed = Fixtures.main.copy(blocks = listOf(Fixtures.main.blocks[0].copy(id = "a.b-c_1")), tethers = emptyList())
+        assertEquals(emptyList<PackageProblem>(), problems(renamed))
+    }
+
     @Test
     fun unknownBlockIdAndPortInTether() {
         val p = single(edit(Fixtures.blueprint, "\"block\": \"source\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\"", "\"block\": \"ghost\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\""))

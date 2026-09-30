@@ -59,7 +59,7 @@ public object BlockDefinitionJson {
         }
         return construct(path) {
             PortDefinition(
-                JsonReading.string(o, "name", path),
+                ManifestJson.checkedIdentifier(JsonReading.string(o, "name", path), "$path.name"),
                 enumValue<PortDirection>(JsonReading.string(o, "direction", path), "$path.direction"),
                 types.toSet(),
                 ref(JsonReading.string(o, "schema", path), "$path.schema"),

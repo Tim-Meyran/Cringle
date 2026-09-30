@@ -106,6 +106,35 @@ class ManifestJsonTest {
         assertEquals("$.fabrics[0].instances", e.path)
         assertTrue(bad("""$head[{"blueprint":"b","engine":"e1"}]}""", ManifestJson::parseProject).path.endsWith("engine"))
         assertTrue(bad("""$head[{"instances":1}]}""", ManifestJson::parseProject).message!!.contains("missing key 'blueprint'"))
+        val ref = bad("""$head[{"blueprint":"../b"}]}""", ManifestJson::parseProject)
+        assertTrue(ref.path.endsWith("$.fabrics[0].blueprint") && ref.message!!.contains("invalid identifier"), "${ref.path} ${ref.message}")
+    }
+
+    @Test
+    fun rejectsIdentifiersThatAreNoNames() {
+        fun blueprint(body: String) = bad("""{"name":"m",$body}""") { ManifestJson.parseBlueprint(it, "f.json") }
+        for (id in listOf("../x", "a/b", "", "x".repeat(65), ".hidden", "trailing-", "con")) {
+            val e = blueprint(""""blocks":[{"id":"$id","block":"p/b"}]""")
+            val message = e.message!!
+            assertTrue(
+                e.path.endsWith("$.blocks[0].id") &&
+                    (message.contains("invalid identifier '$id'") || message.contains("reserved on Windows")),
+                "$id: ${e.path} $message",
+            )
+        }
+        val backslash = blueprint(""""blocks":[{"id":"a\\b","block":"p/b"}]""")
+        assertTrue(
+            backslash.path.endsWith("$.blocks[0].id") && backslash.message!!.contains("invalid identifier 'a\\b'"),
+            "${backslash.path} ${backslash.message}",
+        )
+        val port = blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"../p"},"to":{"block":"b","port":"q"}}]""")
+        assertTrue(port.path.endsWith("$.tethers[0].from.port") && port.message!!.contains("invalid identifier"), "${port.path} ${port.message}")
+        val ref = blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"../a","port":"p"},"to":{"block":"b","port":"q"}}]""")
+        assertTrue(ref.path.endsWith("$.tethers[0].from.block"), ref.path)
+        val named = bad("""{"name":"nul","blocks":[],"tethers":[]}""") { ManifestJson.parseBlueprint(it, "f.json") }
+        assertTrue(named.message!!.contains("'nul' is reserved on Windows"), named.message)
+        val definition = bad(pluginWith(""","blocks":[{"name":"b","ports":[{"name":"com1","direction":"IN","tetherTypes":["MESSAGE"],"schema":"cringle.std/String"}]}]"""))
+        assertTrue(definition.path.endsWith("$.blocks[0].ports[0].name"), definition.path)
     }
 
     @Test

@@ -19,11 +19,41 @@ public object PackageNames {
     /** Package name, block name and blueprint name grammar. */
     public val name: Regex = Regex("[a-z][a-z0-9]*([.-][a-z0-9]+)*")
 
+    /**
+     * Grammar of the identifiers that appear inside a blueprint and become file or directory names of a
+     * fabric: block ids, port names and blueprint references. Letters, digits, `.`, `-` and `_`, at most 64
+     * characters, never starting or ending with a separator.
+     */
+    public val identifier: Regex = Regex("[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?")
+
     /** Semantic version `MAJOR.MINOR.PATCH` with optional `-prerelease`. */
     public val version: Regex = Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?")
 
+    /** Names Windows refuses as a file or directory name, whatever the extension. */
+    private val windowsReserved: Regex = Regex("(aux|con|nul|prn|com[1-9]|lpt[1-9])", RegexOption.IGNORE_CASE)
+
     /** The manifest format number this implementation reads and writes. */
     public const val FORMAT: Int = 1
+
+    /** Why [value] is not a valid [name], or `null` if it is. */
+    public fun nameProblem(value: String): String? = when {
+        !name.matches(value) -> "invalid name '$value': expected ${name.pattern}"
+        else -> reserved(value)
+    }
+
+    /** Why [value] is not a valid [identifier], or `null` if it is. */
+    public fun identifierProblem(value: String): String? = when {
+        !identifier.matches(value) -> "invalid identifier '$value': expected ${identifier.pattern}"
+        else -> reserved(value)
+    }
+
+    /** Why [value] is not a valid [version], or `null` if it is. */
+    public fun versionProblem(value: String): String? =
+        if (version.matches(value)) null else "invalid version '$value': expected MAJOR.MINOR.PATCH[-prerelease]"
+
+    /** Windows also refuses `con.txt`, so the part before the first `.` decides. */
+    private fun reserved(value: String): String? = value.substringBefore('.').takeIf { windowsReserved.matches(it) }
+        ?.let { "'$it' is reserved on Windows and cannot be used as a file or directory name" }
 }
 
 /** JSON (de)serialization of manifests and blueprints (`spec/package-format.md`, sections 3 to 6). */
@@ -99,16 +129,19 @@ public object ManifestJson {
 
     private fun name(o: JsonObject, file: String): String = checkedName(JsonReading.string(o, "name", file), "$file $.name")
 
-    private fun checkedName(value: String, path: String): String {
-        if (!PackageNames.name.matches(value)) throw PackageFormatException(path, "invalid name '$value': expected ${PackageNames.name.pattern}")
+    private fun checkedName(value: String, path: String): String = checked(value, path) { PackageNames.nameProblem(it) }
+
+    /** Rejects anything that is not a valid identifier (`cringle.packaging.PackageNames.identifier`). */
+    internal fun checkedIdentifier(value: String, path: String): String = checked(value, path) { PackageNames.identifierProblem(it) }
+
+    private inline fun checked(value: String, path: String, problem: (String) -> String?): String {
+        val p = problem(value)
+        if (p != null) throw PackageFormatException(path, p)
         return value
     }
 
-    private fun version(o: JsonObject, file: String): String {
-        val v = JsonReading.string(o, "version", file)
-        if (!PackageNames.version.matches(v)) throw PackageFormatException("$file $.version", "invalid version '$v': expected MAJOR.MINOR.PATCH[-prerelease]")
-        return v
-    }
+    private fun version(o: JsonObject, file: String): String =
+        checked(JsonReading.string(o, "version", file), "$file $.version") { PackageNames.versionProblem(it) }
 
     private fun dependencies(o: JsonObject): Map<String, String> {
         val deps = JsonReading.stringMap(o, "dependencies", "$")
@@ -124,7 +157,7 @@ public object ManifestJson {
         val instances = JsonReading.optInt(o, "instances", path) ?: 1
         if (instances < 1) throw PackageFormatException("$path.instances", "must be at least 1")
         return FabricConfig(
-            JsonReading.string(o, "blueprint", path),
+            checkedIdentifier(JsonReading.string(o, "blueprint", path), "$path.blueprint"),
             instances,
             JsonReading.stringList(o, "roles", path),
             JsonReading.stringMap(o, "labels", path),
@@ -142,7 +175,13 @@ public object ManifestJson {
                     ?: throw PackageFormatException("$path.varArgCounts.$k", "must be a non-negative integer")
             }
         } ?: emptyMap()
-        return BlueprintBlock(JsonReading.string(o, "id", path), JsonReading.string(o, "block", path), config, isolation, counts)
+        return BlueprintBlock(
+            checkedIdentifier(JsonReading.string(o, "id", path), "$path.id"),
+            JsonReading.string(o, "block", path),
+            config,
+            isolation,
+            counts,
+        )
     }
 
     private fun tether(o: JsonObject, path: String): TetherDef {
@@ -160,7 +199,11 @@ public object ManifestJson {
         JsonReading.keys(o, path, endpointKeys)
         val index = JsonReading.optInt(o, "index", path)
         if (index != null && index < 0) throw PackageFormatException("$path.index", "must not be negative")
-        return Endpoint(JsonReading.string(o, "block", path), JsonReading.string(o, "port", path), index)
+        return Endpoint(
+            checkedIdentifier(JsonReading.string(o, "block", path), "$path.block"),
+            checkedIdentifier(JsonReading.string(o, "port", path), "$path.port"),
+            index,
+        )
     }
 
     /** Writes `cringle-project.json`. */
