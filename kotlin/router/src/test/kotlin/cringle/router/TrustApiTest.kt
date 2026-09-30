@@ -114,6 +114,14 @@ class TrustApiTest {
     private fun listEngines(node: Node, me: Identity?): Outcome<ListEnginesResponse> =
         outcome { api(channel(node, me)).listEngines(ListEnginesRequest.newBuilder().setIncludeRemote(true).build()) }
 
+    /** The engine registers with its certificate and the secret. */
+    private fun register(router: Node, me: Identity, engine: Identity, id: String, secret: ByteArray?): Status.Code {
+        val builder = RegisterEngineRequest.newBuilder().setEngineId(EngineId.newBuilder().setValue(id)).setName(id).setManagementAddress("127.0.0.1:1")
+            .setCertificate(ByteString.copyFrom(engine.certificate.encoded))
+        if (secret != null) builder.setEnrollmentSecret(ByteString.copyFrom(secret))
+        return outcome { api(channel(router, me)).registerEngine(builder.build()) }.status.code
+    }
+
     /** The daemon announces the engine at [router], the engine registers with its certificate and the secret. */
     private fun enroll(router: Node, daemon: Identity, engine: Identity, id: String) {
         val secret = "secret-$id".toByteArray()
@@ -242,5 +250,39 @@ class TrustApiTest {
 
         val unknown = outcome { api(channel(a, null), admin).revokeRemoteRouter(RevokeRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:9999").build()) }
         assertEquals(Status.Code.NOT_FOUND, unknown.status.code)
+    }
+
+    @Test
+    fun enrollmentBindsTheKeyAndRefusesWrongReusedAndForeignSecrets() {
+        val r = node("r")
+        val daemon = peer("daemon", ComponentKind.DAEMON)
+        val e1 = peer("e1", ComponentKind.ENGINE)
+        val e2 = peer("e2", ComponentKind.ENGINE)
+        r.trust.add(TrustEntry(daemon.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
+
+        fun prepare(id: String, secret: String): Status.Code = outcome { api(channel(r, daemon)).prepareEngine(PrepareEngineRequest.newBuilder().setEngineId(EngineId.newBuilder().setValue(id)).setEnrollmentSecretHash(sha256(secret.toByteArray())).build()) }.status.code
+
+        assertEquals(Status.Code.OK, prepare("eng", "s1"))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e1, e1, "eng", "wrong".toByteArray()))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e1, e1, "eng", null))
+        // certificate of e1 on e2's connection
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e2, e1, "eng", "s1".toByteArray()))
+        assertTrue(r.trust.list().none { it.kind == TrustKind.ENGINE })
+
+        assertEquals(Status.Code.OK, register(r, e1, e1, "eng", "s1".toByteArray()))
+        val bound = r.trust.list().single { it.kind == TrustKind.ENGINE }
+        assertEquals(e1.publicKeyFingerprint, bound.fingerprint)
+        assertEquals("eng", bound.name)
+        assertEquals(null, bound.origin)
+        assertEquals(e1.publicKeyFingerprint, r.server.registry.engines(false).single().record.fingerprint)
+
+        assertEquals(Status.Code.OK, register(r, e1, e1, "eng", null))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e2, e2, "eng", "s1".toByteArray()))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e2, e2, "eng", null))
+
+        assertEquals(Status.Code.OK, prepare("eng2", "s2"))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e2, e2, "eng2", "s1".toByteArray()))
+        assertEquals(Status.Code.OK, register(r, e2, e2, "eng2", "s2".toByteArray()))
+        assertEquals(Status.Code.PERMISSION_DENIED, register(r, e1, e1, "eng2", null))
     }
 }
