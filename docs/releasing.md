@@ -62,29 +62,40 @@ The version of a release is the Git tag without the leading `v`: the tag `v1.2.3
 
 ## Making a release
 
-1. Make sure `master` is what should be released and `./gradlew build` is green.
-2. Tag it and push the tag:
+> **Note:** GitHub does not start Actions for this repository at the moment (billing), so `.github/workflows/release.yml` has never run and is **not verified**. Make releases by hand as described below. Do not push test tags.
+
+1. Make sure `master` is what should be released and `./gradlew build` (all modules, all tests) is green.
+2. Build the distribution with a concrete version number, for example:
 
    ```bash
-   git tag v1.2.3
-   git push origin v1.2.3
+   ./gradlew cringleDist -PreleaseVersion=0.6.0
    ```
 
-3. The workflow `.github/workflows/release.yml` runs on the tag. It checks that the tag is a version tag, builds on Linux with `./gradlew build -PreleaseVersion=1.2.3` (all tests, including `DistributionTest`, which checks the archives of this version), builds the distribution with `./gradlew cringleDist -PreleaseVersion=1.2.3` and creates the GitHub release with the two archives, `SHA256SUMS` and `manifest.json` attached. A tag with a pre-release part makes a pre-release.
-4. Check the release: download the archives and `SHA256SUMS` and run `sha256sum -c SHA256SUMS` (on Windows `Get-FileHash` against the manifest), unpack one and run `bin/cringle --version`.
+3. Create and push the tag manually:
 
-The workflow runs on Linux only: the archives do not depend on the platform they are built on, and the start scripts are templates (`dist/templates`) that the build fills in for both platforms. `DistributionTest` starts the archive of the platform it runs on and reads the other one; a release is therefore only started on Linux by the build that makes it. Run `./gradlew :cli:test` on Windows as well before a release.
+   ```bash
+   git tag v0.6.0
+   git push origin v0.6.0
+   ```
 
-### Checking the release workflow
+4. Verify locally that `bin/cringle --version` prints `cringle 0.6.0`, that an unpacked archive starts, and that the daemon can start engine processes (`DistributionTest` checks all of this for the archive of your platform; `./gradlew :cli:test --tests cringle.cli.DistributionTest -PreleaseVersion=0.6.0`).
+5. Upload the artifacts to a GitHub release:
 
-`release.yml` can only run on GitHub, so it is checked by hand with a test tag, in a fork or in the repository when the release process changes:
+   ```bash
+   gh release create v0.6.0 \
+     build/dist/cringle-0.6.0-linux.tar.gz \
+     build/dist/cringle-0.6.0-windows.zip \
+     build/dist/SHA256SUMS \
+     build/dist/manifest.json \
+     --generate-notes
+   ```
 
-1. Push a tag like `v0.0.1-test.1`.
-2. The run of the workflow `Release` has to go through, and the release `Cringle 0.0.1-test.1` (a pre-release) has to have the four files attached: both archives, `SHA256SUMS` and `manifest.json`.
-3. Download them and check them as in step 4 above; `bin/cringle --version` has to print `cringle 0.0.1-test.1`.
-4. Delete the test release and the tag: `gh release delete v0.0.1-test.1 --cleanup-tag --yes`.
+### Notes
 
-A tag that is not a version (`vnext`) has to fail the first step of the run with the message that names the tag.
+- **Linux start scripts:** the archive is checked for layout, shebang, line ends and permissions (755), and the scripts are only run with the `sh` of Git for Windows (error paths, syntax). They have not been run on a real Linux machine.
+- The workflow `.github/workflows/release.yml` is kept for when GitHub runs Actions again. Until it has run once on a real tag, treat it as unverified.
+- `lib/` holds no test libraries (JUnit, TestKit, test helpers); `DistributionTest` fails if it does.
+
 
 ## What is not covered
 

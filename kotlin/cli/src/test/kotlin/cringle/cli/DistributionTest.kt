@@ -2,6 +2,15 @@
 
 package cringle.cli
 
+import cringle.common.v1.EngineId
+import cringle.daemon.v1.CreateEngineRequest
+import cringle.daemon.v1.DaemonServiceGrpcKt
+import cringle.daemon.v1.EngineProcessState
+import cringle.daemon.v1.EngineRequest
+import cringle.engine.v1.EngineManagementServiceGrpc
+import cringle.engine.v1.GetStatusRequest
+import io.grpc.ManagedChannel
+import io.grpc.ManagedChannelBuilder
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -9,6 +18,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import java.util.zip.ZipFile
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -117,6 +127,22 @@ class DistributionTest {
         assertTrue(jars.any { it.startsWith("grpc-netty-shaded") } && jars.any { it.startsWith("kotlin-stdlib") }, "the runtime libraries are in lib/: $jars")
     }
 
+    /** What must never be shipped: test frameworks, the test helpers of this build and their support libraries. */
+    private val testLibraries = Regex("(?i)^(junit|opentest4j|apiguardian|testkit|mockk|mockito|kotlin-test|kotlinx-coroutines-test|assertj|hamcrest)")
+
+    /** `lib/` of both archives holds no test library and no TestKit, and both hold the same JARs. */
+    @Test
+    fun libHoldsNoTestLibrariesOrTestkit() {
+        val linux = tarEntries(linuxArchive).map { it.name }.filter { it.startsWith("$top/lib/") && it.endsWith(".jar") }.map { it.substringAfterLast('/') }.sorted()
+        val windows = zipEntries(windowsArchive).keys.filter { it.startsWith("$top/lib/") && it.endsWith(".jar") }.map { it.substringAfterLast('/') }.sorted()
+        assertEquals(linux, windows)
+        assertTrue(linux.isNotEmpty())
+        val found = linux.filter { testLibraries.containsMatchIn(it) }
+        assertTrue(found.isEmpty(), "test libraries in lib/: $found")
+        // printed so that the pull request can name the list
+        println("lib/ of $top (${linux.size} JARs): ${linux.joinToString(", ")}")
+    }
+
     // --- an unpacked archive starts ---
 
     /** AC: an unpacked archive runs `bin/cringle --version` and prints the version of the archive. */
@@ -134,6 +160,58 @@ class DistributionTest {
             assertTrue("usage:" in started.error, "$command has to print its usage: ${started.error}")
         }
     }
+
+    /**
+     * A daemon started from the unpacked archive starts an engine process: the engine classes are on the class path
+     * that is built from the JARs in lib, the engine reports RUNNING and answers on its management port.
+     */
+    @Test
+    fun aDaemonFromAnUnpackedArchiveStartsAnEngine() {
+        val home = unpack()
+        val cringleHome = Files.createDirectories(temp.resolve("cringle-home"))
+        val stderrFile = temp.resolve("daemon.err").toFile()
+        val builder = ProcessBuilder(script(home, "cringle-daemon").toString(), "--home", cringleHome.toString(), "--port", "0", "--insecure-dev-mode")
+        builder.environment().remove("CRINGLE_JVM_OPTS")
+        builder.environment()["JAVA_HOME"] = System.getProperty("java.home")
+        builder.redirectError(stderrFile)
+        val daemon = builder.start()
+        var channel: ManagedChannel? = null
+        try {
+            // the daemon prints `daemon-port=<port>` when it listens
+            val line = java.util.concurrent.CompletableFuture.supplyAsync { daemon.inputStream.bufferedReader().readLine() }
+                .get(120, TimeUnit.SECONDS)
+            assertTrue(line != null && line.startsWith("daemon-port="), "daemon output: $line; stderr: ${stderrFile.readText()}")
+            val port = line.substringAfter("=").trim().toInt()
+            channel = ManagedChannelBuilder.forAddress("127.0.0.1", port).usePlaintext().build()
+            val api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
+            val engineId = EngineId.newBuilder().setValue("dist-e1").build()
+            runBlocking {
+                api.createEngine(CreateEngineRequest.newBuilder().setEngineId("dist-e1").setName("From the archive").build())
+                val started = api.startEngine(EngineRequest.newBuilder().setEngineId(engineId).build())
+                assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_RUNNING, started.state, "engine logs: ${engineLogs(cringleHome)}")
+                assertTrue(started.managementPort > 0 && started.pid > 0)
+                val engineChannel = ManagedChannelBuilder.forAddress("127.0.0.1", started.managementPort).usePlaintext().build()
+                try {
+                    val status = EngineManagementServiceGrpc.newBlockingStub(engineChannel).getStatus(GetStatusRequest.getDefaultInstance())
+                    assertEquals("dist-e1", status.engineId.value)
+                    assertEquals("From the archive", status.name)
+                } finally {
+                    engineChannel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+                }
+                api.stopEngine(EngineRequest.newBuilder().setEngineId(engineId).build())
+            }
+        } finally {
+            channel?.shutdownNow()
+            // on Windows the start script is a cmd.exe whose child is the JVM: end the whole tree
+            daemon.descendants().forEach { it.destroyForcibly() }
+            daemon.destroyForcibly()
+            daemon.waitFor(30, TimeUnit.SECONDS)
+        }
+    }
+
+    private fun engineLogs(cringleHome: Path): String = runCatching {
+        Files.walk(cringleHome).use { s -> s.filter { it.toString().endsWith(".log") }.toList().joinToString("\n") { "${it.fileName}:\n${Files.readString(it)}" } }
+    }.getOrDefault("(none)")
 
     /**
      * AC: without a JDK 21 every start script stops with exit code 1 and a message that names the requirement, for a
