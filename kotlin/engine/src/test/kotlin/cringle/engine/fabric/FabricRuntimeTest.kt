@@ -281,43 +281,68 @@ class FabricRuntimeTest {
         }
     }
 
-    @Test
-    fun theTethersAreOpenBeforeTheBlocksStart() = runBlocking {
-        val rec = Recorder()
-        val buffered = listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("b", "in"), DeliveryPolicy.BUFFER))
+    /** `a.out -> b.in` as a MESSAGE tether with the given delivery policy, and `a` sending [value] in its `start()`. */
+    private fun sendingInStart(id: String, rec: Recorder, policy: DeliveryPolicy, logger: FabricLogger = FabricLogger { _, _ -> }, failStart: (String) -> Boolean = { false }, restart: Map<String, RestartPolicy> = emptyMap()): FabricRuntime =
         FabricRuntime(
             spec(
-                "f1",
+                id,
                 rec,
-                tethers = buffered,
+                tethers = listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("b", "in"), policy)),
                 tetherConfig = TetherConfig(SchemaRegistry()),
+                logger = logger,
+                failStart = failStart,
+                restart = restart,
                 onStart = { name, context -> if (name == "one") context.ports.port("out").send("early") },
             ),
-        ).use { fabric ->
-            fabric.start()
-            // 'two' is started after 'one' has sent, but its tether is open and buffers the value
-            withTimeout(10.seconds) { while ("two.got:early" !in rec.events) delay(10) }
-        }
-        val dropped = Recorder()
-        val droppedLogs = CopyOnWriteArrayList<String>()
-        FabricRuntime(
-            spec(
-                "f2",
-                dropped,
-                tethers = listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("b", "in"), DeliveryPolicy.DROP)),
-                tetherConfig = TetherConfig(SchemaRegistry()),
-                logger = FabricLogger { _, m -> droppedLogs += m },
-                // the receiver never runs, so the value sent in start() has nobody to go to
-                failStart = { it == "two" },
-                onStart = { name, context -> if (name == "one") context.ports.port("out").send("early") },
-            ),
-        ).use { fabric ->
-            fabric.start()
-            withTimeout(10.seconds) { while (droppedLogs.none { it.contains("a.out -> b.in") && it.contains("not running") }) delay(10) }
-            assertFalse("two.got:early" in dropped.events, "DROP loses the value of a block that is not running")
+        )
+
+    /**
+     * The tethers are open before the blocks start, and deliveries run on the fabric thread, which is busy starting the
+     * blocks: a value that `a` sends in `start()` reaches `b`, which starts after it and starts normally, once start-up
+     * is done. The delivery policy does not matter for that: `DROP` only drops a value whose receiver is not running when
+     * it is delivered (spec/tether.md, "Start and stop").
+     */
+    @Test
+    fun aValueSentInStartReachesALaterStartedReceiverWithBufferAndWithDrop() = runBlocking {
+        for (policy in listOf(DeliveryPolicy.BUFFER, DeliveryPolicy.DROP)) {
+            val rec = Recorder()
+            val logs = CopyOnWriteArrayList<String>()
+            sendingInStart("f-$policy", rec, policy, FabricLogger { _, m -> logs += m }).use { fabric ->
+                fabric.start()
+                withTimeout(10.seconds) { while ("two.got:early" !in rec.events) delay(10) }
+                assertTrue(logs.none { it.contains("not running") }, "nothing was dropped with $policy: $logs")
+            }
         }
     }
 
+    /**
+     * If the start of the receiver fails, it is not running when the value is delivered, so the delivery policy
+     * decides: `DROP` drops the value and logs it, and the receiver never gets it.
+     */
+    @Test
+    fun aValueSentInStartIsDroppedWithDropWhenTheReceiversStartFails() = runBlocking {
+        val rec = Recorder()
+        val logs = CopyOnWriteArrayList<String>()
+        sendingInStart("f2", rec, DeliveryPolicy.DROP, FabricLogger { _, m -> logs += m }, failStart = { it == "two" }).use { fabric ->
+            fabric.start()
+            withTimeout(10.seconds) { while (logs.none { it.contains("a.out -> b.in") && it.contains("not running") }) delay(10) }
+            assertFalse("two.got:early" in rec.events, "DROP loses the value of a block that is not running")
+        }
+    }
+
+    /** With `BUFFER` the value is not lost when the start of the receiver fails: it arrives when the receiver runs after its restart. */
+    @Test
+    fun aValueSentInStartIsKeptWithBufferWhenTheReceiversStartFailsAndItRestarts() = runBlocking {
+        val rec = Recorder()
+        val attempts = AtomicInteger()
+        val policy = mapOf("b" to RestartPolicy(maxRetries = 3, backoff = 1.milliseconds))
+        sendingInStart("f3", rec, DeliveryPolicy.BUFFER, failStart = { it == "two" && attempts.incrementAndGet() == 1 }, restart = policy).use { fabric ->
+            fabric.start()
+            withTimeout(10.seconds) { while ("two.got:early" !in rec.events) delay(10) }
+            assertTrue(attempts.get() >= 2, "the receiver failed its first start and ran after the restart")
+            assertEquals(1, rec.events.count { it == "two.got:early" }, "the value arrives once")
+        }
+    }
     @Test
     fun untrustedPluginFailsClosedBeforeAnythingIsStarted() = runBlocking {
         val rec = Recorder()

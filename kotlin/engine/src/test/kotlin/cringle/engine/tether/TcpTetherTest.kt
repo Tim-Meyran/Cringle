@@ -108,6 +108,11 @@ class TcpTetherTest {
 
     private fun tcp2(port: Int?) = TetherDef(TetherType.TCP, Endpoint("s", "out2"), Endpoint("d", "in2"), DeliveryPolicy.DROP, port)
 
+    /**
+     * First half of the M2 criterion ("Fertig, wenn" in `docs/Architecture.md`): two blocks exchange bytes over TCP. TCP
+     * is a byte transport for external communication; the second half, a schema violation at a local tether, is
+     * `TetherNetworkTest.schemaViolationsAreReportedWithSchemaAndPath`.
+     */
     @Test
     fun twoBlocksExchangeBytesOverARealTcpConnection(): Unit = runBlocking {
         BuiltinDrivers(dir.resolve("engine")).use { drivers ->
