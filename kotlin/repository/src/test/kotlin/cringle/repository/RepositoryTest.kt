@@ -9,6 +9,7 @@ import cringle.packaging.PackageWriter
 import cringle.packaging.PluginManifest
 import cringle.packaging.ProjectManifest
 import cringle.packaging.Resolver
+import cringle.packaging.Version
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
 import io.grpc.Status
@@ -16,6 +17,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -71,6 +73,58 @@ class RepositoryTest {
         assertEquals(RepositoryError.INVALID, code { r.publish(project("shop", "0.1.0", mapOf("missing" to "^1.0.0"))) })
         assertEquals(RepositoryError.HASH_MISMATCH, code { r.publish(plugin("a-b", "1.0.0"), "00") })
         assertTrue(r.list().isEmpty())
+    }
+
+    @Test
+    fun aVersionThatCannotBeParsedIsRejectedBeforeAnythingIsWritten() {
+        val r = repo()
+        for (bad in listOf("99999999999.0.0", "2147483648.0.0", "1.0.0-01", "1.0.0-1.02")) {
+            assertEquals(RepositoryError.INVALID, code { r.publish(plugin("acme-core", bad)) }, bad)
+            assertEquals(RepositoryError.INVALID, code { r.publish(project("shop", bad)) }, bad)
+        }
+        assertTrue(r.list().isEmpty())
+        assertFalse(Files.exists(dir.resolve("repo/packages")))
+        assertFalse(Files.exists(dir.resolve("repo/index.json")))
+        // The repository keeps working, and a version nobody may write twice is refused twice.
+        r.publish(plugin("acme-core", "1.0.0-1"))
+        assertEquals(listOf("1.0.0-1"), r.versions("acme-core").map { it.version })
+        assertEquals(listOf(Version.parse("1.0.0-1")), r.asSource().versions("acme-core"))
+        assertEquals(RepositoryError.ALREADY_EXISTS, code { r.publish(plugin("acme-core", "1.0.0-1")) })
+        assertEquals(RepositoryError.INVALID, code { r.publish(plugin("acme-core", "1.0.0-01")) })
+        assertEquals(RepositoryError.INVALID, code { r.publish(project("shop", "1.0.0-01")) })
+        assertEquals(1, r.list().size)
+    }
+
+    @Test
+    fun anIndexEntryWithAnUnparseableVersionIsLeftOutWithAWarning() {
+        val home = dir.resolve("repo")
+        repo().publish(plugin("acme-core", "1.0.0"))
+        repo().publish(plugin("other", "2.0.0"))
+        val index = home.resolve("index.json")
+        Files.writeString(index, Files.readString(index).replace("\"version\": \"1.0.0\"", "\"version\": \"99999999999.0.0\""))
+
+        val warnings = ArrayList<String>()
+        val r = PackageRepository(home, warn = { warnings += it })
+        assertEquals(listOf("other"), r.list().map { it.name })
+        assertEquals(listOf("2.0.0"), r.versions("other").map { it.version })
+        assertTrue(r.versions("acme-core").isEmpty())
+        assertEquals(listOf(Version.parse("2.0.0")), r.asSource().versions("other"))
+        assertEquals(1, warnings.size, warnings.toString())
+        assertTrue(warnings.single().contains("99999999999.0.0"), warnings.single())
+
+        // The entry is really gone, so the same version can be published again.
+        r.publish(plugin("acme-core", "1.0.0"))
+        assertEquals(2, r.list().size)
+        assertEquals(listOf("1.0.0"), r.versions("acme-core").map { it.version })
+    }
+
+    @Test
+    fun aBrokenIndexStillKeepsTheRepositoryFromStarting() {
+        val home = dir.resolve("repo")
+        repo().publish(plugin("acme-core", "1.0.0"))
+        val index = home.resolve("index.json")
+        Files.writeString(index, Files.readString(index).replace("\"sizeBytes\"", "\"groesse\""))
+        assertThrows<RepositoryIndexException> { PackageRepository(home) }
     }
 
     @Test

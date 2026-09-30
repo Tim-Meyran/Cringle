@@ -4,6 +4,7 @@ package cringle.packaging
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -33,6 +34,44 @@ class VersionTest {
         for (bad in listOf("1", "1.2", "01.2.3", "1.2.3.4", "v1.2.3", "1.2.3-", "1.2.3+build", "99999999999.0.0")) {
             assertThrows<IllegalArgumentException>(bad) { Version.parse(bad) }
         }
+    }
+
+    /** The examples of `spec/versioning.md`, section 1, in both directions. */
+    @Test
+    fun grammarAgreesWithTheVersioningSpecification() {
+        val chain = "1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < " +
+            "1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0"
+        assertEquals(chain.split(" < ").map(Version::parse), chain.split(" < ").map(Version::parse).sorted())
+        for (good in listOf("0.0.0", "1.0.0", "10.20.30", "1.0.0-0", "1.0.0-0a", "1.0.0-a.b", "1.0.0-x.7.z.92", "1.0.0-a-b")) {
+            assertEquals(null, PackageNames.versionProblem(good), good)
+            assertEquals(good, Version.parse(good).toString())
+        }
+        // No leading zeros, no build metadata, and numbers that fit in the Int of Version.
+        for (bad in listOf("01.2.3", "1.02.3", "1.2.03", "1.0.0-01", "1.0.0-1.02", "1.0.0-00", "1.0.0+build", "1.0.0-",
+            "1.0.0-1..2", "1.0.0-.1", "2147483648.0.0", "1.0.0.2147483648", "99999999999.0.0")) {
+            assertNotEquals(null, PackageNames.versionProblem(bad), bad)
+            assertThrows<IllegalArgumentException>(bad) { Version.parse(bad) }
+        }
+        assertEquals(Version.parse("2147483647.0.0"), Version.parse("2147483647.0.0"))
+    }
+
+    @Test
+    fun equalityAndHashCodeUseTheSamePartsAsTheOrder() {
+        val examples = listOf(
+            "0.0.0", "1.0.0", "1.0.0-0", "1.0.0-1", "1.0.0-alpha", "1.0.0-alpha.0", "1.0.0-alpha.1", "1.0.0-beta.11",
+            "1.0.0-rc.1", "1.0.1", "1.1.0", "2.0.0", "10.0.0",
+        )
+        for (a in examples) for (b in examples) {
+            val x = Version.parse(a)
+            val y = Version.parse(b)
+            assertEquals(x.compareTo(y) == 0, x == y, "$a vs $b")
+            if (x == y) assertEquals(x.hashCode(), y.hashCode(), "$a vs $b")
+        }
+        val set = examples.map { Version.parse(it) }.toHashSet()
+        for (text in examples) assertTrue(set.contains(Version.parse(text)), text)
+        // The spellings that made equals and hashCode disagree do not exist any more.
+        assertThrows<IllegalArgumentException> { Version(1, 0, 0, listOf("01")) }
+        assertThrows<IllegalArgumentException> { Version.parse("1.0.0-01") }
     }
 
     // range, then versions that must match, then versions that must not

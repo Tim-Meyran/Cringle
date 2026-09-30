@@ -55,9 +55,11 @@ public class PackageRepository(
     private val clock: Clock = Clock.systemUTC(),
     /** Packages larger than this are rejected. */
     public val maxPackageBytes: Long = 512L * 1024 * 1024,
+    /** Where content that is left out of the index is reported; by default the standard error stream of the process. */
+    private val warn: (String) -> Unit = { System.err.println("WARNING: $it") },
 ) {
     private val lock = Any()
-    private val index = IndexStore(dir.resolve("index.json"))
+    private val index = IndexStore(dir.resolve("index.json"), warn)
     private var data: IndexData = index.load()
 
     private fun packageFile(name: String, version: String): Path = dir.resolve("packages").resolve(name).resolve("$version.cringle")
@@ -125,12 +127,17 @@ public class PackageRepository(
 
     private fun checkIdentity(name: String, version: String, kind: PackageKind) {
         if (!PackageNames.name.matches(name)) throw RepositoryException(RepositoryError.INVALID, "invalid package name '$name'")
-        if (!PackageNames.version.matches(version)) throw RepositoryException(RepositoryError.INVALID, "invalid version '$version'")
+        val parsed = try {
+            Version.parse(version)
+        } catch (e: IllegalArgumentException) {
+            throw RepositoryException(RepositoryError.INVALID, e.message ?: "invalid version '$version'")
+        }
         val existing = data.records.filter { it.name == name }
         if (existing.any { it.kind != kind }) {
             throw RepositoryException(RepositoryError.ALREADY_EXISTS, "the name '$name' is already used by a ${existing.first().kind.jsonName}; names are unique across projects and plugins")
         }
-        if (existing.any { it.version == version }) {
+        // The index only holds versions that parse, so no entry needs a try here.
+        if (existing.any { Version.parse(it.version) == parsed }) {
             throw RepositoryException(RepositoryError.ALREADY_EXISTS, "$name@$version is already published; published versions are immutable, publish a new version")
         }
     }
