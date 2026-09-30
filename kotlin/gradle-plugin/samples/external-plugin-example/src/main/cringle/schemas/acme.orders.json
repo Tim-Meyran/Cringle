@@ -1,0 +1,16 @@
+{
+  "namespace": "acme.orders",
+  "types": {
+    "Order": {
+      "record": {
+        "id": "cringle.std/String",
+        "total": "cringle.std/Int"
+      }
+    },
+    "OrdersConfig": {
+      "record": {
+        "retries": "cringle.std/Int"
+      }
+    }
+  }
+}
