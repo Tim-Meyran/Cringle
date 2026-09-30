@@ -2,6 +2,7 @@
 
 package cringle.contract
 
+import java.time.Duration
 import kotlin.reflect.KClass
 
 /**
@@ -40,4 +41,11 @@ public interface DriverSet {
      * @throws IllegalArgumentException if no such driver was declared in the block definition.
      */
     public operator fun <T : Driver> get(type: KClass<T>): T
+
+    /**
+     * Waits at most [timeout] until everything the drivers of this set opened is really closed, for example a TCP port
+     * that is free again, and returns whether that happened. Closing a set never blocks a thread (Architecture
+     * chapter 10), so this is how a caller waits for the ports to be really free.
+     */
+    public suspend fun awaitClosed(timeout: Duration): Boolean = true
 }

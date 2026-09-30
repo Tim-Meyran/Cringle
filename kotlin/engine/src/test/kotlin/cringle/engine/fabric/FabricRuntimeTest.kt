@@ -15,10 +15,15 @@ import cringle.contract.PortRef
 import cringle.contract.SchemaRef
 import cringle.contract.TetherEvent
 import cringle.contract.TetherType
+import cringle.engine.tether.TetherConfig
 import cringle.packaging.Blueprint
 import cringle.packaging.BlueprintBlock
+import cringle.packaging.DeliveryPolicy
+import cringle.packaging.Endpoint
+import cringle.packaging.TetherDef
 import cringle.schema.SchemaRegistry
 import cringle.testkit.TestDriverSet
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -52,11 +57,18 @@ class FabricRuntimeTest {
         val threads = CopyOnWriteArrayList<String>()
     }
 
-    class RecordingBlock(private val name: String, private val rec: Recorder, private val failStart: () -> Boolean) : Block {
+    class RecordingBlock(
+        private val name: String,
+        private val rec: Recorder,
+        private val failStart: () -> Boolean,
+        private val onStart: suspend (String, BlockContext) -> Unit = { _, _ -> },
+    ) : Block {
+        lateinit var context: BlockContext
         var config: Map<String, Any?> = emptyMap()
         var received = 0
 
         override suspend fun init(context: BlockContext) {
+            this.context = context
             config = context.config
             rec.events += "$name.init"
             rec.threads += Thread.currentThread().name
@@ -64,6 +76,7 @@ class FabricRuntimeTest {
 
         override suspend fun start() {
             if (failStart()) throw IllegalStateException("start failed")
+            onStart(name, context)
             rec.events += "$name.start"
         }
 
@@ -111,23 +124,28 @@ class FabricRuntimeTest {
         trust: PluginTrust = PluginTrust.TRUSTED,
         restart: Map<String, RestartPolicy> = emptyMap(),
         failStart: (String) -> Boolean = { false },
+        onStart: suspend (String, BlockContext) -> Unit = { _, _ -> },
         logger: FabricLogger = FabricLogger { _, _ -> },
         watchdog: WatchdogConfig = WatchdogConfig(enabled = false),
         wiring: PortWiring = UnconnectedPorts,
+        tethers: List<TetherDef> = emptyList(),
+        tetherConfig: TetherConfig? = null,
+        paths: FabricPaths? = null,
     ): FabricSpec {
         val defs = listOf(definition("one"), definition("two"))
-        val provider = Provider(defs) { name -> RecordingBlock(name, rec) { failStart(name) } }
+        val provider = Provider(defs) { name -> RecordingBlock(name, rec, { failStart(name) }, onStart) }
         return FabricSpec(
             id = id,
-            blueprint = Blueprint("main", blocks, emptyList()),
+            blueprint = Blueprint("main", blocks, tethers),
             resolver = BlockResolver { ref -> defs.firstOrNull { "p/${it.name}" == ref }?.let { ResolvedBlock(provider, it, trust) } },
             drivers = DriverFactory { _, _ -> TestDriverSet() },
-            paths = FabricPaths(dir.resolve("engine"), id),
+            paths = paths ?: FabricPaths(dir.resolve("engine"), id),
             restart = restart,
             schemas = SchemaRegistry(),
             logger = logger,
             watchdog = watchdog,
             wiring = wiring,
+            tethers = tetherConfig,
         )
     }
 
@@ -240,6 +258,63 @@ class FabricRuntimeTest {
             fabric.stop()
             assertEquals(BlockState.STOPPED, fabric.status.value.blocks[0].state)
             assertEquals(1, rec.events.count { it == "one.init" })
+        }
+    }
+
+    @Test
+    fun aFailedStartLeavesNothingBehindAndCanBeRetried() = runBlocking {
+        val rec = Recorder()
+        val paths = FabricPaths(dir.resolve("engine"), "f1")
+        // a file where the working directory has to be makes creating the directories fail
+        Files.createDirectories(paths.root)
+        Files.writeString(paths.working, "in the way")
+        FabricRuntime(spec("f1", rec, paths = paths)).use { fabric ->
+            val e = assertThrows<FabricException> { fabric.start() }
+            assertTrue(e.message!!.contains("cannot be started"), e.message)
+            assertEquals(FabricState.FAILED, fabric.status.value.state)
+            assertTrue(rec.events.isEmpty(), "no block is touched by a start that fails before the blocks run")
+            // the fabric is stopped internally, so the start can be repeated once the cause is gone
+            Files.delete(paths.working)
+            fabric.start()
+            assertEquals(FabricState.RUNNING, fabric.status.value.state)
+            assertTrue(rec.events.contains("one.start") && rec.events.contains("two.start"), rec.events.toString())
+        }
+    }
+
+    @Test
+    fun theTethersAreOpenBeforeTheBlocksStart() = runBlocking {
+        val rec = Recorder()
+        val buffered = listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("b", "in"), DeliveryPolicy.BUFFER))
+        FabricRuntime(
+            spec(
+                "f1",
+                rec,
+                tethers = buffered,
+                tetherConfig = TetherConfig(SchemaRegistry()),
+                onStart = { name, context -> if (name == "one") context.ports.port("out").send("early") },
+            ),
+        ).use { fabric ->
+            fabric.start()
+            // 'two' is started after 'one' has sent, but its tether is open and buffers the value
+            withTimeout(10.seconds) { while ("two.got:early" !in rec.events) delay(10) }
+        }
+        val dropped = Recorder()
+        val droppedLogs = CopyOnWriteArrayList<String>()
+        FabricRuntime(
+            spec(
+                "f2",
+                dropped,
+                tethers = listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("b", "in"), DeliveryPolicy.DROP)),
+                tetherConfig = TetherConfig(SchemaRegistry()),
+                logger = FabricLogger { _, m -> droppedLogs += m },
+                // the receiver never runs, so the value sent in start() has nobody to go to
+                failStart = { it == "two" },
+                onStart = { name, context -> if (name == "one") context.ports.port("out").send("early") },
+            ),
+        ).use { fabric ->
+            fabric.start()
+            withTimeout(10.seconds) { while (droppedLogs.none { it.contains("a.out -> b.in") && it.contains("not running") }) delay(10) }
+            assertFalse("two.got:early" in dropped.events, "DROP loses the value of a block that is not running")
         }
     }
 

@@ -33,6 +33,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.time.Duration
 import java.util.concurrent.Executors
 import cringle.engine.tether.TetherConfig
 import cringle.engine.tether.TetherNetwork
@@ -84,6 +85,11 @@ public class FabricSpec(
  */
 public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     private class Entry(val instance: BlueprintBlock, val resolved: ResolvedBlock, val config: Map<String, Any?>)
+
+    private companion object {
+        /** How long stopping waits for the TCP listeners of the tethers, for all of them together. */
+        private val TCP_CLOSE_TIMEOUT: Duration = Duration.ofSeconds(2)
+    }
 
     private val entries: List<Entry>
     private val network: TetherNetwork?
@@ -190,20 +196,29 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             startFailure = null
             phase = FabricState.STARTING
             publish()
-            spec.paths.create(entries.map { it.instance.id })
-            log(FabricLogger.Level.INFO, "starting fabric '${spec.id}' (blueprint '${spec.blueprint.name}')")
             try {
+                spec.paths.create(entries.map { it.instance.id })
+                log(FabricLogger.Level.INFO, "starting fabric '${spec.id}' (blueprint '${spec.blueprint.name}')")
+                // The tethers are open before the first block runs: a message a block sends in start() finds the tether
+                // open, and a block that is not running yet is handled by the delivery policy of its tethers.
                 network?.open { blockId, event -> deliver(blockId, event) }
-            } catch (e: TetherWiringException) {
-                val message = "fabric '${spec.id}' cannot be started: ${e.message}"
-                startFailure = message
+                withContext(dispatcher) {
+                    hosts.forEach { it.reset() }
+                    for (host in hosts) host.bringUp()
+                }
+            } catch (e: CancellationException) {
+                // a cancelled start leaves nothing behind, so the fabric can be started again
+                network?.close()
                 phase = FabricState.STOPPED
                 publish()
-                throw FabricException(message)
-            }
-            withContext(dispatcher) {
-                hosts.forEach { it.reset() }
-                for (host in hosts) host.bringUp()
+                throw e
+            } catch (e: Exception) {
+                val message = "fabric '${spec.id}' cannot be started: ${e.message}"
+                startFailure = message
+                network?.close()
+                phase = FabricState.STOPPED
+                publish()
+                throw FabricException(message, e)
             }
             phase = FabricState.RUNNING
             publish()
@@ -217,6 +232,10 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             phase = FabricState.STOPPING
             publish()
             network?.close()
+            // the sockets of the TCP tethers are closed without blocking; the ports are free a moment later
+            if (network != null && network.awaitClosed(TCP_CLOSE_TIMEOUT) == false) {
+                log(FabricLogger.Level.WARN, "fabric '${spec.id}': TCP listeners of the tethers were not closed within $TCP_CLOSE_TIMEOUT")
+            }
             withContext(dispatcher) { hosts.asReversed().forEach { it.stopHost() } }
             phase = FabricState.STOPPED
             log(FabricLogger.Level.INFO, "fabric '${spec.id}' stopped")
@@ -415,6 +434,9 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
                 val set = driverSet
                 driverSet = null
                 (set as? AutoCloseable)?.let { runCatching { it.close() } }
+                if (set != null && !set.awaitClosed(TCP_CLOSE_TIMEOUT)) {
+                    log(FabricLogger.Level.WARN, "block '$id': the drivers were not closed within $TCP_CLOSE_TIMEOUT")
+                }
             }
         }
 

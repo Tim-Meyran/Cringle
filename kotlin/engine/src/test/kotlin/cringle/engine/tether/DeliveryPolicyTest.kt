@@ -19,6 +19,7 @@ import cringle.schema.SchemaRegistry
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -31,7 +32,7 @@ import org.junit.jupiter.api.assertThrows
 
 class DeliveryPolicyTest {
     private val string = SchemaRef("cringle.std", "String")
-    private val types = setOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE)
+    private val types = TetherType.entries.toSet()
     private val src = BlockDefinition("src", emptyList(), listOf(PortDefinition("out", PortDirection.OUT, types, string)), emptyList())
     private val dst = BlockDefinition("dst", emptyList(), listOf(PortDefinition("in", PortDirection.IN, types, string)), emptyList())
 
@@ -42,7 +43,14 @@ class DeliveryPolicyTest {
         val failures = CopyOnWriteArrayList<String>()
     }
 
-    private fun network(type: TetherType, policy: DeliveryPolicy, receiver: Receiver, capacity: Int = 64): TetherNetwork {
+    private fun network(
+        type: TetherType,
+        policy: DeliveryPolicy,
+        receiver: Receiver,
+        capacity: Int = 64,
+        timeout: Duration = Duration.ofSeconds(5),
+        onEvent: suspend (TetherEvent) -> Unit = { if (it is TetherEvent.Request) it.respond("re:" + it.value) },
+    ): TetherNetwork {
         val blueprint = Blueprint(
             "bp",
             listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst")),
@@ -51,12 +59,12 @@ class DeliveryPolicyTest {
         val network = TetherNetwork.create(
             blueprint,
             mapOf("s" to src, "d" to dst),
-            TetherConfig(SchemaRegistry(), capacity, Duration.ofSeconds(5)),
+            TetherConfig(SchemaRegistry(), capacity, timeout),
         ) { _, e -> receiver.failures += e.message.orEmpty() }
         runBlocking { network.open { _, event ->
             if (!receiver.running) throw FabricException("block 'd' is not running")
             receiver.events += event
-            if (event is TetherEvent.Request) event.respond("re:" + event.value)
+            onEvent(event)
         } }
         return network
     }
@@ -145,6 +153,60 @@ class DeliveryPolicyTest {
             r2.running = true
             Thread.sleep(300)
             assertTrue(r2.events.isEmpty(), "the abandoned request must not be delivered later")
+        }
+    }
+
+    @Test
+    fun stoppingFailsAWaitingSenderWithTheReasonInsteadOfCancellingIt() {
+        val r = Receiver()
+        network(TetherType.MESSAGE, DeliveryPolicy.BUFFER, r, capacity = 2).use { n ->
+            runBlocking {
+                var sent = 0
+                val sender = async { runCatching { repeat(10) { out(n).send("m$it"); sent++ } } }
+                delay(500)
+                assertTrue(sent < 10, "the sender must wait for buffer space, sent=$sent")
+                n.close()
+                val e = withTimeout(2.seconds) { sender.await() }.exceptionOrNull()
+                assertTrue(e is TetherDeliveryException, "the sender must see the stop as its own failure, got $e")
+                assertTrue(e!!.message!!.contains("the fabric is stopping"), e.message)
+                assertTrue(sent < 10, "the sender must not have sent everything before the stop")
+            }
+        }
+    }
+
+    @Test
+    fun stoppingFailsAWaitingRequestAtOnceAndNotWithItsTimeout() {
+        val r = Receiver()
+        r.running = true
+        val taken = CompletableDeferred<Unit>()
+        val n = network(TetherType.REQUEST_RESPONSE, DeliveryPolicy.BUFFER, r, timeout = Duration.ofSeconds(30)) {
+            taken.complete(Unit)
+        }
+        n.use {
+            runBlocking {
+                val answer = async { runCatching { out(n).request("q") } }
+                withTimeout(10.seconds) { taken.await() }
+                val start = System.nanoTime()
+                n.close()
+                val e = withTimeout(2.seconds) { answer.await() }.exceptionOrNull()
+                val millis = (System.nanoTime() - start) / 1_000_000
+                assertTrue(e is TetherDeliveryException, "got $e")
+                assertTrue(e!!.message!!.contains("the fabric is stopping"), e.message)
+                assertTrue(millis < 5_000, "the request must fail at once, not after its 30 s timeout, took $millis ms")
+            }
+        }
+    }
+
+    @Test
+    fun closedStreamsLeaveTheNetwork() {
+        val r = Receiver()
+        r.running = true
+        network(TetherType.STREAM, DeliveryPolicy.BUFFER, r) { if (it is TetherEvent.StreamOpened) it.stream.close() }.use { n ->
+            runBlocking {
+                repeat(10_000) { out(n).openStream().close() }
+                withTimeout(30.seconds) { while (n.openStreamChannelCount > 0) delay(5) }
+            }
+            assertEquals(0, n.openStreamChannelCount)
         }
     }
 }

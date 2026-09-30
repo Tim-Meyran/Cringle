@@ -9,18 +9,20 @@ import cringle.contract.DriverSet
 import cringle.engine.fabric.DriverFactory
 import cringle.engine.fabric.FabricPaths
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.reflect.KClass
 
 /**
  * The built-in drivers of one engine (Architecture chapter 11): exactly one logging service, one port registry per
  * engine. Blocks get views of these that are bound to their identity (fabric and block id), see [factoryFor].
  */
-public class BuiltinDrivers(engineDir: Path) : AutoCloseable {
+public class BuiltinDrivers(
+    engineDir: Path,
+    /** The engine-wide TCP service; a caller that wants to see the warnings of its drivers passes its own. */
+    public val tcp: TcpService = TcpService(),
+) : AutoCloseable {
     /** The engine-wide log service and store. */
     public val logging: LoggingService = LoggingService(engineDir)
-
-    /** The engine-wide TCP service with its port registry. */
-    public val tcp: TcpService = TcpService()
 
     /** A [DriverFactory] for the blocks of fabric [fabricId] whose directories are [paths]. */
     public fun factoryFor(fabricId: String, paths: FabricPaths): DriverFactory = DriverFactory { blockId, required ->
@@ -39,13 +41,14 @@ public class BuiltinDrivers(engineDir: Path) : AutoCloseable {
         required: List<String>,
     ) : DriverSet, AutoCloseable {
         private val instances = LinkedHashMap<String, Driver>()
+        private val tcp = ArrayList<BlockTcp>()
 
         init {
             for (id in required.distinct()) {
                 instances[id] = when (id) {
                     BuiltinDriverTypes.LOGGING.id -> services.logging.driverFor(fabricId, blockId.value, paths.blockLogs(blockId.value))
                     BuiltinDriverTypes.FILESYSTEM.id -> FilesystemSandbox(paths.blockWorking(blockId.value))
-                    BuiltinDriverTypes.TCP.id -> services.tcp.driverFor(fabricId, blockId.value)
+                    BuiltinDriverTypes.TCP.id -> services.tcp.driverFor(fabricId, blockId.value).also { tcp += it }
                     else -> throw IllegalArgumentException(
                         "block '${blockId.value}' requires unknown driver '$id' (built-in: ${BuiltinDriverTypes.ALL.keys.joinToString()})",
                     )
@@ -58,6 +61,8 @@ public class BuiltinDrivers(engineDir: Path) : AutoCloseable {
                 ?: throw IllegalArgumentException("driver ${type.simpleName} is not among the required drivers of this block")
             return type.java.cast(found)
         }
+
+        override suspend fun awaitClosed(timeout: Duration): Boolean = tcp.all { it.awaitClosed(timeout) }
 
         override fun close() {
             instances.values.filterIsInstance<AutoCloseable>().forEach { runCatching { it.close() } }
