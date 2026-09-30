@@ -7,12 +7,13 @@ import cringle.packaging.PackageHash
 import cringle.packaging.PackageHashMismatchException
 import cringle.packaging.SafeUnzip
 import java.io.IOException
-import java.nio.channels.FileChannel
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.FileTime
+import java.nio.channels.FileChannel
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -41,22 +42,95 @@ public fun interface PackageFetcher {
 }
 
 /**
+ * The outcome of [PackageCache.cleanupReport]: the versions that were removed as `<kind>/<name>@<version>`, and the
+ * versions that could not be removed as `<kind>/<name>@<version>: <reason>`. A version that could not be removed is
+ * still there, complete and usable.
+ */
+public class CleanupReport(public val removed: List<String>, public val failed: List<String>)
+
+/** The two file operations of [PackageCache] that can fail on a locked file; replaced in tests to make them fail. */
+internal interface CacheFileOps {
+    /** Renames [from] to [to] in one step; fails if a file in [from] is locked (Windows). */
+    fun rename(from: Path, to: Path)
+
+    /** Deletes [dir] and everything in it; throws the last error if something could not be deleted. */
+    fun deleteTree(dir: Path)
+}
+
+/** Renames atomically; deletes entry by entry and tries a locked file a few times before it gives up. */
+internal class DefaultCacheFileOps(private val attempts: Int = 3, private val pauseMillis: Long = 100) : CacheFileOps {
+    override fun rename(from: Path, to: Path) {
+        Files.move(from, to, StandardCopyOption.ATOMIC_MOVE)
+    }
+
+    override fun deleteTree(dir: Path) {
+        if (!Files.exists(dir)) return
+        var failure: IOException? = null
+        Files.walk(dir).use { s ->
+            s.sorted(Comparator.reverseOrder()).forEach { entry ->
+                var left = attempts
+                while (true) {
+                    try {
+                        Files.deleteIfExists(entry)
+                        break
+                    } catch (_: NoSuchFileException) {
+                        break
+                    } catch (e: IOException) {
+                        if (--left <= 0) {
+                            failure = e
+                            break
+                        }
+                        Thread.sleep(pauseMillis)
+                    }
+                }
+            }
+        }
+        failure?.let { throw it }
+    }
+}
+
+/**
  * The package cache of a machine (Architecture 15): unpacked packages in `<home>/projects/<name>/<version>` and
  * `<home>/plugins/<name>/<version>`, shared by all Engines that use the same Cringle home.
  *
  * A version is downloaded, verified and unpacked once. Installation happens in a temporary directory that is moved into
  * place atomically, so a failed or corrupt download never leaves anything behind, and a file lock (plus an in-process
- * lock) makes concurrent Engines wait for each other instead of installing twice. A marker file `.cringle-installed`
- * holds the hash of the installed package; only versions with a marker are managed (and cleaned up) by the cache.
+ * lock) per version makes concurrent Engines wait for each other instead of installing twice. [ensure] and [cleanup]
+ * take the same lock, so they never meet a version in the middle of the other. A marker file `.cringle-installed`
+ * holds the hash of the installed package; only versions with a marker are managed (and cleaned up) by the cache. A
+ * version directory without a marker was placed by hand: [ensure] refuses to touch it and [cleanup] ignores it.
+ *
+ * Removing a version is a rename to `<version>.removing-<uuid>` followed by the deletion of that directory. The rename
+ * is atomic, so a version is either complete or gone, never half deleted; if a file in it is locked (Windows) the
+ * rename fails and the version stays as it was. What an interrupted deletion, installation or download left behind
+ * (`*.removing-*`, `*.installing-*` directories and `*.part` files) is removed by [sweepLeftovers] and [cleanup] once
+ * it is older than [LEFTOVER_AGE]; these names never count as versions.
  *
  * Usage is tracked per Engine and fabric in `<home>/cache/usage/<engine>/<fabric>`; a version is unused when no fabric of
  * an existing Engine lists it.
  */
-public class PackageCache(private val home: Path, private val clock: java.time.Clock = java.time.Clock.systemUTC()) {
+public class PackageCache internal constructor(
+    private val home: Path,
+    private val clock: java.time.Clock,
+    private val ops: CacheFileOps,
+    private val onWarning: (String) -> Unit,
+) {
+    /** A cache of [home]; [onWarning] gets what the cache could not do but survived (by default the error stream). */
+    public constructor(
+        home: Path,
+        clock: java.time.Clock = java.time.Clock.systemUTC(),
+        onWarning: (String) -> Unit = { System.err.println("WARNING: $it") },
+    ) : this(home, clock, DefaultCacheFileOps(), onWarning)
+
     private val root = home.resolve("cache")
+
     private fun target(a: Artifact): Path = home.resolve(a.type.dir).resolve(a.name).resolve(a.version)
 
     private fun marker(dir: Path): Path = dir.resolve(MARKER)
+
+    private fun warn(message: String) {
+        runCatching { onWarning(message) }
+    }
 
     /**
      * Makes sure [artifact] is installed, downloading it with [fetcher] if needed.
@@ -64,14 +138,21 @@ public class PackageCache(private val home: Path, private val clock: java.time.C
      */
     public suspend fun ensure(artifact: Artifact, fetcher: PackageFetcher): Boolean {
         val dir = target(artifact)
-        if (isInstalled(artifact, dir)) {
-            touch(dir)
-            return false
-        }
         val key = artifact.label
         val lock = locks.computeIfAbsent(key) { ReentrantLock() }
-        // the file lock is taken on a blocking thread; the download runs in the caller's coroutine context
-        return withContext(Dispatchers.IO) { lock.withLock { withFileLock(key) { install(artifact, dir, fetcher) } } }
+        // the locks are taken on a blocking thread; the download runs in the caller's coroutine context
+        return withContext(Dispatchers.IO) {
+            lock.withLock {
+                withFileLock(key) {
+                    if (isInstalled(artifact, dir)) {
+                        touch(dir)
+                        false
+                    } else {
+                        install(artifact, dir, fetcher)
+                    }
+                }
+            }
+        }
     }
 
     private fun isInstalled(a: Artifact, dir: Path): Boolean {
@@ -94,7 +175,6 @@ public class PackageCache(private val home: Path, private val clock: java.time.C
     }
 
     private fun install(a: Artifact, dir: Path, fetcher: PackageFetcher): Boolean {
-        if (isInstalled(a, dir)) return false // another engine was faster
         val downloads = Files.createDirectories(root.resolve("downloads"))
         val file = downloads.resolve("${UUID.randomUUID()}.part")
         val staging = dir.resolveSibling(dir.fileName.toString() + ".installing-" + UUID.randomUUID())
@@ -119,7 +199,7 @@ public class PackageCache(private val home: Path, private val clock: java.time.C
             throw PackageCacheException(false, "${a.label}: cannot install: ${e.message}", e)
         } finally {
             runCatching { Files.deleteIfExists(file) }
-            runCatching { deleteTree(staging) }
+            runCatching { ops.deleteTree(staging) }
         }
     }
 
@@ -174,52 +254,165 @@ public class PackageCache(private val home: Path, private val clock: java.time.C
         return result
     }
 
+    // --- cleanup ---
+
     /**
      * Removes cache-installed versions that are not in use and were last used at least [minUnused] ago.
-     * Returns what was removed as `<kind>/<name>@<version>`.
+     * Returns what was removed as `<kind>/<name>@<version>`; [cleanupReport] also says what could not be removed.
      */
-    public fun cleanup(minUnused: Duration): List<String> {
-        val used = inUse()
-        val now = clock.instant()
+    public fun cleanup(minUnused: Duration): List<String> = cleanupReport(minUnused).removed
+
+    /**
+     * Like [cleanup], and reports the versions it could not remove. One version that cannot be removed (for example
+     * because a file in it is locked) does not stop the others. Leftovers of interrupted work are removed as well, see
+     * [sweepLeftovers].
+     */
+    public fun cleanupReport(minUnused: Duration): CleanupReport {
         val removed = ArrayList<String>()
+        val failed = ArrayList<String>()
+        val candidates = inUse().let { used ->
+            versionDirs().filter { (type, name, version, _) -> Triple(type, name, version) !in used }
+        }
+        for ((type, name, version, versionDir) in candidates) {
+            val label = "${type.dir}/$name@$version"
+            try {
+                val lock = locks.computeIfAbsent(label) { ReentrantLock() }
+                lock.withLock {
+                    withFileLock(label) {
+                        // everything that decides is looked at under the lock of the version, which ensure takes as well
+                        val m = marker(versionDir)
+                        if (!Files.exists(m)) return@withFileLock // gone, or placed by hand
+                        if (Triple(type, name, version) in inUse()) return@withFileLock
+                        val lastUsed: Instant = Files.getLastModifiedTime(m).toInstant()
+                        if (Duration.between(lastUsed, clock.instant()) < minUnused) return@withFileLock
+                        remove(versionDir, label, removed, failed)
+                    }
+                }
+            } catch (e: IOException) {
+                failed += "$label: ${e.message ?: e.javaClass.simpleName}"
+                warn("$label could not be removed from the package cache: ${e.message}")
+            }
+        }
+        removeEmptyNameDirs()
+        sweepLeftovers()
+        return CleanupReport(removed.sorted(), failed.sorted())
+    }
+
+    /** Renames the version away atomically, then deletes it. Called with the lock of the version. */
+    private fun remove(versionDir: Path, label: String, removed: MutableList<String>, failed: MutableList<String>) {
+        val gone = versionDir.resolveSibling(versionDir.fileName.toString() + ".removing-" + UUID.randomUUID())
+        try {
+            ops.rename(versionDir, gone)
+        } catch (e: IOException) {
+            // nothing changed: the version is still there and complete
+            failed += "$label: ${e.message ?: e.javaClass.simpleName}"
+            warn("$label could not be removed from the package cache, it is in use or locked: ${e.message}")
+            return
+        }
+        removed += label
+        // the age of the leftover counts from now, not from when the version was installed
+        runCatching { Files.setLastModifiedTime(gone, FileTime.from(clock.instant())) }
+        try {
+            ops.deleteTree(gone)
+        } catch (e: IOException) {
+            // the version is gone under its name; the rest is swept later
+            warn("$label was removed, but ${gone.fileName} could not be deleted completely and is left for a later cleanup: ${e.message}")
+        }
+    }
+
+    private data class VersionDir(val type: ArtifactType, val name: String, val version: String, val dir: Path)
+
+    /** The cache-installed versions (with marker); leftovers and hand-placed directories are not among them. */
+    private fun versionDirs(): List<VersionDir> {
+        val result = ArrayList<VersionDir>()
         for (type in ArtifactType.entries) {
             val base = home.resolve(type.dir)
             if (!Files.isDirectory(base)) continue
             for (nameDir in Files.list(base).use { it.toList() }) {
+                if (!Files.isDirectory(nameDir)) continue
                 for (versionDir in Files.list(nameDir).use { it.toList() }) {
-                    val m = marker(versionDir)
-                    if (!Files.exists(m)) continue // not managed by the cache
-                    val key = Triple(type, nameDir.fileName.toString(), versionDir.fileName.toString())
-                    if (key in used) continue
-                    val lastUsed: Instant = Files.getLastModifiedTime(m).toInstant()
-                    if (Duration.between(lastUsed, now) < minUnused) continue
-                    val label = "${type.dir}/${key.second}@${key.third}"
-                    val lock = locks.computeIfAbsent(label) { ReentrantLock() }
-                    lock.withLock {
-                        withFileLock(label) {
-                            if (Files.exists(m)) {
-                                deleteTree(versionDir)
-                                removed += label
-                            }
+                    if (LEFTOVER.matches(versionDir.fileName.toString()) || !Files.exists(marker(versionDir))) continue
+                    result += VersionDir(type, nameDir.fileName.toString(), versionDir.fileName.toString(), versionDir)
+                }
+            }
+        }
+        return result
+    }
+
+    private fun removeEmptyNameDirs() {
+        for (type in ArtifactType.entries) {
+            val base = home.resolve(type.dir)
+            if (!Files.isDirectory(base)) continue
+            for (nameDir in Files.list(base).use { it.toList() }) {
+                runCatching {
+                    if (Files.isDirectory(nameDir) && Files.list(nameDir).use { it.findAny().isEmpty }) Files.deleteIfExists(nameDir)
+                }
+            }
+        }
+    }
+
+    /**
+     * Removes what interrupted work left behind and that is older than [LEFTOVER_AGE]: `*.part` files in
+     * `cache/downloads`, and `*.installing-*` and `*.removing-*` directories next to the versions. Younger ones may
+     * belong to an Engine that is working on them right now. Called when an Engine starts and by [cleanup]; it never
+     * throws. Returns what it removed.
+     */
+    public fun sweepLeftovers(): List<String> {
+        val removed = ArrayList<String>()
+        val limit = clock.instant().minus(LEFTOVER_AGE)
+        fun old(path: Path): Boolean = try {
+            Files.getLastModifiedTime(path).toInstant().isBefore(limit)
+        } catch (_: IOException) {
+            false
+        }
+        val downloads = root.resolve("downloads")
+        if (Files.isDirectory(downloads)) {
+            runCatching {
+                for (file in Files.list(downloads).use { it.toList() }) {
+                    if (file.fileName.toString().endsWith(".part") && Files.isRegularFile(file) && old(file)) {
+                        try {
+                            Files.deleteIfExists(file)
+                            removed += "cache/downloads/${file.fileName}"
+                        } catch (e: IOException) {
+                            warn("cannot remove the old download ${file.fileName}: ${e.message}")
                         }
                     }
                 }
-                if (Files.isDirectory(nameDir) && Files.list(nameDir).use { it.findAny().isEmpty }) Files.deleteIfExists(nameDir)
             }
         }
+        for (type in ArtifactType.entries) {
+            val base = home.resolve(type.dir)
+            if (!Files.isDirectory(base)) continue
+            runCatching {
+                for (nameDir in Files.list(base).use { it.toList() }) {
+                    if (!Files.isDirectory(nameDir)) continue
+                    for (dir in Files.list(nameDir).use { it.toList() }) {
+                        if (!LEFTOVER.matches(dir.fileName.toString()) || !Files.isDirectory(dir) || !old(dir)) continue
+                        try {
+                            ops.deleteTree(dir)
+                            removed += "${type.dir}/${nameDir.fileName}/${dir.fileName}"
+                        } catch (e: IOException) {
+                            warn("cannot remove the leftover ${dir.fileName} of ${type.dir}/${nameDir.fileName}: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+        removeEmptyNameDirs()
         return removed.sorted()
-    }
-
-    private fun deleteTree(dir: Path) {
-        if (!Files.exists(dir)) return
-        Files.walk(dir).use { s -> s.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
     }
 
     public companion object {
         // JVM wide: file locks cannot be taken twice by one JVM, so caches of several engines in one process share these
         private val locks = ConcurrentHashMap<String, ReentrantLock>()
 
+        /** Directories of an unfinished installation or removal: `<version>.installing-<uuid>`, `<version>.removing-<uuid>`. */
+        private val LEFTOVER = Regex(".+\\.(installing|removing)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
         /** Name of the marker file inside an installed version. */
         public const val MARKER: String = ".cringle-installed"
+
+        /** How old leftovers of interrupted work have to be before they are removed. */
+        public val LEFTOVER_AGE: Duration = Duration.ofHours(1)
     }
 }

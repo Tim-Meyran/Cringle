@@ -134,6 +134,9 @@ message CleanupCacheRequest {
 message CleanupCacheResponse {
   // The removed versions as `<kind>/<name>@<version>`.
   repeated string removed = 1;
+  // Versions that could not be removed (for example a locked file), as `<kind>/<name>@<version>: <reason>`.
+  // They are still in the cache, complete.
+  repeated string failed = 2;
 }
 
 message FabricRequest {
