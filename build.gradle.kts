@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
@@ -126,4 +129,144 @@ tasks.register("publishToTestMavenLocal") {
 testMavenLocalModules.forEach { path ->
     project(path).tasks.matching { it.name == "publishAllPublicationsToCringleTestMavenLocalRepository" }
         .configureEach { mustRunAfter(deleteTestMavenLocal) }
+}
+
+// --- The release distribution (#57, docs/releasing.md) ---
+//
+// `./gradlew cringleDist` writes build/dist/cringle-<version>-linux.tar.gz, cringle-<version>-windows.zip, SHA256SUMS and
+// manifest.json. Both archives hold the same JARs (they run on any JVM); they differ in the start scripts and in the
+// archive format. The version comes from the tag in the release workflow (`-PreleaseVersion=1.2.3`); local builds are
+// 0.0.0-SNAPSHOT.
+val releaseVersion: String = providers.gradleProperty("releaseVersion").orElse("0.0.0-SNAPSHOT").get()
+extra["releaseVersion"] = releaseVersion
+val distMinJava = 21
+val distDir = layout.buildDirectory.dir("dist")
+
+// Start script name to main class. The JARs of the other modules (engine, router, repository, ...) are on the class path
+// of all of them: the daemon starts engine processes with its own class path.
+val distLaunchers = linkedMapOf(
+    "cringle" to "cringle.cli.MainKt",
+    "cringle-daemon" to "cringle.daemon.MainKt",
+    "cringle-management-server" to "cringle.management.MainKt",
+)
+val distModules = listOf(":cli", ":daemon", ":management-server", ":engine", ":router", ":repository")
+
+// Everything the distribution ships: the JAR of each of these modules and everything it needs at runtime, taken from
+// the runtime classpath that the module resolves for itself (so the versions are the ones the tests run with).
+fun distRuntimeFiles(): Set<File> = distModules.flatMap { path ->
+    val module = project(path)
+    module.configurations.getByName("runtimeClasspath").files + module.tasks.getByName("jar").outputs.files.files
+}.toSet()
+
+val semanticVersion = Regex("[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?")
+
+/** One staged distribution: `build/dist-stage/<platform>/cringle-<version>/` with the start scripts of that platform. */
+fun registerStage(platform: String) = tasks.register("cringleDistStage" + platform.replaceFirstChar { it.uppercase() }) {
+    group = "distribution"
+    description = "Assembles the $platform distribution directory of cringleDist."
+    val stage = layout.buildDirectory.dir("dist-stage/$platform")
+    val windows = platform == "windows"
+    distModules.forEach { path ->
+        inputs.files(project(path).configurations.named("runtimeClasspath"))
+        inputs.files(project(path).tasks.named("jar"))
+    }
+    inputs.dir("dist")
+    inputs.files("LICENSE", "NOTICE")
+    inputs.property("version", releaseVersion)
+    outputs.dir(stage)
+    doLast {
+        check(semanticVersion.matches(releaseVersion)) { "releaseVersion '$releaseVersion' is not a version like 1.2.3 or 1.2.3-rc.1" }
+        val root = stage.get().asFile.toPath()
+        root.toFile().deleteRecursively()
+        val home = Files.createDirectories(root.resolve("cringle-$releaseVersion"))
+        val lib = Files.createDirectories(home.resolve("lib"))
+        for (jar in distRuntimeFiles()) {
+            val target = lib.resolve(jar.name)
+            check(!Files.exists(target)) { "two JARs of the distribution are called ${jar.name}" }
+            Files.copy(jar.toPath(), target, StandardCopyOption.COPY_ATTRIBUTES)
+        }
+        val templates = projectDir.toPath().resolve("dist/templates")
+        val template = Files.readString(templates.resolve(if (windows) "launcher.bat" else "launcher.sh")).replace("\r\n", "\n")
+        val eol = if (windows) "\r\n" else "\n"
+        val bin = Files.createDirectories(home.resolve("bin"))
+        for ((command, mainClass) in distLaunchers) {
+            val script = template.replace("@COMMAND@", command).replace("@MAIN_CLASS@", mainClass).replace("\n", eol)
+            Files.write(bin.resolve(if (windows) "$command.bat" else command), script.toByteArray(Charsets.UTF_8))
+        }
+        val conf = Files.createDirectories(home.resolve("conf"))
+        Files.writeString(conf.resolve("README.txt"), Files.readString(projectDir.toPath().resolve("dist/conf/README.txt")).replace("\r\n", "\n").replace("\n", eol))
+        Files.copy(projectDir.toPath().resolve("LICENSE"), home.resolve("LICENSE"))
+        Files.copy(projectDir.toPath().resolve("NOTICE"), home.resolve("NOTICE"))
+        Files.write(home.resolve("VERSION"), (releaseVersion + "\n").toByteArray(Charsets.UTF_8))
+    }
+}
+
+val stageLinux = registerStage("linux")
+val stageWindows = registerStage("windows")
+
+val distLinux = tasks.register<Tar>("cringleDistLinux") {
+    group = "distribution"
+    description = "Writes build/dist/cringle-<version>-linux.tar.gz."
+    dependsOn(stageLinux)
+    from(layout.buildDirectory.dir("dist-stage/linux"))
+    archiveFileName.set("cringle-$releaseVersion-linux.tar.gz")
+    destinationDirectory.set(distDir)
+    compression = Compression.GZIP
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+    // the start scripts are executable, everything else is not; a stage directory on Windows has no such bits
+    dirPermissions { unix("rwxr-xr-x") }
+    filePermissions { unix("rw-r--r--") }
+    filesMatching("*/bin/*") { permissions { unix("rwxr-xr-x") } }
+}
+
+val distWindows = tasks.register<Zip>("cringleDistWindows") {
+    group = "distribution"
+    description = "Writes build/dist/cringle-<version>-windows.zip."
+    dependsOn(stageWindows)
+    from(layout.buildDirectory.dir("dist-stage/windows"))
+    archiveFileName.set("cringle-$releaseVersion-windows.zip")
+    destinationDirectory.set(distDir)
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
+val distManifest = tasks.register("cringleDistManifest") {
+    group = "distribution"
+    description = "Writes SHA256SUMS and manifest.json for the archives of cringleDist."
+    val archives = listOf(distLinux, distWindows).map { task -> task.flatMap { it.archiveFile } }
+    inputs.files(archives)
+    inputs.property("version", releaseVersion)
+    val sums = distDir.map { it.file("SHA256SUMS") }
+    val manifest = distDir.map { it.file("manifest.json") }
+    outputs.files(sums, manifest)
+    doLast {
+        fun sha256(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    digest.update(buffer, 0, n)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+        val files = archives.map { it.get().asFile }.sortedBy { it.name }.map { Triple(it.name, it.length(), sha256(it)) }
+        sums.get().asFile.writeText(files.joinToString("") { (name, _, hash) -> "$hash  $name\n" })
+        manifest.get().asFile.writeText(
+            buildString {
+                append("{\n  \"version\": \"$releaseVersion\",\n  \"files\": [\n")
+                append(files.joinToString(",\n") { (name, size, hash) -> "    { \"name\": \"$name\", \"size\": $size, \"sha256\": \"$hash\", \"minJava\": $distMinJava }" })
+                append("\n  ]\n}\n")
+            },
+        )
+    }
+}
+
+tasks.register("cringleDist") {
+    group = "distribution"
+    description = "Builds the release archives, SHA256SUMS and manifest.json into build/dist (see docs/releasing.md)."
+    dependsOn(distManifest)
 }
