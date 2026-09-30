@@ -51,6 +51,7 @@ public class FileRegistryStore(private val file: Path) : RegistryStore {
             FabricSummary(text(fo, "fabricId"), text(fo, "blueprint"), text(fo, "state"))
         },
         optText(o, "origin"),
+        optText(o, "fingerprint").orEmpty(),
     )
 
     private fun remote(o: JsonObject) = RemoteRouterRecord(
@@ -89,6 +90,7 @@ public class FileRegistryStore(private val file: Path) : RegistryStore {
             ),
         )
         e.origin?.let { put("origin", it) }
+        if (e.fingerprint.isNotEmpty()) put("fingerprint", e.fingerprint)
     }
 
     private fun remote(r: RemoteRouterRecord): JsonObject = buildJsonObject {
