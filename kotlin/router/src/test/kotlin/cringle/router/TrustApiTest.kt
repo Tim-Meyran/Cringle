@@ -7,7 +7,6 @@ import cringle.common.ComponentKind
 import cringle.common.Identity
 import cringle.router.RouterServer
 import cringle.router.RouterTls
-
 import cringle.common.TlsHelper
 import cringle.common.TrustStore
 import cringle.common.TrustEntry
@@ -22,6 +21,8 @@ import cringle.router.v1.ListEnginesRequest
 import cringle.router.v1.ListEnginesResponse
 import cringle.router.v1.ListTrustRequest
 import cringle.router.v1.PrepareEngineRequest
+import cringle.router.v1.RegisterEngineRequest
+import cringle.router.v1.RevokeRemoteRouterRequest
 import cringle.router.v1.RegistryServiceGrpcKt
 import cringle.router.v1.TrustRemoteRouterRequest
 import io.grpc.CallCredentials
@@ -31,6 +32,7 @@ import io.grpc.Status
 import io.grpc.StatusException
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
@@ -112,6 +114,23 @@ class TrustApiTest {
     private fun listEngines(node: Node, me: Identity?): Outcome<ListEnginesResponse> =
         outcome { api(channel(node, me)).listEngines(ListEnginesRequest.newBuilder().setIncludeRemote(true).build()) }
 
+    /** The daemon announces the engine at [router], the engine registers with its certificate and the secret. */
+    private fun enroll(router: Node, daemon: Identity, engine: Identity, id: String) {
+        val secret = "secret-$id".toByteArray()
+        val engineId = EngineId.newBuilder().setValue(id).build()
+        val prepare = outcome { api(channel(router, daemon)).prepareEngine(PrepareEngineRequest.newBuilder().setEngineId(engineId).setEnrollmentSecretHash(sha256(secret)).build()) }
+        assertEquals(Status.Code.OK, prepare.status.code, prepare.status.toString())
+        val register = outcome {
+            api(channel(router, engine)).registerEngine(
+                RegisterEngineRequest.newBuilder().setEngineId(engineId).setName(id).setManagementAddress("127.0.0.1:1")
+                    .setCertificate(ByteString.copyFrom(engine.certificate.encoded)).setEnrollmentSecret(ByteString.copyFrom(secret)).build(),
+            )
+        }
+        assertEquals(Status.Code.OK, register.status.code, register.status.toString())
+    }
+
+    private fun sha256(v: ByteArray): ByteString = ByteString.copyFrom(MessageDigest.getInstance("SHA-256").digest(v))
+
     @Test
     fun enginesOfARouterThatIsNotTrustedAreNotListed() {
         val a = node("a")
@@ -165,5 +184,63 @@ class TrustApiTest {
         val entry = a.trust.list().single()
         assertEquals(TrustKind.ROUTER, entry.kind)
         assertEquals(b.fp, entry.fingerprint)
+    }
+
+    @Test
+    fun trustInARouterMakesItsEnginesTransitivelyTrustedAndRevokeRemovesThemAndCutsTheRouter() {
+        val a = node("a")
+        val b = node("b")
+        val daemonB = peer("daemon-b", ComponentKind.DAEMON)
+        val engine = peer("engine-1", ComponentKind.ENGINE)
+        val admin = token(a, UserRole.ADMIN)
+
+        // b trusts a as a router and itself (as the daemon that enrolls engines)
+        b.trust.add(TrustEntry(a.fp, "a", TrustKind.ROUTER, address = a.address))
+        b.trust.add(TrustEntry(daemonB.publicKeyFingerprint, "daemon-b", TrustKind.COMPONENT))
+
+        // enroll an engine through b (b is trusted by a)
+        enroll(b, daemonB, engine, "eng-1")
+
+        val bToA = channel(a, b.identity)          // one channel, reused: b as a client of a
+        fun bAsksA() = outcome { api(bToA).listEngines(ListEnginesRequest.newBuilder().setIncludeRemote(true).build()) }
+        assertEquals(Status.Code.UNAUTHENTICATED, bAsksA().status.code)      // not trusted yet
+
+        // a trusts b as a remote router
+        val added = outcome { api(channel(a, null), admin).addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(b.address).setExpectedFingerprint(b.fp).build()) }
+        assertEquals(Status.Code.OK, added.status.code, added.status.toString())
+        assertEquals(1, added.value!!.router.cachedEngines)
+
+        val entries = a.trust.list()
+        assertEquals(2, entries.size)                                          // router + engine (engine came via b)
+        val routerEntry = entries.single { it.kind == TrustKind.ROUTER }
+        assertEquals(b.fp, routerEntry.fingerprint); assertEquals(null, routerEntry.origin)
+        val engineEntry = entries.single { it.kind == TrustKind.ENGINE }
+        assertEquals(engine.publicKeyFingerprint, engineEntry.fingerprint); assertEquals(b.fp, engineEntry.origin)
+
+        // b is trusted now (via the router entry), so listEngines works
+        val shown = listEngines(a, b.identity)
+        assertEquals(listOf("eng-1" to engine.publicKeyFingerprint), shown.value!!.enginesList.map { it.engineId.value to it.fingerprint })
+
+        // b forgets the engine: the next refresh removes the transitive entry
+        assertTrue(b.server.registry.unregister("eng-1"))
+        runBlocking { a.server.remoteRouters.refresh(b.address) }
+        assertEquals(listOf(TrustKind.ROUTER), a.trust.list().map { it.kind })
+
+        // b reports it again
+        b.server.registry.register("eng-1", "eng-1", "127.0.0.1:1", engine.publicKeyFingerprint)
+        runBlocking { a.server.remoteRouters.refresh(b.address) }
+        assertEquals(b.fp, a.trust.list().single { it.kind == TrustKind.ENGINE }.origin)
+
+        // revoke
+        val revoked = outcome { api(channel(a, null), admin).revokeRemoteRouter(RevokeRemoteRouterRequest.newBuilder().setAddress(b.address).build()) }
+        assertEquals(Status.Code.OK, revoked.status.code, revoked.status.toString())
+        assertEquals(2, revoked.value!!.removedEntries)
+        assertTrue(a.trust.list().isEmpty())
+        assertTrue(a.server.registry.remotes().isEmpty())
+        assertEquals(0, a.server.registry.engines(true).size)
+        assertEquals(Status.Code.UNAUTHENTICATED, bAsksA().status.code)      // the same connection, new call: refused
+
+        val unknown = outcome { api(channel(a, null), admin).revokeRemoteRouter(RevokeRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:9999").build()) }
+        assertEquals(Status.Code.NOT_FOUND, unknown.status.code)
     }
 }
