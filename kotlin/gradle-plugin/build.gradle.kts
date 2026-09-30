@@ -20,7 +20,12 @@ version = localPublishVersion
 dependencies {
     implementation(project(":packaging"))
     implementation(project(":contract"))
+    // The task cringlePublish uploads with `RepositoryClient` and reads the profile of `cringle login` with the same
+    // JSON library the CLI uses.
+    implementation(project(":repository"))
+    implementation(libs.findLibrary("kotlinx-serialization-json").get())
 
+    testImplementation(project(":router"))
     testImplementation(gradleTestKit())
 }
 
@@ -62,9 +67,14 @@ dependencies {
     kotlinPluginClasspath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
 }
 
+// `cringlePublish` reads the address and the token of the profile that `cringle login` writes from the Cringle home, so
+// the tests point that home at a folder of the build directory. No test of this build ever reads the `cli.json` of the
+// user who runs it, and the path is an input of the test task, so a build with another home runs the tests again.
+val cringleTestHome = rootProject.layout.buildDirectory.dir("cringle-test-home")
+
 // The nested builds of the functional tests resolve the libraries of the sample like any other build, but with
-// --offline: this build has already downloaded them into the Gradle cache while it compiled its own Kotlin code, so
-// the tests need no network of their own. TestKit gives a build under test an empty cache of its own, so the nested
+// --offline: this build has already downloaded them into the Gradle cache while it compiled its own Kotlin code, so the
+// tests need no network of their own. TestKit gives a build under test an empty cache of its own, so the nested
 // builds are pointed at the cache of this build. The example outside this build resolves the plugin itself from a
 // folder with the layout of Maven Local, which the test passes as -Dmaven.repo.local, so no test ever touches ~/.m2.
 tasks.withType<Test> {
@@ -74,6 +84,9 @@ tasks.withType<Test> {
     systemProperty("cringle.version", localPublishVersion)
     systemProperty("cringle.kotlinVersion", kotlinVersion)
     systemProperty("cringle.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
+    systemProperty("cringle.testHome", cringleTestHome.get().asFile.absolutePath)
+    environment("CRINGLE_HOME", cringleTestHome.get().asFile.absolutePath)
+    inputs.property("cringleTestHome", cringleTestHome.get().asFile.absolutePath)
     inputs.files(kotlinPluginClasspath).withNormalizer(ClasspathNormalizer::class)
     doFirst {
         systemProperty(
