@@ -205,6 +205,11 @@ class TetherNetworkTest {
         }
     }
 
+    /**
+     * Second half of the M2 criterion ("Fertig, wenn" in `docs/Architecture.md`): a schema violation at a local tether is
+     * detected at runtime (`TetherValidationException`). The schema check applies to `MESSAGE`, `REQUEST_RESPONSE` and
+     * `STREAM`; the first half, two blocks exchanging bytes over TCP, is `TcpTetherTest`.
+     */
     @Test
     fun schemaViolationsAreReportedWithSchemaAndPath(): Unit = runBlocking {
         setup(listOf(tether(TetherType.MESSAGE), tether(TetherType.MESSAGE, "outInt", "inInt"))).use { s ->
