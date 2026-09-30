@@ -28,8 +28,9 @@ public object PackageValidator {
         duplicates(m.providers, "$.providers", "provider", problems)
         duplicates(m.drivers, "$.drivers", "driver", problems)
         m.blocks.forEachIndexed { i, block ->
-            for (n in listOf(block.name)) {
-                if (!PackageNames.name.matches(n)) problems += PackageProblem("$.blocks[$i].name", "invalid block name '$n'")
+            PackageNames.nameProblem(block.name)?.let { problems += PackageProblem("$.blocks[$i].name", it) }
+            block.ports.forEachIndexed { p, port ->
+                PackageNames.identifierProblem(port.name)?.let { problems += PackageProblem("$.blocks[$i].ports[$p].name", it) }
             }
             problems += schemaRefs(block, "$.blocks[$i]", registry)
         }
@@ -53,9 +54,7 @@ public object PackageValidator {
         val problems = ArrayList<PackageProblem>()
         duplicates(project.blueprints.map { it.name }, "$.blueprints", "blueprint", problems)
         val known = project.blueprints.map { it.name }.toSet()
-        project.manifest.fabrics.forEachIndexed { i, f ->
-            if (f.blueprint !in known) problems += PackageProblem("$.fabrics[$i].blueprint", "unknown blueprint '${f.blueprint}'")
-        }
+        blueprintRefs(project.manifest, known, problems)
         for (blueprint in project.blueprints) {
             val file = "blueprints/${blueprint.name}.json"
             val report: (String, String) -> Unit = { path, message -> problems.add(PackageProblem("$file $path", message)) }
@@ -64,6 +63,8 @@ public object PackageValidator {
                 val path = "$.tethers[$i]"
                 for ((side, endpoint) in listOf("from" to t.from, "to" to t.to)) {
                     if (endpoint.block !in ids) report("$path.$side.block", "unknown block id '${endpoint.block}'")
+                    PackageNames.identifierProblem(endpoint.port)
+                        ?.let { report("$path.$side.port", it) }
                 }
                 tetherRules(t, path, report)
             }
@@ -80,9 +81,7 @@ public object PackageValidator {
         val registry = registry(plugins, listOf(project.schemas to "${project.manifest.name}@${project.manifest.version}"), problems)
         duplicates(project.blueprints.map { it.name }, "$.blueprints", "blueprint", problems)
         val known = project.blueprints.map { it.name }.toSet()
-        project.manifest.fabrics.forEachIndexed { i, f ->
-            if (f.blueprint !in known) problems += PackageProblem("$.fabrics[$i].blueprint", "unknown blueprint '${f.blueprint}'")
-        }
+        blueprintRefs(project.manifest, known, problems)
         val lookup = HashMap<String, BlockDefinition>()
         for (p in plugins) for (b in p.manifest.blocks) lookup["${p.manifest.name}/${b.name}"] = b
         for (blueprint in project.blueprints) {
@@ -143,15 +142,25 @@ public object PackageValidator {
     }
 
     /**
-     * The block ids of [blueprint], reported to [problem] if one of them is declared twice. The path of a finding is
-     * `$.blocks[<i>].id`, so it is relative to whatever the caller puts in front of it.
+     * The block ids of [blueprint], reported to [problem] if one of them is declared twice or is not a valid
+     * identifier (see [PackageNames.identifier]). The path of a finding is `$.blocks[<i>].id`, so it is relative to
+     * whatever the caller puts in front of it.
      */
     private fun blockIds(blueprint: Blueprint, problem: (String, String) -> Unit): Set<String> {
         val ids = LinkedHashSet<String>()
         blueprint.blocks.forEachIndexed { i, b ->
+            PackageNames.identifierProblem(b.id)?.let { problem("$.blocks[$i].id", it) }
             if (!ids.add(b.id)) problem("$.blocks[$i].id", "duplicate block id '${b.id}'")
         }
         return ids
+    }
+
+    /** Every fabric must name a blueprint of [known] with a valid identifier. */
+    private fun blueprintRefs(m: ProjectManifest, known: Set<String>, problems: MutableList<PackageProblem>) {
+        m.fabrics.forEachIndexed { i, f ->
+            PackageNames.identifierProblem(f.blueprint)?.let { problems += PackageProblem("$.fabrics[$i].blueprint", it) }
+            if (f.blueprint !in known) problems += PackageProblem("$.fabrics[$i].blueprint", "unknown blueprint '${f.blueprint}'")
+        }
     }
 
     /**
@@ -176,6 +185,7 @@ public object PackageValidator {
         direction: PortDirection,
         report: (String, String) -> Boolean,
     ): PortDefinition? {
+        PackageNames.identifierProblem(e.port)?.let { report("$path.port", it) }
         if (e.block in unresolved) return null
         val (instance, definition) = instances[e.block] ?: run {
             report("$path.block", "unknown block id '${e.block}'")
