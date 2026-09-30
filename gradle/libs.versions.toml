@@ -10,9 +10,10 @@ grpc = "1.70.0"
 grpc-kotlin = "1.4.1"
 bouncycastle = "1.80"
 
-# Version under which contract, schema and packaging are published into build/cringle-repo, from where the Cringle
-# Gradle plugin samples resolve them. It exists only inside this repository and is never published anywhere.
-localPublish = "0.0.0-local"
+# Version under which contract, schema, packaging and the Cringle Gradle plugin itself are published locally: into
+# build/cringle-repo, which the samples of the Gradle plugin use, and into Maven Local, which projects outside this
+# build use. It exists only inside this repository and is never published anywhere else.
+localPublish = "0.0.0-SNAPSHOT"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
