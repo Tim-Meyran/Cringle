@@ -180,7 +180,7 @@ public class ManagementServer(
         }
 
         override suspend fun deploy(request: cringle.management.v1.DeployProjectRequest): cringle.management.v1.DeployProjectResponse = guard {
-            val r = core.deploy(request.project, request.versionRange, if (request.hasStart()) request.start else true)
+            val r = core.deploy(request.project, request.versionRange, if (request.hasStart()) request.start else true, request.relock)
             cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).build()
         }
 
