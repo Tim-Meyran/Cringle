@@ -97,6 +97,17 @@ The version of a release is the Git tag without the leading `v`: the tag `v1.2.3
 - `lib/` holds no test libraries (JUnit, TestKit, test helpers); `DistributionTest` fails if it does.
 
 
+### Checking `release.yml` (only when GitHub runs Actions again)
+
+Not done yet, and no test tag is to be pushed before GitHub starts Actions for the repository. Afterwards, once and whenever the workflow changes:
+
+1. Push a tag like `v0.0.1-test.1`.
+2. The run of the workflow `Release` has to go through, and the pre-release `Cringle 0.0.1-test.1` has to have four files: both archives, `SHA256SUMS` and `manifest.json`.
+3. Download them, check `sha256sum -c SHA256SUMS`, unpack one and run `bin/cringle --version`; it has to print `cringle 0.0.1-test.1`.
+4. Delete the test release and the tag: `gh release delete v0.0.1-test.1 --cleanup-tag --yes`.
+
+A tag that is not a version (`vnext`) has to fail the first step of the run with a message that names the tag.
+
 ## What is not covered
 
 Installers for Linux (#58) and Windows (#59), the updater (#60), bundles with their own JRE, signing the artifacts and packages for package managers (apt, winget, Chocolatey). The licenses of the bundled libraries are not collected in one file yet; every JAR carries its own.
