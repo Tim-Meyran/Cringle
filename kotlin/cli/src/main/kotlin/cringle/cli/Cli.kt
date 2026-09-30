@@ -19,6 +19,8 @@ public class Cli(
     private val err: PrintStream,
     private val stdin: InputStream = System.`in`,
     private val environment: Map<String, String> = System.getenv(),
+    /** The version `--version` prints; by default the one of the distribution the CLI was started from. */
+    private val version: String = Distribution.version(),
 ) {
     /** Runs one command line and returns the exit code. */
     public fun run(args: List<String>): Int {
@@ -42,6 +44,10 @@ public class Cli(
                     else -> rest += a
                 }
                 i++
+            }
+            if (rest.firstOrNull() == "--version") {
+                out.println("cringle $version")
+                return 0
             }
             val wantsHelp = rest.isEmpty() || rest.first() == "help" || rest.first() == "--help" || rest.first() == "-h"
             if (wantsHelp) {
@@ -136,6 +142,7 @@ public class Cli(
         appendLine("  --home dir          Cringle home with the profile cli.json (default: CRINGLE_HOME or ~/.cringle)")
         appendLine("  --insecure-dev-mode accept the unencrypted connection (also CRINGLE_INSECURE_DEV_MODE=1, or stored by")
         appendLine("                      'cringle login --insecure-dev-mode'); without it the CLI does not connect")
+        appendLine("  --version           print the version of this installation")
         appendLine("  --help              show this help; 'cringle <command> --help' shows the options of a command")
         appendLine()
         appendLine("The profile <home>/cli.json holds the server address and the token that 'cringle login' stored; the token can be")

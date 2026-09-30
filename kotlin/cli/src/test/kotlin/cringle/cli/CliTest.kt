@@ -107,6 +107,22 @@ class CliTest {
 
     private fun machine() = ok("machine", "add", "m1", "127.0.0.1:${daemon.port}")
 
+    /** #57: `cringle --version` prints the version of the installation; it needs no server and no switch. */
+    @Test
+    fun versionIsPrintedWithoutAServerAndComesFromTheVersionFileOfTheDistribution() {
+        val out = ByteArrayOutputStream()
+        val code = Cli(PrintStream(out, true), PrintStream(ByteArrayOutputStream()), ByteArrayInputStream(ByteArray(0)), emptyMap(), "1.2.3").run(listOf("--version"))
+        assertEquals(0, code)
+        assertEquals("cringle 1.2.3", out.toString().trim())
+        assertTrue(cli("--help", server = false).out.contains("--version"))
+
+        val distribution = Files.createDirectories(dir.resolve("distribution"))
+        assertEquals(Distribution.LOCAL_VERSION, Distribution.version(null))
+        assertEquals(Distribution.LOCAL_VERSION, Distribution.version(distribution.toString()), "a directory without VERSION is a local build")
+        Files.writeString(distribution.resolve("VERSION"), "4.5.6-rc.1\n")
+        assertEquals("4.5.6-rc.1", Distribution.version(distribution.toString()))
+    }
+
     @Test
     fun helpDocumentsEveryCommand() {
         val help = cli("--help", server = false)
