@@ -91,20 +91,22 @@ Implement exactly the issue's **Scope**. Anything under **Out of scope** belongs
 
 Every acceptance criterion needs a test or a documented manual check. Never disable or weaken tests, style checks or CI to get a green build.
 
-### 6. Pull request and automatic merge
+### 6. Pull request and merge (CI suspended)
+
+**Status (decided by the owner, 2026-09-30): the GitHub CI is suspended** (the account's Actions billing is not available; the workflow `CI` is disabled). Until the owner re-enables it, the local build replaces the CI checks. The rules of the previous procedure (automatic merge after green CI checks) apply again as soon as the owner says the CI runs.
 
 When the acceptance criteria are met, do this **without asking**:
 
 ```bash
+./gradlew build                                   # must pass locally, all modules, all tests
 git push
 gh pr create --base master --title "<issue title> (#<n>)" --body-file <file>   # body: use .github/pull_request_template.md, must contain "Closes #<n>"
-gh pr merge --auto --squash --delete-branch
-gh pr checks --watch --fail-fast
+gh pr merge --squash --delete-branch
 ```
 
-- Auto-merge merges the pull request as soon as all required CI checks are green. The merge closes the issue through `Closes #<n>`; the `in-progress` label is removed automatically.
-- **If a check fails:** read `gh run view --log-failed`, fix the cause, push, and wait again. Repeat at most 5 times. If it still fails, or the failure is not caused by your change, run `gh pr merge --disable-auto`, add the label `blocked` to the issue, comment what is wrong, and stop.
-- If `gh pr merge --auto` is rejected because auto-merge is not enabled, wait for green checks (`gh pr checks --watch`) and then run `gh pr merge --squash --delete-branch`. If the repository is not configured for the workflow at all, tell the user to run `python3 scripts/setup-github-repo.py --apply`.
+- The pull request text states the result of the local build (operating system, number of tests, `BUILD SUCCESSFUL`) and names every test that could not run on this machine (for example tests that are skipped on Windows or Linux). Code that only one platform can exercise is called out explicitly, so the owner can run it there.
+- Merge only if `./gradlew build` was green **on the final commit of the branch**. A red or unfinished build is never merged; add the label `blocked`, comment what is wrong, and stop.
+- The merge closes the issue through `Closes #<n>` (the squash commit message must contain it); remove the label `in-progress` yourself, because the housekeeping workflow does not run either.
 - After the merge: `git switch master && git pull` and delete your local branch.
 
 ### Findings, follow-ups, blockers
@@ -118,7 +120,7 @@ gh pr checks --watch --fail-fast
 
 - **Scope discipline.** No refactoring of unrelated code, no renames, no extra features.
 - **Never edit** `docs/Architecture.md` or `docs/decisions.md` as part of an issue. Propose changes in a comment.
-- **Merging** is allowed only through `gh pr merge --auto` (or the fallback above) after all required checks are green. Never use `--admin`, never merge a pull request with a failing or missing check, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
+- **Merging** is allowed only through `gh pr merge --squash --delete-branch` after `./gradlew build` was green locally on the final commit (while the CI is suspended, see section 6). Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
 - **Technical guard rails.** `opencode.json` (opencode) and `.claude/settings.json` (Claude Code) enforce the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
 - One issue per branch and pull request. Do not start a second issue before the first pull request is merged or you have marked the issue `blocked`.
@@ -136,7 +138,7 @@ gh pr checks --watch --fail-fast
 ## Definition of done
 
 - [ ] All acceptance criteria of the issue are met and tested.
-- [ ] `./gradlew build` passes locally, and all required CI checks on the pull request are green.
+- [ ] `./gradlew build` passes locally on the final commit (the CI is suspended; see section 6), and the pull request text states the result.
 - [ ] Pull request contains `Closes #<n>`, follows the template, and has no unrelated changes.
 - [ ] Findings and follow-ups are written down (issue comment, follow-up issues).
-- [ ] The pull request is merged (automatically) and the issue is closed.
+- [ ] The pull request is merged and the issue is closed.
