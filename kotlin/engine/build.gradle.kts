@@ -8,8 +8,6 @@ dependencies {
     implementation(project(":repository"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.grpc.netty.shaded)
-    implementation(libs.bouncycastle.prov)
-    implementation(libs.bouncycastle.pkix)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(project(":testkit"))
     testImplementation(project(":router"))

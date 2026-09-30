@@ -18,6 +18,10 @@ dependencies {
     api(libs.grpc.stub)
     api(libs.grpc.kotlin.stub)
     api(libs.kotlinx.coroutines.core)
+    api(libs.grpc.netty.shaded)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.bouncycastle.prov)
+    implementation(libs.bouncycastle.pkix)
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
