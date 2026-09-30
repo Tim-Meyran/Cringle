@@ -302,6 +302,66 @@ class DeploymentTest {
         assertEquals(listOf("demo-0.1.0.lock.json"), Files.list(dir.resolve("locks")).use { st -> st.map { it.fileName.toString() }.toList() })
     }
 
+    /** Publishes the project [name] 1.0.0 with one blueprint and one fabric config that needs [instances] engines with the given roles. */
+    private fun publishPool(name: String, instances: Int, roles: List<String> = listOf("worker")) {
+        val work = Files.createDirectories(dir.resolve("build-$name"))
+        val block = BlueprintBlock("p1", "acme-demo/marker", config = JsonObject(mapOf("marker" to JsonPrimitive(dir.resolve("$name.txt").toString()))))
+        val project = TestProjectBuilder(name, "1.0.0")
+            .dependency("acme-demo", "^1.0.0")
+            .blueprint(Blueprint("main", listOf(block), emptyList()))
+            .fabric(FabricConfig("main", instances, roles, emptyMap()))
+            .build(work, listOf(buildPlugin("1.0.0", work).pkg))
+        repository.publish(project.file)
+    }
+
+    /**
+     * Placement (#17, Architecture 8.4): a fabric goes to the running engine with the fewest fabrics among those that
+     * have all roles and labels, and a tie goes to the smallest engine id. The engines `e1` and `e2` both have the role
+     * `worker`.
+     */
+    @Test
+    fun theLeastLoadedEngineGetsTheFabricAndATieGoesToTheSmallestId(): Unit = runBlocking {
+        publishPool("tie", 1)
+        publishPool("pool", 2)
+        publishPool("single", 1)
+        fun placed(r: cringle.management.v1.DeployProjectResponse) = r.fabricsList.associate { it.info.fabricId.value to it.engineId.value }
+
+        // both workers are empty: the tie goes to e1
+        assertEquals(mapOf("tie-main-1" to "e1"), placed(s.deploy(DeployProjectRequest.newBuilder().setProject("tie").build())))
+        // e1 has one fabric, e2 none: the first copy goes to e2, then both have one and the tie goes to e1
+        assertEquals(mapOf("pool-main-1" to "e2", "pool-main-2" to "e1"), placed(s.deploy(DeployProjectRequest.newBuilder().setProject("pool").build())))
+        // e1 has two fabrics, e2 one: the next one goes to e2
+        assertEquals(mapOf("single-main-1" to "e2"), placed(s.deploy(DeployProjectRequest.newBuilder().setProject("single").build())))
+        // the engine with the role `db` was never a candidate
+        assertTrue(fabricIds().values.none { it == "e3" })
+
+        // deploying a project again replaces its fabrics, it does not add to them
+        s.deploy(DeployProjectRequest.newBuilder().setProject("pool").build())
+        assertEquals(2, fabricIds().keys.count { it.startsWith("pool-") })
+    }
+
+    /**
+     * #17 "zwei Engines derselben Maschine teilen eine Version": the fabrics of one project run on two engines of one
+     * machine, and the plugin and the project exist once in the cache of the machine, with the hash of the package,
+     * while both engines have recorded that their fabric uses them.
+     */
+    @Test
+    fun twoEnginesOfOneMachineShareOneInstalledVersionOfAPackage(): Unit = runBlocking {
+        val result = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        assertEquals(setOf("e1", "e3"), result.fabricsList.map { it.engineId.value }.toSet())
+
+        assertEquals(listOf("acme-demo/1.0.0"), versionDirs("plugins"))
+        assertEquals(listOf("demo/0.1.0"), versionDirs("projects"))
+        assertEquals(repository.get("acme-demo", "1.0.0").sha256, Files.readString(home.resolve("plugins/acme-demo/1.0.0/.cringle-installed")).trim())
+        assertEquals(repository.get("demo", "0.1.0").sha256, Files.readString(home.resolve("projects/demo/0.1.0/.cringle-installed")).trim())
+        for ((engine, fabric) in listOf("e1" to "demo-two-1", "e3" to "demo-one-1")) {
+            val usage = Files.readString(home.resolve("cache/usage/$engine/$fabric"))
+            assertTrue("PLUGIN acme-demo 1.0.0" in usage && "PROJECT demo 0.1.0" in usage, "engine $engine does not record its use of the shared versions:\n$usage")
+        }
+        val leftovers = Files.walk(home).use { st -> st.filter { it.fileName.toString().let { n -> n.endsWith(".part") || ".installing-" in n || ".removing-" in n } }.toList() }
+        assertEquals(emptyList<Path>(), leftovers)
+    }
+
     @Test
     fun aCorruptDownloadIsRejectedAndNothingIsLeftInTheCache(): Unit = runBlocking {
         Files.write(repository.file("acme-demo", "1.0.0"), byteArrayOf(1, 2, 3))

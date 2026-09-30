@@ -13,7 +13,7 @@ java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--rou
 - `--combined`: runs the router (registry) of the machine inside the daemon process (Architecture 4.3). Its data lives in `<home>/router/`.
 - `--router host:port`: points the engines to an existing router instead.
 
-The daemon starts engines with the same JVM and class path it runs with. When the daemon stops, it stops the engines it started; the ManagementServer starts them again with `StartAllEngines`.
+The daemon starts engines with the same JVM and class path it runs with. When the daemon stops, it stops the engines it started. The ManagementServer brings them back during recovery (`Recover`, which also runs when the ManagementServer starts): it registers every engine it created with `autostart` (the default, see `CreateEngine`) at the daemon again if the daemon lost it and starts it, one engine after the other, and then deploys and starts the fabrics of the running engines that should run. Engines created without `autostart` stay stopped, and an engine that was stopped on purpose is not started again because stopping is not remembered (`autostart` is a setting, not the current state). The daemon API has a call `StartAllEngines`, but recovery does not use it.
 
 ## systemd
 

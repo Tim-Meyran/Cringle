@@ -107,7 +107,7 @@ class ManagementServerTest {
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
-    private fun startDaemon(port: Int = 0): Daemon = track(Daemon(home, port).start())
+    private fun startDaemon(port: Int = 0, combined: Boolean = false): Daemon = track(Daemon(home, port, combined = combined).start())
 
     private fun startManagement(users: UserManager? = null, repository: String? = null, router: String? = null, token: String? = null, recover: Boolean = false): ManagementServer =
         track(ManagementServer(ManagementCore(ManagementStore(dir.resolve("state.json")), repository, token, router), users = users, recoverOnStart = recover).start())
@@ -291,6 +291,47 @@ class ManagementServerTest {
         s2.removeFabric(fabricRef("m1", "e1", "idle"))
         assertEquals(listOf("shop"), s2.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsList.map { it.info.fabricId.value })
         assertNotNull(daemon2)
+    }
+
+    /**
+     * M4 "Fertig, wenn": after the machine was restarted (Daemon with its router and ManagementServer new, engine
+     * process gone) the project runs again and the registry of the router knows the placement again. The registry keeps
+     * the engine and its fabrics across a restart, but without a heartbeat it counts the engine as unreachable, so a
+     * reachable engine with the fabric in state RUNNING proves that the recovered engine reported it.
+     */
+    @Test
+    fun afterARestartOfTheMachineTheProjectRunsAgainAndTheRegistryKnowsThePlacement(): Unit = runBlocking {
+        val runningState = cringle.common.v1.FabricLifecycleState.FABRIC_LIFECYCLE_STATE_RUNNING.name
+        val marker = dir.resolve("marker.txt")
+        installPackages(marker)
+        val daemonPort = freePort()
+        val daemon = startDaemon(daemonPort, combined = true)
+        val server = startManagement()
+        val s = stub(server)
+        addMachine(s, daemon)
+        createAndStart(s)
+        s.deployFabric(deployRequest("m1", "e1", "shop", start = true))
+        assertEquals("started", Files.readString(marker))
+        val registry = daemon.router!!.registry
+        awaitTrue(what = "the registry knows the fabric of the engine before the restart") {
+            registry.lookupFabric("shop")?.record?.fabrics?.any { it.fabricId == "shop" && it.state == runningState } == true
+        }
+
+        // the machine goes down and comes up again: new Daemon (new router, same home), new ManagementServer
+        server.close()
+        daemon.close()
+        Files.delete(marker)
+        val daemon2 = startDaemon(daemonPort, combined = true)
+        val recovered = startManagement(recover = true)
+        assertEquals(emptyList<String>(), recovered.recovery!!.await().problems)
+
+        assertEquals("started", Files.readString(marker), "the project runs again")
+        val registry2 = daemon2.router!!.registry
+        awaitTrue(what = "the registry knows the placement of the recovered fabric") {
+            val view = registry2.lookupFabric("shop")
+            view != null && view.record.id == "e1" && view.reachability == cringle.router.Reachability.REACHABLE &&
+                view.record.fabrics.any { it.fabricId == "shop" && it.state == runningState }
+        }
     }
 
     @Test
