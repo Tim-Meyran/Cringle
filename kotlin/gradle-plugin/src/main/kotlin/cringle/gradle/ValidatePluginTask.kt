@@ -5,9 +5,11 @@ package cringle.gradle
 import cringle.packaging.PackageFormatException
 import cringle.packaging.PackageProblem
 import cringle.packaging.PackageReader
-import cringle.packaging.PackageValidator
 import cringle.packaging.VersionRange
 import org.gradle.api.GradleException
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.TaskAction
 import java.nio.file.Files
 
@@ -15,8 +17,17 @@ import java.nio.file.Files
  * Checks the declared plugin package without writing it: the manifest, the block definitions and the schema
  * documents are read back exactly as the runtime reads them, and every problem is reported as `<path>: <message>`
  * with the wording of the `packaging` library.
+ *
+ * The package is checked against the plugins it depends on, which the repository of `cringlePublish` (same address and
+ * token) provides, as the repository does when the package is published. Without a repository the check goes on with a
+ * warning, see [PluginValidation].
  */
 public abstract class ValidatePluginTask : CringlePluginPackageTask() {
+
+    /** The address of the repository as `host:port`; without it the environment and the profile are asked. */
+    @get:Input
+    @get:Optional
+    public abstract val server: Property<String>
 
     @TaskAction
     internal fun validate() {
@@ -54,7 +65,9 @@ public abstract class ValidatePluginTask : CringlePluginPackageTask() {
                 null
             }
             if (pkg != null) {
-                problems += PackageValidator.validatePlugin(pkg).map { ProblemRender.text(it) }
+                val result = PluginValidation.validate(pkg, server.orNull)
+                result.warnings.forEach { logger.warn(it) }
+                problems += result.problems.map { ProblemRender.text(it) }
             }
         } finally {
             Files.deleteIfExists(file)

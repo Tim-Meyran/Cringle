@@ -100,7 +100,7 @@ cringle {
 }
 ```
 
-`./gradlew cringlePackage` writes `build/distributions/acme-orders-1.2.0.cringle`; `cringleValidate` checks the same package against the contract without writing it. Everything the `cringle { }` block contributes has to exist in the project: the provider and driver classes, a schema document per schema, and whatever goes into `lib/` and `binaries/`. The example project has all of it and is the shortest path from nothing to a working package.
+`./gradlew cringlePackage` writes `build/distributions/acme-orders-1.2.0.cringle`; `cringleValidate` checks the same package against the contract without writing it. The package is checked against the plugins it depends on, as the repository does when it is published: a block that uses a schema of a dependency passes, a schema that the dependency does not have fails the build. The build asks the repository for those plugins, with the address and the token of `cringlePublish` (see "Publishing a plugin"); it only reads them and locks or resolves nothing, that is the deploy's job. Without a repository, because none is configured or because it is not reachable or does not answer, `cringleValidate` goes on with a warning and checks what it can: a reference to a schema outside the namespaces of the plugin itself is then taken as coming from its dependencies and checked when the package is published, while a reference into the plugin's own namespace that does not resolve still fails, and so does any reference outside the plugin in a plugin that declares no dependency (the message names the namespace and how to declare the dependency). `cringlePackage` runs `cringleValidate` first. Everything the `cringle { }` block contributes has to exist in the project: the provider and driver classes, a schema document per schema, and whatever goes into `lib/` and `binaries/`. The example project has all of it and is the shortest path from nothing to a working package.
 
 ## Publishing a plugin
 
@@ -133,7 +133,7 @@ cringle {
 
 The same ranking as in the CLI, so that a `cringle login` also holds for a Gradle build. Without an address anywhere the build fails with a message that names all four ways to set one.
 
-**The token.** A repository that knows users wants a token with the right `Permission.OPERATE`. The task takes it from `CRINGLE_TOKEN` or from the `token` entry of the profile, never from a build script and never from a command line, so a token cannot end up in a `build.gradle.kts` or in a log of a build that failed. A repository that needs a token and gets none fails the build with a message that names `CRINGLE_TOKEN` and `cringle login`.
+**The token.** A repository that knows users wants a token with the right `Permission.OPERATE`. The task takes it from `CRINGLE_TOKEN` or from the `token` entry of the profile, never from a build script and never from a command line, so it cannot end up in a `build.gradle.kts`. The task itself never writes the token anywhere: not into a message, not into the output of a build at the default level or with `--info`. With `--debug` Gradle lowers the log level of the gRPC transport, which then prints the headers of every call, including `authorization: Bearer ...`, so a `--debug` log can contain the token; do not share one. A repository that needs a token and gets none fails the build with a message that names `CRINGLE_TOKEN` and `cringle login`.
 
 **What a build says.** On success the task reports name, version, SHA-256 and the repository it published to:
 

@@ -52,6 +52,8 @@ public class CringlePlugin : Plugin<Project> {
 
         validate.configure {
             common(project, extension, jar, manifest)
+            // the same repository as `cringlePublish`: it holds the plugins this one depends on
+            server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
             group = TASK_GROUP
             description = "Validates the Cringle plugin package without writing it."
         }

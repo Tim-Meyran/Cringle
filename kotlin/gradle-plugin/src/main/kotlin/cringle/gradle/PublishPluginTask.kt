@@ -84,7 +84,12 @@ public abstract class PublishPluginTask : DefaultTask() {
      */
     private fun read(file: Path): Published = try {
         val (published, problems) = when (PackageReader.kind(file)) {
-            PackageKind.PLUGIN -> PackageReader.readPlugin(file).let { Published(it.manifest.name, it.manifest.version) to PackageValidator.validatePlugin(it) }
+            PackageKind.PLUGIN -> PackageReader.readPlugin(file).let { plugin ->
+                // against the plugins it depends on, like the repository does; --dryRun connects to nothing
+                val result = PluginValidation.validate(plugin, server.orNull, mayConnect = !dryRun.getOrElse(false))
+                result.warnings.forEach { logger.warn(it) }
+                Published(plugin.manifest.name, plugin.manifest.version) to result.problems
+            }
             PackageKind.PROJECT -> PackageReader.readProject(file).let { Published(it.manifest.name, it.manifest.version) to PackageValidator.validateProjectSources(it) }
         }
         if (problems.isNotEmpty()) {

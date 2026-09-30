@@ -70,15 +70,22 @@ internal object PublishSettings {
      * repository without a token is normal, so a missing token is no error here: a repository that wants one answers
      * with `UNAUTHENTICATED`, and the task turns that into a message that names both sources.
      */
-    fun resolve(server: String?, environment: Map<String, String>, profile: CliProfile?): PublishTarget {
+    fun resolve(server: String?, environment: Map<String, String>, profile: CliProfile?): PublishTarget =
+        find(server, environment, profile) ?: throw GradleException(
+            "cringlePublish: no repository address: use -Pcringle.server=host:port, " +
+                "cringle { publish { server = \"host:port\" } }, $SERVER_VARIABLE " +
+                "or 'cringle login --server host:port'",
+        )
+
+    /**
+     * The same as [resolve], but `null` if no address is configured anywhere: `cringleValidate` uses the repository to
+     * look up dependencies when it can and goes on without it when it cannot, where `cringlePublish` has to fail.
+     */
+    fun find(server: String?, environment: Map<String, String>, profile: CliProfile?): PublishTarget? {
         val address = server?.takeIf { it.isNotBlank() }
             ?: environment[SERVER_VARIABLE]?.takeIf { it.isNotBlank() }
             ?: profile?.server?.takeIf { it.isNotBlank() }
-            ?: throw GradleException(
-                "cringlePublish: no repository address: use -Pcringle.server=host:port, " +
-                    "cringle { publish { server = \"host:port\" } }, $SERVER_VARIABLE " +
-                    "or 'cringle login --server host:port'",
-            )
+            ?: return null
         val token = environment[TOKEN_VARIABLE]?.takeIf { it.isNotBlank() }
             ?: profile?.token?.takeIf { it.isNotBlank() }
         return PublishTarget(address, token)

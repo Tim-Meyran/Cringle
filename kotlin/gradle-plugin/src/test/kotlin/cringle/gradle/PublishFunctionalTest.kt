@@ -240,6 +240,29 @@ class PublishFunctionalTest {
     }
 
     /**
+     * AC 4 (#72): in a build with `--info` the token is nowhere in the output, not in a message of the plugin and not in
+     * anything the transport prints. Only `--debug` can show it, in the header dump of gRPC, see the test above. The
+     * build validates against the dependencies of the repository and publishes, so the token is used by both.
+     */
+    @Test
+    fun theTokenIsNowhereInTheOutputOfAnInfoBuild() {
+        val users = UserManager(FileUserStore(temp.resolve("users.json")))
+        val operator = users.createUser("author", setOf(UserRole.OPERATOR))
+        val token = users.createToken(operator.user.id, "info", null).secret
+        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val address = "127.0.0.1:${server.port}"
+        writeProfile(address, token)
+        val project = SamplePlugin.copyTo(temp, "info")
+        publishCore()
+
+        val result = runner(project, listOf("cringlePublish", "--info"), forward = false).build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":cringlePublish")?.outcome, excerpt(result.output))
+        assertEquals(TaskOutcome.SUCCESS, result.task(":cringleValidate")?.outcome, excerpt(result.output))
+        assertFalse(token in result.output, "the token appeared in the output of an --info build:\n${excerpt(result.output)}")
+        server.stop()
+    }
+    /**
      * The `acme-core` the sample depends on. A repository only takes a package whose dependencies it can resolve, so
      * the fixture has to hold the plugin the sample names.
      */
