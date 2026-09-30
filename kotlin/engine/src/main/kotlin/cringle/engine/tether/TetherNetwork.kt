@@ -21,6 +21,8 @@ import cringle.packaging.Blueprint
 import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
 import cringle.schema.SchemaValidator
+import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -31,10 +33,10 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 
 /** Hands an event to a block; implemented by the fabric runtime. */
@@ -59,7 +61,6 @@ public fun interface TetherDeliverer {
 public class TetherNetwork private constructor(
     private val config: TetherConfig,
     private val connections: Map<String, Connection>,
-    private val ports: Map<String, PortDefinition>,
     private val onDeliveryFailure: (TetherInfo, Throwable) -> Unit,
 ) : PortWiring, AutoCloseable {
     private val validator = config.schemas?.let { SchemaValidator(it) }
@@ -67,8 +68,21 @@ public class TetherNetwork private constructor(
     @Volatile private var deliverer: TetherDeliverer? = null
 
     @Volatile private var scope: CoroutineScope? = null
-    private val streamChannels = CopyOnWriteArrayList<Channel<*>>()
+    private val streamChannels = ConcurrentHashMap.newKeySet<Channel<*>>()
     private val tcpDrivers = CopyOnWriteArrayList<TcpDriver>()
+
+    /** The TCP drivers the last [close] closed; [awaitClosed] waits for them. */
+    @Volatile private var closingDrivers: List<TcpDriver> = emptyList()
+    private val pendingRequests = ConcurrentHashMap.newKeySet<CompletableDeferred<Any>>()
+
+    /** The reason the queues and streams were closed last, or `null` while the network is open. */
+    @Volatile private var stopping: TetherDeliveryException? = null
+
+    /** Completed by [close]: a sender that waits for room in a buffer waits for this as well. */
+    @Volatile private var stopped: CompletableDeferred<Unit> = CompletableDeferred()
+
+    /** The number of stream channels the network still has to close; read by the tests. */
+    internal val openStreamChannelCount: Int get() = streamChannels.size
 
     /** All tethers of the blueprint. */
     public val tethers: List<TetherInfo> = connections.values.map { it.info }.distinctBy { it.id }
@@ -76,6 +90,8 @@ public class TetherNetwork private constructor(
     /** Starts the delivery of messages to [deliverer]. */
     public suspend fun open(deliverer: TetherDeliverer) {
         close()
+        stopping = null
+        stopped = CompletableDeferred()
         this.deliverer = deliverer
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope = s
@@ -100,7 +116,7 @@ public class TetherNetwork private constructor(
         val port = checkNotNull(c.tcpPort)
         val receiver = provider(c.info.to.block).also { tcpDrivers += it }
         c.sender = provider(c.info.from.block).also { tcpDrivers += it }
-        val listener = receiver.listen(port)
+        val listener = receiver.listen(port, acceptCapacity = config.bufferCapacity)
         val target = PortRef(c.info.to.port, c.info.to.index)
         s.launch {
             listener.connections.collect { connection ->
@@ -128,16 +144,56 @@ public class TetherNetwork private constructor(
         override suspend fun close() = connection.close()
     }
 
-    /** Stops delivery, fails waiting senders and closes open streams. Safe to call more than once. */
+    /**
+     * Stops delivery, fails waiting senders and requests and closes open streams; the drivers of the TCP tethers get
+     * their sockets closed but are not waited for, see [awaitClosed]. Never blocks a thread, and may be called more
+     * than once.
+     */
     override fun close() {
+        val reason = TetherDeliveryException("the fabric is stopping")
+        stopping = reason
+        // before the queues are closed: a sender that waits for room does not learn anything from close(cause)
+        stopped.complete(Unit)
         scope?.cancel()
         scope = null
         deliverer = null
-        for (c in connections.values.distinctBy { it.info.id }) c.queue?.cancel()
-        for (ch in streamChannels) ch.cancel()
+        for (c in connections.values.distinctBy { it.info.id }) c.queue?.close(reason)
+        for (ch in streamChannels) ch.close(reason)
         streamChannels.clear()
+        for (r in pendingRequests) r.completeExceptionally(reason)
+        pendingRequests.clear()
         for (d in tcpDrivers) (d as? AutoCloseable)?.close()
+        closingDrivers = tcpDrivers.toList()
         tcpDrivers.clear()
+    }
+
+    /** The reason a sender gets when the network stops under it. */
+    private fun stopReason(): TetherDeliveryException = stopping ?: TetherDeliveryException("the fabric is stopping")
+
+    /**
+     * Puts [value] into a bounded [channel] and suspends while it is full, as every other send does. A closed
+     * channel alone would leave a waiting sender suspended, so the stop is awaited beside the send.
+     */
+    private suspend fun <T> send(channel: Channel<T>, value: T) {
+        select {
+            stopped.onAwait { throw stopReason() }
+            channel.onSend(value) { }
+        }
+    }
+
+    /**
+     * Waits at most [timeout] until the TCP tethers closed their listeners and freed their ports, and returns whether
+     * that happened. One timeout for all of them, never on a dispatcher thread.
+     */
+    public suspend fun awaitClosed(timeout: Duration): Boolean {
+        val drivers = closingDrivers
+        val start = System.nanoTime()
+        var allClosed = true
+        for (d in drivers) {
+            val left = timeout.minusNanos(System.nanoTime() - start)
+            if (!d.awaitClosed(if (left.isNegative) Duration.ZERO else left)) allClosed = false
+        }
+        return allClosed
     }
 
     private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition, val policy: DeliveryPolicy, val tcpPort: Int?) {
@@ -186,6 +242,9 @@ public class TetherNetwork private constructor(
             }
         } catch (_: CancellationException) {
             // closed
+        } catch (e: Throwable) {
+            // close() closed the queue with the reason its senders get; nothing is left to pump
+            if (e !== stopping) throw e
         }
     }
 
@@ -284,25 +343,18 @@ public class TetherNetwork private constructor(
 
         private fun queue(): Channel<Envelope> = c.queue ?: throw IllegalStateException("tether ${c.info.id}: the fabric is not running")
 
-        private suspend fun enqueue(e: Envelope) {
-            try {
-                queue().send(e)
-            } catch (_: ClosedSendChannelException) {
-                throw IllegalStateException("tether ${c.info.id}: the fabric is stopping")
-            } catch (e: CancellationException) {
-                throw e
-            }
-        }
-
         override suspend fun send(message: Any) {
             require(TetherType.MESSAGE, "send")
-            enqueue(Envelope.Message(validate(c, message, "message")))
+            // a closed queue throws the reason close() gave it
+            send(queue(), Envelope.Message(validate(c, message, "message")))
         }
 
         override suspend fun request(request: Any): Any {
             require(TetherType.REQUEST_RESPONSE, "request")
             val response = CompletableDeferred<Any>()
-            enqueue(Envelope.Request(validate(c, request, "request"), response))
+            pendingRequests += response
+            response.invokeOnCompletion { pendingRequests.remove(response) }
+            send(queue(), Envelope.Request(validate(c, request, "request"), response))
             try {
                 return withTimeout(config.requestTimeout.toMillis()) { response.await() }
             } catch (e: TimeoutCancellationException) {
@@ -317,7 +369,7 @@ public class TetherNetwork private constructor(
             val fromReceiver = Channel<Any>(config.bufferCapacity)
             streamChannels += toReceiver
             streamChannels += fromReceiver
-            enqueue(Envelope.Stream(toReceiver, fromReceiver))
+            send(queue(), Envelope.Stream(toReceiver, fromReceiver))
             return ValueStream(c, toReceiver, fromReceiver)
         }
 
@@ -336,7 +388,7 @@ public class TetherNetwork private constructor(
             val fromReceiver = Channel<ByteArray>(config.bufferCapacity)
             streamChannels += toReceiver
             streamChannels += fromReceiver
-            enqueue(Envelope.Bytes(toReceiver, fromReceiver))
+            send(queue(), Envelope.Bytes(toReceiver, fromReceiver))
             return ByteStream(c, toReceiver, fromReceiver)
         }
     }
@@ -351,10 +403,11 @@ public class TetherNetwork private constructor(
         override suspend fun send(item: Any) {
             val checked = validate(c, item, "stream item")
             hook(c, TrafficKind.STREAM_ITEM, checked)
-            outbound.send(checked)
+            send(outbound, checked)
         }
 
         override suspend fun close() {
+            streamChannels.remove(outbound)
             outbound.close()
         }
     }
@@ -368,10 +421,11 @@ public class TetherNetwork private constructor(
 
         override suspend fun write(bytes: ByteArray) {
             hook(c, TrafficKind.BYTES, bytes)
-            outbound.send(bytes)
+            send(outbound, bytes)
         }
 
         override suspend fun close() {
+            streamChannels.remove(outbound)
             outbound.close()
         }
     }
@@ -394,7 +448,6 @@ public class TetherNetwork private constructor(
         ): TetherNetwork {
             val problems = ArrayList<String>()
             val connections = HashMap<String, Connection>()
-            val ports = HashMap<String, PortDefinition>()
             val counts = blueprint.blocks.associate { it.id to it.varArgCounts }
 
             fun endpoint(e: Endpoint, direction: PortDirection, label: String): PortDefinition? {
@@ -438,11 +491,10 @@ public class TetherNetwork private constructor(
                 for (e in listOf(t.from, t.to)) {
                     val k = key(e.block, e.port, e.index)
                     if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"
-                    ports[k] = if (e === t.from) from else to
                 }
             }
             if (problems.isNotEmpty()) throw TetherWiringException("tethers cannot be wired:\n" + problems.joinToString("\n") { "  $it" })
-            return TetherNetwork(config, connections, ports, onDeliveryFailure)
+            return TetherNetwork(config, connections, onDeliveryFailure)
         }
     }
 }

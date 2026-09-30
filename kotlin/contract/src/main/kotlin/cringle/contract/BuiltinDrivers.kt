@@ -2,6 +2,7 @@
 
 package cringle.contract
 
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 
@@ -110,11 +111,23 @@ public interface TcpListener {
  * port that is already in use fails at once with [PortInUseException], before the operating system is asked.
  */
 public interface TcpDriver : Driver {
-    /** Listens on [port] (0 picks a free port) on the loopback interface, or on all interfaces if [anyInterface]. */
-    public suspend fun listen(port: Int, anyInterface: Boolean = false): TcpListener
+    /**
+     * Listens on [port] (0 picks a free port) on the loopback interface, or on all interfaces if [anyInterface]. At
+     * most [acceptCapacity] accepted connections wait to be taken from [TcpListener.connections]; a connection that
+     * arrives while that buffer is full is closed at once and reported, because a listener must not hold connections
+     * that nobody takes.
+     */
+    public suspend fun listen(port: Int, anyInterface: Boolean = false, acceptCapacity: Int = 64): TcpListener
 
     /** Connects to [host]:[port]. */
     public suspend fun connect(host: String, port: Int): TcpConnection
+
+    /**
+     * Waits at most [timeout] until every listener of this driver has stopped and every port it claimed is free, and
+     * returns whether that happened. Closing a driver never blocks (Architecture chapter 10), so this is how a caller
+     * waits for the ports to be really free.
+     */
+    public suspend fun awaitClosed(timeout: Duration): Boolean = true
 }
 
 /** One entry of the engine's log store. */
