@@ -296,10 +296,16 @@ internal val COMMANDS: List<Command> = listOf(
     },
     Command(
         listOf("deploy"), "<project>", "Deploy a project from the repository onto the engines its fabric configuration selects",
-        listOf(opt("version", "version range, default: the highest release", "RANGE"), flag("no-start", "deploy the fabrics but do not start them")), 1,
+        listOf(
+            opt("version", "version range, default: the highest release", "RANGE"),
+            flag("no-start", "deploy the fabrics but do not start them"),
+            flag("relock", "resolve the dependencies again instead of using the lock file of this version"),
+        ),
+        1,
     ) { env, a ->
         val b = DeployProjectRequest.newBuilder().setProject(a.positional[0]).setVersionRange(a.option("version").orEmpty())
         if (a.flag("no-start")) b.start = false
+        if (a.flag("relock")) b.relock = true
         val r = env.m.deploy(b.build())
         Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "fabrics" to r.fabricsList.map(::fabricRow)))
     },

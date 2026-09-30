@@ -22,6 +22,9 @@ import cringle.engine.v1.ListFabricsRequest
 import cringle.engine.v1.LogEntry
 import cringle.engine.v1.QueryLogsRequest
 import cringle.repository.v1.RepositoryServiceGrpcKt.RepositoryServiceCoroutineStub
+import cringle.packaging.LockFile
+import cringle.packaging.PackageFormatException
+import cringle.packaging.VersionRange
 import cringle.router.users.AuthInterceptor
 import cringle.router.v1.RegistryServiceGrpcKt.RegistryServiceCoroutineStub
 import io.grpc.CallOptions
@@ -39,6 +42,8 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** An error of the ManagementServer with the gRPC status it is reported as. */
 public class ManagementException(public val code: Status.Code, message: String) : RuntimeException(message)
@@ -428,28 +433,103 @@ public class ManagementCore(
         return base.take(63 - suffix.length) + suffix
     }
 
+    private val projectLocks = ConcurrentHashMap<String, Mutex>()
+
+    /** Deploy and undeploy of one project never overlap; other projects are not held up. */
+    private fun projectLock(project: String): Mutex = projectLocks.computeIfAbsent(project) { Mutex() }
+
+    /** Test hook: runs before each fabric of a deployment is sent to its Engine. */
+    internal var beforeFabricDeploy: suspend (fabricId: String) -> Unit = {}
+
+    private fun lockPath(project: String, version: String) = store.directory.resolve("locks").resolve("$project-$version.lock.json")
+
     /**
-     * Deploys [project] (version [range], default any release): resolves it against the Repository, writes the lock,
-     * places every fabric of the fabric configuration on running Engines with all required roles and labels (the
-     * least loaded first) and lets those Engines download what they miss. Fabrics of the project that are deployed
-     * already are replaced. If one fabric cannot be deployed, the ones deployed by this call are removed again.
+     * The lock file of the project version that a deploy for [range] would pick (the highest release in the range),
+     * with that version; `null` if there is none. A lock file that cannot be used is an error, not a reason to
+     * resolve again behind the back of the user: `--relock` is the way out.
      */
-    public suspend fun deploy(project: String, range: String, start: Boolean): DeployResult {
-        val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
-        val repo = repositoryClient(defaultAddress)
-        val resolution = try {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cringle.packaging.Resolver.resolve(mapOf(project to range.ifBlank { "*" }), repo) }
-        } catch (e: cringle.packaging.ResolutionException) {
-            throw ManagementException(if (e.failure == cringle.packaging.ResolutionFailure.UNKNOWN_PACKAGE) Status.Code.NOT_FOUND else Status.Code.FAILED_PRECONDITION, e.message ?: "resolution failed")
+    private suspend fun existingLock(repo: cringle.repository.RepositoryClient, project: String, range: String): Pair<String, LockFile>? {
+        val wanted = try {
+            VersionRange.parse(range.ifBlank { "*" })
+        } catch (_: IllegalArgumentException) {
+            return null // resolving reports the invalid range
+        }
+        val candidate = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { repo.versions(project) }.filter { wanted.matches(it) }.maxOrNull()
         } catch (e: cringle.repository.RepositoryClientException) {
             throw ManagementException(e.status, "repository: ${e.message}")
+        } ?: return null
+        val version = candidate.toString()
+        val path = lockPath(project, version)
+        if (!java.nio.file.Files.exists(path)) return null
+        val lock = try {
+            LockFile.parse(java.nio.file.Files.readString(path))
+        } catch (e: PackageFormatException) {
+            throw ManagementException(Status.Code.FAILED_PRECONDITION, "lock file $path is damaged (${e.message}); deploy with --relock to resolve again")
         }
-        val rootInfo = resolution.packages.getValue(project)
-        val version = rootInfo.version.toString()
-        val lock = resolution.toLock()
-        val lockText = lock.encode()
         val problems = lock.problems()
-        if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "inconsistent lock: " + problems.joinToString { "${it.path}: ${it.message}" })
+        if (problems.isNotEmpty() || lock.packages[project]?.version != version) {
+            val what = problems.joinToString { "${it.path}: ${it.message}" }.ifEmpty { "it does not lock $project@$version" }
+            throw ManagementException(Status.Code.FAILED_PRECONDITION, "lock file $path is inconsistent ($what); deploy with --relock to resolve again")
+        }
+        // the locked bytes must be the ones the repository has
+        for ((name, locked) in lock.packages) {
+            val entry = try {
+                repo.get(name, locked.version)
+            } catch (e: cringle.repository.RepositoryClientException) {
+                throw ManagementException(e.status, "repository: locked package $name@${locked.version}: ${e.message}")
+            }
+            if (!entry.sha256.equals(locked.hash, ignoreCase = true)) {
+                throw ManagementException(
+                    Status.Code.FAILED_PRECONDITION,
+                    "$name@${locked.version} has hash ${entry.sha256} in the repository, but the lock file $path says ${locked.hash}; deploy with --relock to accept the repository's version",
+                )
+            }
+        }
+        return version to lock
+    }
+
+    /**
+     * Deploys [project] (version [range], default any release) and places every fabric of the fabric configuration on
+     * running Engines with all required roles and labels (the least loaded first); the Engines download what they miss.
+     *
+     * Versions come from the lock file `locks/<project>-<version>.lock.json` if there is one for the version this deploy
+     * picks; otherwise (or with [relock]) the project is resolved against the Repository and the lock file is written.
+     * Deploy and [undeploy] of one project run one after the other.
+     *
+     * Everything that can fail without touching the running system is done first: resolving, reading the package,
+     * placement and building the requests. Only then are the fabrics of the project that are deployed already removed
+     * and the new ones deployed. If that fails, the new fabrics are removed again and the previous ones are restored
+     * from their recorded requests.
+     */
+    public suspend fun deploy(project: String, range: String, start: Boolean, relock: Boolean = false): DeployResult {
+        val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
+        val repo = repositoryClient(defaultAddress)
+        return projectLock(project).withLock { deployLocked(project, range, start, relock, repo) }
+    }
+
+    private suspend fun deployLocked(project: String, range: String, start: Boolean, relock: Boolean, repo: cringle.repository.RepositoryClient): DeployResult {
+        val pinned = if (relock) null else existingLock(repo, project, range)
+        val lock: LockFile
+        val version: String
+        if (pinned != null) {
+            version = pinned.first
+            lock = pinned.second
+        } else {
+            val resolution = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cringle.packaging.Resolver.resolve(mapOf(project to range.ifBlank { "*" }), repo) }
+            } catch (e: cringle.packaging.ResolutionException) {
+                throw ManagementException(if (e.failure == cringle.packaging.ResolutionFailure.UNKNOWN_PACKAGE) Status.Code.NOT_FOUND else Status.Code.FAILED_PRECONDITION, e.message ?: "resolution failed")
+            } catch (e: cringle.repository.RepositoryClientException) {
+                throw ManagementException(e.status, "repository: ${e.message}")
+            }
+            version = resolution.packages.getValue(project).version.toString()
+            lock = resolution.toLock()
+            val problems = lock.problems()
+            if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "inconsistent lock: " + problems.joinToString { "${it.path}: ${it.message}" })
+        }
+        val lockText = lock.encode()
+        val rootHash = lock.packages.getValue(project).hash
 
         val projectPackage = try {
             val entry = repo.get(project, version)
@@ -470,14 +550,11 @@ public class ManagementCore(
             if (projectPackage.blueprints.none { it.name == c.blueprint }) throw ManagementException(Status.Code.FAILED_PRECONDITION, "fabric configuration refers to unknown blueprint '${c.blueprint}'")
         }
 
-        java.nio.file.Files.createDirectories(store.directory.resolve("locks"))
-        java.nio.file.Files.writeString(store.directory.resolve("locks").resolve("$project-$version.lock.json"), lockText)
-
-        // replace what is deployed, then place on what is left
-        undeploy(project)
+        // place on the running Engines, counting the load without the fabrics this deploy is going to replace
+        val previous = snapshot().fabrics.filter { projectOf(it) == project }
         val engines = listEngines(null).filter { it.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING }
         val load = HashMap<Pair<String, String>, Int>()
-        snapshot().fabrics.forEach { load.merge(it.machine to it.engineId, 1, Int::plus) }
+        snapshot().fabrics.filter { it !in previous }.forEach { load.merge(it.machine to it.engineId, 1, Int::plus) }
         val plan = ArrayList<Triple<EngineView, String, String>>() // engine, fabric id, blueprint
         for (config in configs) {
             val candidates = engines
@@ -497,44 +574,78 @@ public class ManagementCore(
         }
         if (plan.map { it.second }.distinct().size != plan.size) throw ManagementException(Status.Code.FAILED_PRECONDITION, "the fabric configuration of $project@$version yields duplicate fabric ids")
 
+        val plugins = lock.packages.filterKeys { it != project }.toSortedMap()
+        val requests = ArrayList<Triple<EngineView, String, DeployFabricRequest>>()
+        for ((engine, fabricId, blueprint) in plan) {
+            val machine = machine(engine.machine)
+            val address = repositoryOf(machine)
+            val client = repositoryClient(address)
+            val builder = DeployFabricRequest.newBuilder()
+                .setFabricId(FabricId.newBuilder().setValue(fabricId))
+                .setProject(cringle.common.v1.ProjectRef.newBuilder().setName(project).setVersion(version))
+                .setBlueprint(blueprint)
+            val source = cringle.engine.v1.PackageSource.newBuilder().setRepositoryAddress(address)
+            source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PROJECT, project, version, rootHash))
+            for ((name, locked) in plugins) {
+                val trust = try {
+                    client.get(name, locked.version).trust
+                } catch (e: cringle.repository.RepositoryClientException) {
+                    throw ManagementException(e.status, "repository $address: ${e.message}")
+                }
+                builder.addPlugins(
+                    cringle.engine.v1.DeployedPlugin.newBuilder()
+                        .setPlugin(cringle.common.v1.PluginRef.newBuilder().setName(name).setVersion(locked.version))
+                        .setTrust(if (trust == cringle.repository.PluginTrust.TRUSTED) cringle.engine.v1.PluginTrust.PLUGIN_TRUST_TRUSTED else cringle.engine.v1.PluginTrust.PLUGIN_TRUST_UNTRUSTED),
+                )
+                source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PLUGIN, name, locked.version, locked.hash))
+            }
+            builder.setSource(source)
+            requests += Triple(engine, fabricId, builder.build())
+        }
+
+        // nothing has been touched so far; a lock that cannot be written stops the deploy here
+        if (pinned == null) writeAtomically(lockPath(project, version), lockText)
+
+        undeployLocked(project)
+        val touched = ArrayList<Triple<String, String, String>>() // machine, engine, fabric
         val deployed = ArrayList<FabricView>()
         try {
-            for ((engine, fabricId, blueprint) in plan) {
-                val machine = machine(engine.machine)
-                val address = repositoryOf(machine)
-                val client = repositoryClient(address)
-                val plugins = resolution.packages.values.filter { it.name != project }.sortedBy { it.name }
-                val builder = DeployFabricRequest.newBuilder()
-                    .setFabricId(FabricId.newBuilder().setValue(fabricId))
-                    .setProject(cringle.common.v1.ProjectRef.newBuilder().setName(project).setVersion(version))
-                    .setBlueprint(blueprint)
-                val source = cringle.engine.v1.PackageSource.newBuilder().setRepositoryAddress(address)
-                source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PROJECT, project, version, rootInfo.hash))
-                for (plugin in plugins) {
-                    val trust = try {
-                        client.get(plugin.name, plugin.version.toString()).trust
-                    } catch (e: cringle.repository.RepositoryClientException) {
-                        throw ManagementException(e.status, "repository $address: ${e.message}")
-                    }
-                    builder.addPlugins(
-                        cringle.engine.v1.DeployedPlugin.newBuilder()
-                            .setPlugin(cringle.common.v1.PluginRef.newBuilder().setName(plugin.name).setVersion(plugin.version.toString()))
-                            .setTrust(if (trust == cringle.repository.PluginTrust.TRUSTED) cringle.engine.v1.PluginTrust.PLUGIN_TRUST_TRUSTED else cringle.engine.v1.PluginTrust.PLUGIN_TRUST_UNTRUSTED),
-                    )
-                    source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PLUGIN, plugin.name, plugin.version.toString(), plugin.hash))
-                }
-                builder.setSource(source)
+            for ((engine, fabricId, request) in requests) {
+                val engineId = engine.process.engineId.value
+                touched += Triple(engine.machine, engineId, fabricId)
                 try {
-                    deployed += deployFabric(engine.machine, engine.process.engineId.value, builder.build(), start)
+                    beforeFabricDeploy(fabricId)
+                    deployed += deployFabric(engine.machine, engineId, request, start)
                 } catch (e: StatusException) {
-                    throw ManagementException(e.status.code, "deploying $fabricId on ${engine.machine}/${engine.process.engineId.value}: ${e.status.description ?: e.status.code.name}")
+                    throw ManagementException(e.status.code, "deploying $fabricId on ${engine.machine}/$engineId: ${e.status.description ?: e.status.code.name}")
                 }
             }
         } catch (e: Exception) {
-            deployed.forEach { runCatching { removeFabricQuietly(it.machine, it.engineId, it.info.fabricId.value) } }
-            throw e
+            // cleanup must not be cancelled with the call that failed
+            val notRestored = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                touched.forEach { (machineId, engineId, fabricId) -> runCatching { removeFabricQuietly(machineId, engineId, fabricId) } }
+                restore(previous)
+            }
+            if (notRestored.isEmpty()) throw e
+            val code = (e as? ManagementException)?.code ?: Status.Code.INTERNAL
+            throw ManagementException(code, "${e.message}; the previous fabrics of $project could not all be restored: ${notRestored.joinToString()}")
         }
         return DeployResult(project, version, lockText, deployed)
+    }
+
+    /** Deploys [previous] again on their Engines from the recorded requests; returns the ones that could not be restored. */
+    private suspend fun restore(previous: List<FabricRecord>): List<String> {
+        val failed = ArrayList<String>()
+        for (f in previous) {
+            try {
+                deployFabric(f.machine, f.engineId, DeployFabricRequest.parseFrom(f.deploy), f.desiredRunning)
+            } catch (e: StatusException) {
+                failed += "${f.machine}/${f.engineId}/${f.fabricId}: ${e.status.description ?: e.status.code.name}"
+            } catch (e: ManagementException) {
+                failed += "${f.machine}/${f.engineId}/${f.fabricId}: ${e.message}"
+            }
+        }
+        return failed
     }
 
     private fun artifact(kind: cringle.engine.v1.ArtifactKind, name: String, version: String, hash: String) =
@@ -553,7 +664,9 @@ public class ManagementCore(
     }
 
     /** Stops and removes all fabrics of [project]; returns them as `<machine>/<engine>/<fabric>`. */
-    public suspend fun undeploy(project: String): List<String> {
+    public suspend fun undeploy(project: String): List<String> = projectLock(project).withLock { undeployLocked(project) }
+
+    private suspend fun undeployLocked(project: String): List<String> {
         val fabrics = snapshot().fabrics.filter { projectOf(it) == project }
         for (f in fabrics) removeFabricQuietly(f.machine, f.engineId, f.fabricId)
         return fabrics.map { "${it.machine}/${it.engineId}/${it.fabricId}" }

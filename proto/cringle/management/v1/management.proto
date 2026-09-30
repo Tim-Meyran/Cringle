@@ -265,6 +265,9 @@ message DeployProjectRequest {
   string version_range = 2;
   // Start the fabrics after deploying them. Default: true.
   optional bool start = 3;
+  // Resolve again and overwrite the lock file. Without it, an existing lock file of the resolved
+  // project version is used and nothing is resolved.
+  bool relock = 4;
 }
 
 message DeployProjectResponse {
