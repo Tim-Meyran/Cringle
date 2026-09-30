@@ -72,7 +72,11 @@ public class Engine private constructor(
     public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers))
 
     /** The package cache of the machine (shared by all engines with the same Cringle home). */
-    public val cache: PackageCache = PackageCache(home).also { it.clearEngine(config.id) }
+    public val cache: PackageCache = PackageCache(home).also {
+        it.clearEngine(config.id)
+        // what an earlier crash left in the cache (old downloads, unfinished installs and removals)
+        it.sweepLeftovers()
+    }
 
     private val lock = Any()
     private var currentConfig = config
@@ -227,8 +231,8 @@ public class Engine private constructor(
                 request.pluginsList.map { Artifact(ArtifactType.PLUGIN, it.plugin.name, it.plugin.version, "") }
 
         override suspend fun cleanupCache(request: cringle.engine.v1.CleanupCacheRequest): cringle.engine.v1.CleanupCacheResponse {
-            val removed = withContext(Dispatchers.IO) { cache.cleanup(Duration.ofSeconds(request.minUnusedSeconds.coerceAtLeast(0))) }
-            return cringle.engine.v1.CleanupCacheResponse.newBuilder().addAllRemoved(removed).build()
+            val report = withContext(Dispatchers.IO) { cache.cleanupReport(Duration.ofSeconds(request.minUnusedSeconds.coerceAtLeast(0))) }
+            return cringle.engine.v1.CleanupCacheResponse.newBuilder().addAllRemoved(report.removed).addAllFailed(report.failed).build()
         }
 
         private suspend fun deployLocal(request: DeployFabricRequest): FabricInfo = fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {

@@ -698,6 +698,7 @@ public class ManagementCore(
             }
             try {
                 engineApi(m, running.managementPort).cleanupCache(cringle.engine.v1.CleanupCacheRequest.newBuilder().setMinUnusedSeconds(minUnusedSeconds).build())
+                    .also { r -> r.failedList.forEach { problems += "${m.id}: could not remove $it" } }
                     .removedList.forEach { removed += "${m.id}: $it" }
             } catch (e: StatusException) {
                 problems += "${m.id}: ${e.status.description ?: e.status.code.name}"

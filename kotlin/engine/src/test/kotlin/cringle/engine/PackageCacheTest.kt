@@ -148,4 +148,181 @@ class PackageCacheTest {
         cache.clearEngine("e1")
         assertEquals(listOf("plugins/acme-core@1.0.0"), cache.cleanup(Duration.ZERO))
     }
+    // --- hardening (#69) ---
+
+    /** File operations that fail where a test says so, like a locked file on Windows does. */
+    private class FailingOps(
+        private val failRename: (Path) -> Boolean = { false },
+        private val deleteFailsAfterTheMarker: Boolean = false,
+    ) : CacheFileOps {
+        private val real = DefaultCacheFileOps(attempts = 1, pauseMillis = 0)
+
+        override fun rename(from: Path, to: Path) {
+            if (failRename(from)) throw java.nio.file.FileSystemException(from.toString(), null, "the process cannot access the file because it is being used by another process")
+            real.rename(from, to)
+        }
+
+        override fun deleteTree(dir: Path) {
+            if (deleteFailsAfterTheMarker && dir.fileName.toString().contains(".removing-")) {
+                // a deletion that dies in the middle: the marker is gone, the rest is still there
+                Files.deleteIfExists(dir.resolve(PackageCache.MARKER))
+                throw java.io.IOException("the process cannot access the file because it is being used by another process")
+            }
+            real.deleteTree(dir)
+        }
+    }
+
+    private fun versionDir(name: String, version: String = "1.0.0") = home.resolve("plugins/$name/$version")
+
+    private fun names(dir: Path): List<String> = if (!Files.isDirectory(dir)) emptyList() else Files.list(dir).use { s -> s.map { it.fileName.toString() }.sorted().toList() }
+
+    @Test
+    fun aVersionThatCannotBeRemovedDoesNotStopTheOthersAndIsReported(): Unit = runBlocking {
+        val warnings = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val clock = Clocks()
+        val cache = PackageCache(home, clock, FailingOps(failRename = { it.parent.fileName.toString() == "locked" }), { warnings += it })
+        val f = fetcher()
+        for (n in listOf("aaa", "locked", "zzz")) cache.ensure(artifact(n), f)
+
+        val report = cache.cleanupReport(Duration.ZERO)
+        assertEquals(listOf("plugins/aaa@1.0.0", "plugins/zzz@1.0.0"), report.removed)
+        assertEquals(1, report.failed.size, report.failed.toString())
+        assertTrue(report.failed.single().startsWith("plugins/locked@1.0.0: "), report.failed.single())
+        assertTrue(warnings.any { it.contains("plugins/locked@1.0.0") }, warnings.toString())
+        // the version that could not be removed is still complete and usable
+        assertTrue(Files.exists(versionDir("locked").resolve(PackageCache.MARKER)))
+        assertFalse(cache.ensure(artifact("locked"), f))
+        assertEquals(emptyList<String>(), leftovers())
+        // a later cleanup, when the file is free, removes it
+        assertEquals(listOf("plugins/locked@1.0.0"), PackageCache(home, clock).cleanup(Duration.ZERO))
+    }
+
+    @Test
+    fun aDeletionThatFailsInTheMiddleNeverLeavesAHalfDeletedVersion(): Unit = runBlocking {
+        val clock = Clocks()
+        val cache = PackageCache(home, clock, FailingOps(deleteFailsAfterTheMarker = true), {})
+        val f = fetcher()
+        cache.ensure(artifact("gone"), f)
+
+        val report = cache.cleanupReport(Duration.ZERO)
+        // the version is gone under its name, complete or not at all: there is no marker-less directory left under it
+        assertEquals(listOf("plugins/gone@1.0.0"), report.removed)
+        assertEquals(emptyList<String>(), report.failed)
+        assertFalse(Files.exists(versionDir("gone")))
+        val left = names(home.resolve("plugins/gone"))
+        assertEquals(1, left.size, left.toString())
+        assertTrue(left.single().startsWith("1.0.0.removing-"), left.toString())
+
+        // the leftover is not a version: ensure installs a fresh one without an error, cleanup does not see the leftover
+        assertTrue(cache.ensure(artifact("gone"), f))
+        assertTrue(Files.exists(versionDir("gone").resolve(PackageCache.MARKER)))
+        assertEquals(listOf("plugins/gone@1.0.0"), PackageCache(home, clock).cleanup(Duration.ZERO))
+
+        // it is removed once it is old enough: not after ten minutes, after two hours, by cleanup and at the start
+        val leftover = home.resolve("plugins/gone").resolve(left.single())
+        assertTrue(Files.exists(leftover))
+        // the fake deletion touched the directory with the real time; the age is measured on the test clock
+        Files.setLastModifiedTime(leftover, java.nio.file.attribute.FileTime.from(clock.instant()))
+        clock.now = clock.now.plus(Duration.ofMinutes(10))
+        assertEquals(emptyList<String>(), PackageCache(home, clock).sweepLeftovers())
+        assertTrue(Files.exists(leftover))
+        clock.now = clock.now.plus(Duration.ofHours(2))
+        assertEquals(listOf("plugins/gone/${left.single()}"), PackageCache(home, clock).sweepLeftovers())
+        assertFalse(Files.exists(leftover))
+    }
+
+    @Test
+    fun handPlacedPackagesAreKeptWhileTheRestIsCleanedUp(): Unit = runBlocking {
+        val cache = PackageCache(home)
+        Files.createDirectories(versionDir("manual"))
+        Files.writeString(versionDir("manual").resolve("file.txt"), "mine")
+        cache.ensure(artifact("cached"), fetcher())
+        assertEquals(listOf("plugins/cached@1.0.0"), cache.cleanup(Duration.ZERO))
+        assertEquals("mine", Files.readString(versionDir("manual").resolve("file.txt")))
+        assertThrows<PackageCacheException> { runBlocking { cache.ensure(artifact("manual"), fetcher()) } }
+        assertEquals("mine", Files.readString(versionDir("manual").resolve("file.txt")))
+    }
+
+    @Test
+    fun ensureAndCleanupRunTogetherWithoutAMissingVersionOrAnError(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val a = artifact("busy")
+        val f = fetcher()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val cleanerFailures = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val cleanups = AtomicInteger()
+        // a second engine of the same machine cleans up as fast as it can, removing everything that is unused
+        val cleaner = Thread {
+            val cache = PackageCache(home, onWarning = {})
+            try {
+                while (!done.get()) {
+                    cache.cleanupReport(Duration.ZERO)
+                    cleanups.incrementAndGet()
+                }
+            } catch (e: Throwable) {
+                cleanerFailures += e
+            }
+        }
+        cleaner.start()
+        try {
+            val cache = PackageCache(home, onWarning = {})
+            // ensure throws if it meets a directory without marker (a half-deleted version): it must never happen
+            repeat(150) { i ->
+                cache.ensure(a, f)
+                cache.recordUsage("e1", "fab$i", listOf(a))
+                cache.clearUsage("e1", "fab$i")
+            }
+            cache.ensure(a, f)
+            cache.recordUsage("e1", "last", listOf(a))
+        } finally {
+            done.set(true)
+            cleaner.join()
+        }
+        assertEquals(emptyList<Throwable>(), cleanerFailures)
+        assertTrue(cleanups.get() > 0, "the cleanup ran")
+        // the version that is in use is there, complete, and is not removed
+        assertTrue(Files.exists(versionDir("busy").resolve(PackageCache.MARKER)))
+        assertEquals(emptyList<String>(), PackageCache(home).cleanup(Duration.ZERO))
+        assertTrue(Files.exists(versionDir("busy").resolve(PackageCache.MARKER)))
+        // what the cleanup removed while it ran left nothing that is older work in progress
+        assertEquals(emptyList<String>(), leftovers().filter { it.contains(".part") })
+    }
+    @Test
+    fun oldDownloadsAndUnfinishedInstallsAreRemovedAndNewOnesStay(): Unit = runBlocking {
+        val clock = Clocks()
+        val cache = PackageCache(home, clock)
+        cache.ensure(artifact("keep"), fetcher())
+        Files.createDirectories(versionDir("manual", "2.0.0"))
+        val downloads = Files.createDirectories(home.resolve("cache/downloads"))
+        val oldPart = Files.writeString(downloads.resolve("${java.util.UUID.randomUUID()}.part"), "old")
+        val newPart = Files.writeString(downloads.resolve("${java.util.UUID.randomUUID()}.part"), "new")
+        val other = Files.writeString(downloads.resolve("readme.txt"), "not a download")
+        fun staging(version: String, kind: String): Path {
+            val d = Files.createDirectories(home.resolve("plugins/keep/$version.$kind-${java.util.UUID.randomUUID()}"))
+            Files.writeString(d.resolve("x"), "x")
+            return d
+        }
+        val oldInstall = staging("3.0.0", "installing")
+        val newInstall = staging("4.0.0", "installing")
+        val oldRemoval = staging("5.0.0", "removing")
+        val now = clock.instant()
+        for (p in listOf(oldPart, oldInstall, oldRemoval, other)) Files.setLastModifiedTime(p, java.nio.file.attribute.FileTime.from(now.minus(Duration.ofHours(2))))
+        for (p in listOf(newPart, newInstall)) Files.setLastModifiedTime(p, java.nio.file.attribute.FileTime.from(now.minus(Duration.ofMinutes(10))))
+
+        assertEquals(emptyList<String>(), cache.cleanup(Duration.ofDays(1000))) // removes no version, but sweeps
+        assertFalse(Files.exists(oldPart))
+        assertFalse(Files.exists(oldInstall))
+        assertFalse(Files.exists(oldRemoval))
+        assertTrue(Files.exists(newPart), "a download of the last minutes may still be running")
+        assertTrue(Files.exists(newInstall), "an installation of the last minutes may still be running")
+        assertTrue(Files.exists(other), "only .part files are downloads")
+        assertTrue(Files.exists(versionDir("keep").resolve(PackageCache.MARKER)))
+        assertTrue(Files.isDirectory(versionDir("manual", "2.0.0")))
+
+        // at the start of an engine the same happens, without a cleanup
+        val later = Clocks(now.plus(Duration.ofHours(3)))
+        val swept = PackageCache(home, later).sweepLeftovers()
+        assertEquals(listOf("cache/downloads/${newPart.fileName}", "plugins/keep/${newInstall.fileName}"), swept)
+        assertTrue(Files.exists(other))
+    }
 }

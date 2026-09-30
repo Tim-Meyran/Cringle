@@ -53,6 +53,12 @@ public class EngineSupervisor(
     private val stopTimeout: Duration = Duration.ofSeconds(30),
     /** Called after the daemon stopped an engine process, with the engine id. */
     private val onStopped: (String) -> Unit = {},
+    /** Appends one line to a log file; replaced in tests to make writing fail. */
+    private val appendLog: (Path, String) -> Unit = { file, line ->
+        Files.writeString(file, line + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+    },
+    /** Where the supervisor reports problems of its own (at most once per engine process for a failing log file). */
+    private val onWarning: (String) -> Unit = { System.err.println("WARNING: $it") },
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -152,14 +158,29 @@ public class EngineSupervisor(
         throw DaemonException(DaemonError.FAILED_PRECONDITION, message)
     }
 
+    /**
+     * Reads the standard output of the engine process until it ends. A failure to write the log (disk full, file
+     * locked) is reported once and the lines are discarded from then on, but the stream is always read to its end: an
+     * engine whose output nobody reads blocks as soon as the pipe is full.
+     */
     private fun pumpOutput(m: Managed, process: Process, port: CompletableFuture<Int>) {
+        var logFailed = false
+        val logFile = logs.resolve("${m.id}.out.log")
         try {
             process.inputStream.bufferedReader().useLines { lines ->
                 for (line in lines) {
                     if (!port.isDone && line.startsWith("management-port=")) {
                         line.removePrefix("management-port=").trim().toIntOrNull()?.let { port.complete(it) }
                     }
-                    Files.writeString(logs.resolve("${m.id}.out.log"), line + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+                    if (logFailed) continue
+                    try {
+                        appendLog(logFile, line)
+                    } catch (e: Exception) {
+                        logFailed = true
+                        runCatching {
+                            onWarning("engine '${m.id}': cannot write $logFile (${e.message}); its output is discarded until the process ends")
+                        }
+                    }
                 }
             }
         } catch (_: Exception) {
