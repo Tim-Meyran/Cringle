@@ -268,7 +268,11 @@ public class ManagementCore(
         d.copy(fabrics = d.fabrics.map { if (it.machine == machineId && it.engineId == engineId && it.fabricId == fabricId) it.copy(desiredRunning = running) else it }) to Unit
     }
 
-    /** Deploys a fabric on a running Engine and remembers it. */
+    /**
+     * Deploys a fabric on a running Engine and remembers it. The request is stored in `state.json` as it was passed in
+     * (for [recover]), so a `source.token` the caller put into it is stored in plain text; [deploy] never sets one,
+     * it is added by [withToken] only when a request is sent.
+     */
     public suspend fun deployFabric(machineId: String, id: String, request: DeployFabricRequest, start: Boolean): FabricView {
         val api = runningEngine(machineId, id)
         val fabricId = request.fabricId.value
@@ -283,7 +287,11 @@ public class ManagementCore(
         return FabricView(machineId, id, info, start)
     }
 
-    /** The token for the Repository is never stored; it is added whenever a request is sent. */
+    /**
+     * Adds the token of the ManagementServer for the Repository to a request that is sent to an Engine. This token is
+     * not stored by the ManagementServer itself (it comes from its start arguments); a token that the caller put into
+     * the request is kept, see [deployFabric].
+     */
     private fun withToken(request: DeployFabricRequest): DeployFabricRequest =
         if (request.hasSource() && repositoryToken != null) request.toBuilder().apply { sourceBuilder.token = repositoryToken }.build() else request
 

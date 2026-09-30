@@ -82,6 +82,8 @@ public class ManagementServer(
     /** If set, package versions that no fabric uses and that were not used for this many days are removed regularly. */
     private val cacheMaxUnusedDays: Long? = null,
     private val cleanupInterval: java.time.Duration = java.time.Duration.ofHours(1),
+    /** Called with the token of every authenticated call; used to delete the bootstrap token file after its first use. */
+    onAuthenticated: (token: String) -> Unit = {},
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
@@ -90,13 +92,13 @@ public class ManagementServer(
         .maxInboundMessageSize(1024 * 1024)
         .addService(
             service.bindService().let { definition ->
-                if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS))
+                if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS, onAuthenticated = onAuthenticated))
             },
         )
         .apply {
             // user management (#22) is served here, so that clients need one address only
             if (users != null) {
-                addService(ServerInterceptors.intercept(cringle.router.users.UserGrpcService(users).bindService(), AuthInterceptor(users, cringle.router.users.UserGrpcService.REQUIRED_PERMISSIONS)))
+                addService(ServerInterceptors.intercept(cringle.router.users.UserGrpcService(users).bindService(), AuthInterceptor(users, cringle.router.users.UserGrpcService.REQUIRED_PERMISSIONS, onAuthenticated = onAuthenticated)))
             }
         }
         .build()
