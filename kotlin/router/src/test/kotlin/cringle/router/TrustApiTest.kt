@@ -5,6 +5,9 @@ package cringle.router
 import com.google.protobuf.ByteString
 import cringle.common.ComponentKind
 import cringle.common.Identity
+import cringle.router.RouterServer
+import cringle.router.RouterTls
+
 import cringle.common.TlsHelper
 import cringle.common.TrustStore
 import cringle.common.TrustEntry
@@ -15,7 +18,12 @@ import cringle.router.users.AuthInterceptor
 import cringle.router.users.InMemoryUserStore
 import cringle.router.users.UserManager
 import cringle.router.v1.AddRemoteRouterRequest
+import cringle.router.v1.ListEnginesRequest
+import cringle.router.v1.ListEnginesResponse
+import cringle.router.v1.ListTrustRequest
+import cringle.router.v1.PrepareEngineRequest
 import cringle.router.v1.RegistryServiceGrpcKt
+import cringle.router.v1.TrustRemoteRouterRequest
 import io.grpc.CallCredentials
 import io.grpc.ManagedChannel
 import io.grpc.Metadata
@@ -97,6 +105,42 @@ class TrustApiTest {
         Outcome(runBlocking { body() }, Status.OK)
     } catch (e: StatusException) {
         Outcome(null, e.status)
+    }
+
+    private fun peer(name: String, kind: ComponentKind): Identity = Identity.loadOrCreate(dir.resolve(name), kind.commonName(name))
+
+    private fun listEngines(node: Node, me: Identity?): Outcome<ListEnginesResponse> =
+        outcome { api(channel(node, me)).listEngines(ListEnginesRequest.newBuilder().setIncludeRemote(true).build()) }
+
+    @Test
+    fun enginesOfARouterThatIsNotTrustedAreNotListed() {
+        val a = node("a")
+        val ops = peer("ops", ComponentKind.DAEMON)
+        a.trust.add(TrustEntry(ops.publicKeyFingerprint, "ops", TrustKind.COMPONENT))
+        a.server.registry.addRemote("127.0.0.1:9")
+        a.server.registry.updateRemote("127.0.0.1:9", listOf(EngineRecord("x", "x", "h:1") to Reachability.REACHABLE), null)
+        assertEquals(1, a.server.registry.engines(true).size)
+        val hidden = listEngines(a, ops)
+        assertEquals(Status.Code.OK, hidden.status.code, hidden.status.toString())
+        assertEquals(0, hidden.value!!.enginesList.size)
+        a.trust.add(TrustEntry("1".repeat(64), "r", TrustKind.ROUTER, address = "127.0.0.1:9"))
+        val shown = listEngines(a, ops)
+        assertEquals(listOf("x"), shown.value!!.enginesList.map { it.engineId.value })
+    }
+
+    @Test
+    fun withoutTlsTheRouterHasNoTrustAndKeepsTheOldAddBehavior() {
+        val plain = RouterServer(dir.resolve("plain-registry.json")).start()
+        closeables += { plain.stop() }
+        val channel = NettyChannelBuilder.forAddress("127.0.0.1", plain.port).usePlaintext().build()
+        closeables += { channel.shutdownNow() }
+        val hash = ByteString.copyFrom(ByteArray(32))
+        val trust = outcome { api(channel).trustRemoteRouter(TrustRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:1").setExpectedFingerprint("0".repeat(64)).build()) }
+        val list = outcome { api(channel).listTrust(ListTrustRequest.getDefaultInstance()) }
+        val prepare = outcome { api(channel).prepareEngine(PrepareEngineRequest.newBuilder().setEngineId(EngineId.newBuilder().setValue("e")).setEnrollmentSecretHash(hash).build()) }
+        for (status in listOf(trust.status, list.status, prepare.status)) assertEquals(Status.Code.FAILED_PRECONDITION, status.code, status.toString())
+        val add = outcome { api(channel).addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:1").build()) }
+        assertEquals(Status.Code.OK, add.status.code, add.status.toString())
     }
 
     @Test
