@@ -36,7 +36,9 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -147,6 +149,89 @@ class TcpTetherTest {
                     val e = assertThrows<FabricException> { runBlocking { b.start() } }
                     assertTrue(e.message!!.contains("port $port is already used by block 'd' of fabric 'f1'"), e.message)
                     assertEquals("block 'd' of fabric 'f1'", drivers.tcp.ports.owner(port))
+                }
+            }
+        }
+    }
+
+    /**
+     * M2 (TCP tether) with several connections: every connection of one tether is its own stream. Five clients send their
+     * own number at the same time, the receiver echoes on the stream the bytes came in on, and each client gets exactly
+     * its own echo back.
+     */
+    @Test
+    fun severalConnectionsOfOneTcpTetherAreIndependentStreams(): Unit = runBlocking {
+        BuiltinDrivers(dir.resolve("engine")).use { drivers ->
+            val opened = Channel<TetherEvent.ByteStreamOpened>(Channel.UNLIMITED)
+            val s = TestBlock()
+            val d = TestBlock { if (it is TetherEvent.ByteStreamOpened) opened.send(it) }
+            fabric("f", drivers, listOf(tcp(freePort())), s, d).use { f ->
+                f.start()
+                val clients = (0 until 5).map { s.context.ports.port("out").openByteStream() }
+                val servers = launch {
+                    repeat(5) {
+                        val stream = withTimeout(10.seconds) { opened.receive() }.stream
+                        launch { stream.write("echo:".toByteArray() + stream.incoming.first()) }
+                    }
+                }
+                clients.forEachIndexed { i, client -> client.write("c$i".toByteArray()) }
+                clients.forEachIndexed { i, client -> assertEquals("echo:c$i", String(withTimeout(10.seconds) { client.incoming.first() })) }
+                servers.join()
+                f.stop()
+            }
+        }
+    }
+
+    /**
+     * Restarting a fabric while a connection is open: stopping closes the connection (the client sees the end of the
+     * stream instead of waiting forever), frees the port, and after the next start the tether works again on the same
+     * port with a new connection.
+     */
+    @Test
+    fun restartingTheFabricWithAnOpenConnectionClosesItAndTheTetherWorksAgain(): Unit = runBlocking {
+        BuiltinDrivers(dir.resolve("engine")).use { drivers ->
+            val opened = Channel<TetherEvent.ByteStreamOpened>(Channel.UNLIMITED)
+            val s = TestBlock()
+            val d = TestBlock { if (it is TetherEvent.ByteStreamOpened) opened.send(it) }
+            val port = freePort()
+            fabric("f", drivers, listOf(tcp(port)), s, d).use { f ->
+                f.start()
+                val first = s.context.ports.port("out").openByteStream()
+                val firstServer = withTimeout(10.seconds) { opened.receive() }.stream
+                first.write("one".toByteArray())
+                assertEquals("one", String(withTimeout(10.seconds) { firstServer.incoming.first() }))
+
+                f.stop()
+                assertNull(drivers.tcp.ports.owner(port), "the port is free after the stop")
+                // the client of the open connection learns that it is closed: its stream ends or fails, it does not hang
+                val ended = runCatching { withTimeout(10.seconds) { first.incoming.collect { } } }
+                assertTrue(ended.exceptionOrNull() !is kotlinx.coroutines.TimeoutCancellationException, "the open connection was left open by the stop")
+
+                f.start()
+                val second = s.context.ports.port("out").openByteStream()
+                val secondServer = withTimeout(10.seconds) { opened.receive() }.stream
+                second.write("two".toByteArray())
+                assertEquals("two", String(withTimeout(10.seconds) { secondServer.incoming.first() }))
+                secondServer.write("back".toByteArray())
+                assertEquals("back", String(withTimeout(10.seconds) { second.incoming.first() }))
+            }
+        }
+    }
+
+    /**
+     * The check of the port (`SO_REUSEADDR` in `Tcp.kt`): a port that another socket holds is reported as a conflict, on
+     * every platform. On Windows `SO_REUSEADDR` would let a second socket bind to a port that is in use, so this is the
+     * test that shows the start fails there as well, with a message, and leaves no claim on the port behind.
+     */
+    @Test
+    fun aPortThatAnotherSocketHoldsIsReportedAsAConflict(): Unit = runBlocking {
+        BuiltinDrivers(dir.resolve("engine")).use { drivers ->
+            ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress()).use { other ->
+                val port = other.localPort
+                fabric("f", drivers, listOf(tcp(port)), TestBlock(), TestBlock()).use { f ->
+                    val e = assertThrows<FabricException> { runBlocking { f.start() } }
+                    assertTrue(e.message!!.contains("port $port is in use by another process"), e.message)
+                    assertNull(drivers.tcp.ports.owner(port), "a failed start must not keep the claim on the port")
                 }
             }
         }
