@@ -14,9 +14,9 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 
 /**
- * AC 1: `publishToTestMavenLocal` writes the plugin, the marker of `cringle.plugin`, the three libraries the plugin
- * needs and nothing else into `build/cringle-test-maven-local`, a folder with the layout of Maven Local. The test
- * reads that folder; it never looks at `~/.m2`, which no test of this build touches.
+ * AC 1: `publishToTestMavenLocal` writes the plugin, the markers of `cringle.plugin` and `cringle.project`, the three
+ * libraries the plugin needs and nothing else into `build/cringle-test-maven-local`, a folder with the layout of
+ * Maven Local. The test reads that folder; it never looks at `~/.m2`, which no test of this build touches.
  *
  * The publications of a snapshot repository carry a timestamp in the name of the files, so the tests look for
  * `<artifactId>-*<extension>` instead of the plain name that `./gradlew publishToMavenLocal` writes. The version
@@ -57,17 +57,18 @@ class MavenLocalPublicationTest {
     }
 
     @Test
-    fun theMarkerOfTheProjectPluginIsNotPublished() {
-        // A marker is a promise that the plugin exists. `cringle.project` comes with #52, until then it is published
-        // nowhere, so an external project gets a "not found" and not a promise that fails later.
-        assertFalse(
-            Files.exists(mavenLocal.resolve("cringle").resolve("project")),
-            "the marker of cringle.project must not be published, but ${mavenLocal.resolve("cringle/project")} exists",
+    fun theMarkerOfTheProjectPluginIsPublishedAndPointsAtThePlugin() {
+        val dir = markerDir("cringle.project")
+        val pom = publishedFile(dir, "cringle.project.gradle.plugin", ".pom").readText()
+        assertEquals(
+            listOf("gradle-plugin:$version"),
+            cringleDependencies(pom),
+            "the marker of cringle.project has to depend on the plugin, but its POM has $pom",
         )
         assertEquals(
-            listOf("cringle.plugin.gradle.plugin"),
-            childDirectories(mavenLocal.resolve("cringle").resolve("plugin")),
-            "the folder of the markers must hold the marker of cringle.plugin only",
+            listOf("cringle.project.gradle.plugin"),
+            childDirectories(mavenLocal.resolve("cringle").resolve("project")),
+            "the folder of the id cringle.project has to hold the marker of that id only",
         )
     }
 
@@ -84,9 +85,9 @@ class MavenLocalPublicationTest {
     @Test
     fun theFolderHoldsNothingButThePublicationsOfThisBuild() {
         assertEquals(
-            listOf("contract", "gradle-plugin", "packaging", "plugin", "schema"),
+            listOf("contract", "gradle-plugin", "packaging", "plugin", "project", "schema"),
             childDirectories(mavenLocal.resolve("cringle")),
-            "build/cringle-test-maven-local must hold the plugin, its marker and the three libraries only",
+            "build/cringle-test-maven-local must hold the plugin, the two markers and the three libraries only",
         )
     }
 

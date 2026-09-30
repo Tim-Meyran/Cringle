@@ -1,0 +1,10 @@
+{
+  "name": "orders",
+  "blocks": [
+    { "id": "source", "block": "acme-orders/orders" },
+    { "id": "sink", "block": "acme-orders/orders" }
+  ],
+  "tethers": [
+    { "type": "MESSAGE", "from": { "block": "source", "port": "out" }, "to": { "block": "sink", "port": "in" } }
+  ]
+}

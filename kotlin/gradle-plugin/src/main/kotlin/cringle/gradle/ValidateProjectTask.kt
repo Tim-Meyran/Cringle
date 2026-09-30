@@ -12,11 +12,15 @@ import org.gradle.api.tasks.TaskAction
 import java.nio.file.Files
 
 /**
- * Checks the declared plugin package without writing it: the manifest, the block definitions and the schema
- * documents are read back exactly as the runtime reads them, and every problem is reported as `<path>: <message>`
- * with the wording of the `packaging` library.
+ * Checks the declared project package without writing it: the manifest, the blueprints and the schema documents are
+ * read back exactly as the runtime reads them, and every problem is reported as `<path>: <message>` with the wording
+ * of the `packaging` library.
+ *
+ * What is checked is what the project says about itself. Its dependencies are named with a version range and resolved
+ * at deploy time, so the block definitions they contribute are not known here; everything that needs them is checked
+ * when the project is deployed.
  */
-public abstract class ValidatePluginTask : CringlePluginPackageTask() {
+public abstract class ValidateProjectTask : CringleProjectPackageTask() {
 
     @TaskAction
     internal fun validate() {
@@ -43,18 +47,18 @@ public abstract class ValidatePluginTask : CringlePluginPackageTask() {
      * Writes the package to a temporary file and reads it back, so that the reader sees exactly what `cringlePackage`
      * would write. A package that passes here is a package the repository would accept.
      */
-    private fun checkWithReader(content: PluginPackageContent, problems: MutableList<String>) {
+    private fun checkWithReader(content: ProjectPackageContent, problems: MutableList<String>) {
         val file = Files.createTempFile("cringle-validate", ".cringle")
         try {
             Files.newOutputStream(file).use { content.write(it) }
             val pkg = try {
-                PackageReader.readPlugin(file)
+                PackageReader.readProject(file)
             } catch (e: PackageFormatException) {
                 problems += ProblemRender.text(e)
                 null
             }
             if (pkg != null) {
-                problems += PackageValidator.validatePlugin(pkg).map { ProblemRender.text(it) }
+                problems += PackageValidator.validateProjectSources(pkg).map { ProblemRender.text(it) }
             }
         } finally {
             Files.deleteIfExists(file)
@@ -64,15 +68,15 @@ public abstract class ValidatePluginTask : CringlePluginPackageTask() {
     /**
      * The `packaging` library keeps the dependency ranges of a manifest opaque and parses them in the resolver, so
      * they are checked here with the same parser the runtime uses and in the same wording: the runtime reports an
-     * unparsable range of a plugin as it reports one of the root of a resolution.
+     * unparsable range of a project as it reports one of the root of a resolution.
      */
-    private fun invalidRanges(content: PluginPackageContent): List<String> =
+    private fun invalidRanges(content: ProjectPackageContent): List<String> =
         content.manifest.dependencies.mapNotNull { (name, range) ->
             try {
                 VersionRange.parse(range)
                 null
             } catch (e: IllegalArgumentException) {
-                val message = "invalid range '$range' for '$name' required by the plugin: ${e.message}"
+                val message = "invalid range '$range' for '$name' required by the project: ${e.message}"
                 ProblemRender.text(PackageProblem("$.dependencies.$name", message))
             }
         }

@@ -40,6 +40,38 @@ public object PackageValidator {
     }
 
     /**
+     * Validates what a project package says about itself, which is everything that needs no resolved dependency:
+     * blueprint names are unique, fabric configs point at blueprints of the project, block ids are unique, and both
+     * endpoints of a tether name a block of the same blueprint. A TCP tether needs a port in range, every other type
+     * must not carry one.
+     *
+     * A build checks the project with this, because a project only refers to its dependencies by name and range and
+     * resolves them at deploy time. The rules that need the block definitions of those dependencies stay with
+     * [validateProject].
+     */
+    public fun validateProjectSources(project: ProjectPackage): List<PackageProblem> {
+        val problems = ArrayList<PackageProblem>()
+        duplicates(project.blueprints.map { it.name }, "$.blueprints", "blueprint", problems)
+        val known = project.blueprints.map { it.name }.toSet()
+        project.manifest.fabrics.forEachIndexed { i, f ->
+            if (f.blueprint !in known) problems += PackageProblem("$.fabrics[$i].blueprint", "unknown blueprint '${f.blueprint}'")
+        }
+        for (blueprint in project.blueprints) {
+            val file = "blueprints/${blueprint.name}.json"
+            val report: (String, String) -> Unit = { path, message -> problems.add(PackageProblem("$file $path", message)) }
+            val ids = blockIds(blueprint, report)
+            blueprint.tethers.forEachIndexed { i, t ->
+                val path = "$.tethers[$i]"
+                for ((side, endpoint) in listOf("from" to t.from, "to" to t.to)) {
+                    if (endpoint.block !in ids) report("$path.$side.block", "unknown block id '${endpoint.block}'")
+                }
+                tetherRules(t, path, report)
+            }
+        }
+        return problems
+    }
+
+    /**
      * Validates [project] against the already resolved [plugins] (resolution is not done here): fabric configs point at
      * existing blueprints, and every blueprint is consistent with the block definitions it uses.
      */
@@ -68,12 +100,11 @@ public object PackageValidator {
     ): List<PackageProblem> {
         val problems = ArrayList<PackageProblem>()
         fun problem(path: String, message: String) = problems.add(PackageProblem("$file $path", message))
+        blockIds(blueprint) { path, message -> problem(path, message) }
         val instances = HashMap<String, Pair<BlueprintBlock, BlockDefinition>>()
-        val seenIds = HashSet<String>()
         val unresolved = HashSet<String>()
         blueprint.blocks.forEachIndexed { i, b ->
             val path = "$.blocks[$i]"
-            if (!seenIds.add(b.id)) problem("$path.id", "duplicate block id '${b.id}'")
             val definition = block(b.block)
             if (definition == null) {
                 problem("$path.block", "unknown block '${b.block}'")
@@ -103,17 +134,38 @@ public object PackageValidator {
             val to = endpoint(t.to, "$path.to", instances, unresolved, PortDirection.IN, ::problem)
             if (from != null && t.type !in from.tetherTypes) problem("$path.type", "port '${t.from.port}' does not support ${t.type}")
             if (to != null && t.type !in to.tetherTypes) problem("$path.type", "port '${t.to.port}' does not support ${t.type}")
-            if (t.type == TetherType.TCP) {
-                if (t.port == null || t.port !in 1..65535) problem("$path.port", "a TCP tether needs a 'port' between 1 and 65535")
-                if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a TCP tether only supports delivery DROP")
-            } else if (t.port != null) {
-                problem("$path.port", "only TCP tethers have a 'port'")
-            }
+            tetherRules(t, path) { path, message -> problem(path, message) }
             if (from != null && to != null && !isAssignable(from.schema, to.schema, registry)) {
                 problem(path, "schema ${from.schema} of '${t.from.port}' is not assignable to ${to.schema} of '${t.to.port}'")
             }
         }
         return problems
+    }
+
+    /**
+     * The block ids of [blueprint], reported to [problem] if one of them is declared twice. The path of a finding is
+     * `$.blocks[<i>].id`, so it is relative to whatever the caller puts in front of it.
+     */
+    private fun blockIds(blueprint: Blueprint, problem: (String, String) -> Unit): Set<String> {
+        val ids = LinkedHashSet<String>()
+        blueprint.blocks.forEachIndexed { i, b ->
+            if (!ids.add(b.id)) problem("$.blocks[$i].id", "duplicate block id '${b.id}'")
+        }
+        return ids
+    }
+
+    /**
+     * The rules a tether has on its own, without knowing its ports: only a TCP tether has a port, and it needs one in
+     * range and never buffers. Shared by the validators that resolve the ports and the ones that do not, so both
+     * report the same wording.
+     */
+    private fun tetherRules(t: TetherDef, path: String, problem: (String, String) -> Unit) {
+        if (t.type == TetherType.TCP) {
+            if (t.port == null || t.port !in 1..65535) problem("$path.port", "a TCP tether needs a 'port' between 1 and 65535")
+            if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a TCP tether only supports delivery DROP")
+        } else if (t.port != null) {
+            problem("$path.port", "only TCP tethers have a 'port'")
+        }
     }
 
     private fun endpoint(

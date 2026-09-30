@@ -28,6 +28,7 @@ import java.util.concurrent.Callable
  */
 public class CringlePlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        if (project.plugins.hasPlugin(CringleProjectPlugin::class.java)) throw GradleException(CringleProjectPlugin.CONFLICT)
         project.pluginManager.apply(JavaPlugin::class.java)
 
         val extension = project.extensions.create(EXTENSION, CringlePluginExtension::class.java)
