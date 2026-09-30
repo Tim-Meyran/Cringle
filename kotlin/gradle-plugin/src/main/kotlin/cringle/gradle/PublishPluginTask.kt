@@ -4,9 +4,9 @@ package cringle.gradle
 
 import cringle.packaging.PackageFormatException
 import cringle.packaging.PackageHash
+import cringle.packaging.PackageKind
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
-import cringle.packaging.PluginManifest
 import cringle.repository.RepositoryClient
 import cringle.repository.RepositoryClientException
 import io.grpc.Status
@@ -25,9 +25,10 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.options.Option
 
 /**
- * Publishes the plugin package to a Cringle repository. It builds the package with `cringlePackage` and uploads it
- * unchanged with `RepositoryClient`, so the version and the content of the package are the ones of the build and the
- * repository decides whether it takes them.
+ * Publishes the package of the build, a plugin package (`cringle.plugin`) or a project package (`cringle.project`), to a
+ * Cringle repository. It builds the package with `cringlePackage` and uploads it unchanged with `RepositoryClient`, so
+ * the version and the content of the package are the ones of the build and the repository decides whether it takes
+ * them. The task does not treat the two kinds differently: it only reads the package to name it and to check it.
  *
  * The address of the repository comes from the task (`-Pcringle.server=host:port` or
  * `cringle { publish { server = … } }`), from `CRINGLE_SERVER` or from the profile `cringle login` wrote. The token
@@ -74,23 +75,28 @@ public abstract class PublishPluginTask : DefaultTask() {
         logger.lifecycle("cringlePublish: published {} {} (SHA-256 {}) to {}", entry.name, entry.version, entry.sha256, target.server)
     }
 
+    /** The name and the version of the package that is published; both kinds of package have them. */
+    private data class Published(val name: String, val version: String)
+
     /**
      * Reads the package back and validates it, so that a package the repository would reject never leaves the build.
      * The text of a finding is the one of the `packaging` module, as `cringleValidate` writes it.
      */
-    private fun read(file: Path) = try {
-        val pkg = PackageReader.readPlugin(file)
-        val problems = PackageValidator.validatePlugin(pkg)
+    private fun read(file: Path): Published = try {
+        val (published, problems) = when (PackageReader.kind(file)) {
+            PackageKind.PLUGIN -> PackageReader.readPlugin(file).let { Published(it.manifest.name, it.manifest.version) to PackageValidator.validatePlugin(it) }
+            PackageKind.PROJECT -> PackageReader.readProject(file).let { Published(it.manifest.name, it.manifest.version) to PackageValidator.validateProjectSources(it) }
+        }
         if (problems.isNotEmpty()) {
             throw GradleException("cringlePublish found ${problems.size} problem(s):\n" + problems.joinToString("\n") { ProblemRender.text(it) })
         }
-        pkg.manifest
+        published
     } catch (e: PackageFormatException) {
         throw GradleException("cringlePublish cannot read $file: ${ProblemRender.text(e)}", e)
     }
 
     /** Uploads [file] and checks that the repository stored the bytes that were sent. */
-    private fun upload(file: Path, target: PublishTarget, manifest: PluginManifest) = RepositoryClient(target.server, target.token).use { client ->
+    private fun upload(file: Path, target: PublishTarget, manifest: Published) = RepositoryClient(target.server, target.token).use { client ->
         val expected = PackageHash.sha256(file)
         val entry = try {
             runBlocking { client.publish(file) }
@@ -111,7 +117,7 @@ public abstract class PublishPluginTask : DefaultTask() {
      * wants a token, a token that may not publish, a server that is not there. The token is in none of them, because
      * none of them knows it.
      */
-    private fun refusal(target: PublishTarget, manifest: PluginManifest, e: RepositoryClientException): String {
+    private fun refusal(target: PublishTarget, manifest: Published, e: RepositoryClientException): String {
         val pkg = "${manifest.name} ${manifest.version}"
         return when (e.status) {
             Status.Code.ALREADY_EXISTS ->

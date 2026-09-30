@@ -46,6 +46,19 @@ public abstract class CringleProjectExtension @Inject constructor(objects: Objec
     public val fabrics: List<FabricConfig>
         get() = fabricSpecs.map { it.build() }
 
+    private val publishSpec: PublishSpec = objects.newInstance(PublishSpec::class.java)
+
+    /**
+     * Declares where `cringlePublish` publishes to, as `publish { server = "host:port" }`. The token is not part of
+     * the block: it comes from `CRINGLE_TOKEN` or from the profile of `cringle login`, never from a build script.
+     */
+    public fun publish(action: Action<in PublishSpec>) {
+        action.execute(publishSpec)
+    }
+
+    /** The block the [publish] method writes into, which the plugin hands to the task. */
+    internal val publishSettings: PublishSpec get() = publishSpec
+
     /** Declares a dependency on [name] that accepts the npm-style range [range]. */
     public fun dependency(name: String, range: String) {
         dependencies.put(name, range)
