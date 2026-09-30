@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import org.gradle.api.publish.maven.tasks.AbstractPublishToMaven
-
 plugins {
     `kotlin-dsl`
     `java-gradle-plugin`
@@ -34,33 +32,10 @@ gradlePlugin {
         }
         create("cringleProject") {
             id = "cringle.project"
-            implementationClass = "cringle.gradle.CringleProjectPlaceholder"
+            implementationClass = "cringle.gradle.CringleProjectPlugin"
         }
     }
 }
-
-// The id `cringle.project` is reserved, but its marker must not be published: a marker is a promise that the plugin
-// exists, and the plugin itself comes with issue #52. The publication stays, so #52 only has to enable it again.
-// `java-gradle-plugin` names the marker publication of an id after the id in camel case, with the suffix
-// `PluginMarkerMaven`; the artifact of a publication is only set after this script has run, so the name is what the
-// marker is recognised by. The test `MavenLocalPublicationTest` fails if a marker appears all the same.
-val unpublishedPluginIds = listOf("cringle.project")
-val unpublishedMarkers = unpublishedPluginIds.map { id ->
-    id.split('.').mapIndexed { i, part -> if (i == 0) part else part.replaceFirstChar(Char::uppercase) }
-        .joinToString("") + "PluginMarkerMaven"
-}
-val publishing = extensions.getByType<PublishingExtension>()
-
-publishing.publications.withType<MavenPublication>()
-    .matching { it.name in unpublishedMarkers }
-    .configureEach {
-        val marker = this
-        tasks.withType<AbstractPublishToMaven>().configureEach {
-            if (publication === marker) {
-                enabled = false
-            }
-        }
-    }
 
 // The folder with the layout of Maven Local, for projects outside this build. `./gradlew publishToMavenLocal` writes
 // the same publications into the real one; this folder is what the functional tests use instead.

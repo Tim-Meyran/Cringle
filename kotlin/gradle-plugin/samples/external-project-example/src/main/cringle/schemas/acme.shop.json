@@ -1,0 +1,11 @@
+{
+  "namespace": "acme.shop",
+  "types": {
+    "ShopConfig": {
+      "record": {
+        "currency": "cringle.std/String",
+        "retries": { "optional": "cringle.std/Int" }
+      }
+    }
+  }
+}

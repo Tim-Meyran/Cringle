@@ -183,4 +183,44 @@ class PackageValidatorTest {
         val outOfRange = problems(Fixtures.main.copy(tethers = listOf(tcp.copy(port = 70000))))
         assertTrue(outOfRange.any { it.path.endsWith("$.tethers[0].port") }, outOfRange.toString())
     }
+
+    @Test
+    fun sourceValidationNeedsNoResolvedDependency() {
+        // The blocks of a project are named `plugin/block`, and the plugin is only known once the dependencies are
+        // resolved at deploy time. The source validation therefore has to accept a project whose blocks it cannot
+        // resolve, and only report what the project says about itself.
+        val project = Fixtures.projectPackage(
+            blueprints = listOf(edit(Fixtures.blueprint, "acme-orders/order-source", "acme-orders/does-not-exist")),
+        )
+        assertEquals(emptyList<PackageProblem>(), PackageValidator.validateProjectSources(project))
+        // In contrast, the deploy-time validation cannot resolve that block and says so.
+        assertTrue(PackageValidator.validateProject(project, plugins).any { it.message.contains("unknown block") })
+    }
+
+    @Test
+    fun sourceValidationReportsFabricAndEndpointAndPortProblems() {
+        val manifest = Fixtures.project.copy(fabrics = listOf(FabricConfig("missing", 1, emptyList(), emptyMap())))
+        assertEquals(
+            "unknown blueprint 'missing'",
+            PackageValidator.validateProjectSources(Fixtures.projectPackage(manifest = manifest)).single().message,
+        )
+
+        val ghost = edit(Fixtures.blueprint, "\"from\": { \"block\": \"source\"", "\"from\": { \"block\": \"ghost\"")
+        val p = PackageValidator.validateProjectSources(Fixtures.projectPackage(listOf(ghost)))
+            .single { it.path.endsWith("$.tethers[0].from.block") }
+        assertEquals("blueprints/main.json $.tethers[0].from.block", p.path)
+        assertEquals("unknown block id 'ghost'", p.message)
+
+        val tcp = edit(Fixtures.blueprint, "\"type\": \"MESSAGE\", \"from\": { \"block\": \"source\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\" }", "\"type\": \"TCP\", \"from\": { \"block\": \"source\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\" }")
+        val q = PackageValidator.validateProjectSources(Fixtures.projectPackage(listOf(tcp)))
+            .single { it.path.endsWith("$.tethers[0].port") }
+        assertTrue(q.message.contains("a TCP tether needs a 'port' between 1 and 65535"), q.message)
+
+        val duplicateIds = Fixtures.main.copy(
+            blocks = listOf(Fixtures.main.blocks[0], Fixtures.main.blocks[0]),
+        )
+        val r = PackageValidator.validateProjectSources(Fixtures.projectPackage(listOf(duplicateIds)))
+            .single { it.path.endsWith("$.blocks[1].id") }
+        assertEquals("duplicate block id 'source'", r.message)
+    }
 }
