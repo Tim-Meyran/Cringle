@@ -57,6 +57,8 @@ public class CringlePlugin : Plugin<Project> {
         }
         packagePlugin.configure {
             common(project, extension, jar, manifest)
+            // a package is only written if it passes the validation, so `cringlePublish` never uploads an invalid one
+            dependsOn(validate)
             group = TASK_GROUP
             description = "Builds the Cringle plugin package."
             packageFile.set(packageFile(project, manifest))

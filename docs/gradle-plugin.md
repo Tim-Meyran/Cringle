@@ -104,7 +104,9 @@ cringle {
 
 ## Publishing a plugin
 
-`cringlePublish` hands the package of the build to a Cringle repository. It runs `cringlePackage` first, reads and validates the package, uploads it unchanged with `RepositoryClient` and checks the SHA-256 the repository reports against the SHA-256 of the local file:
+This section holds for both plugin ids: `cringle.plugin` publishes its plugin package, `cringle.project` its project package, with the same task, the same `cringle { publish { server = "host:port" } }` block, the same `-Pcringle.server`, `CRINGLE_SERVER`, `CRINGLE_TOKEN` and profile, and the same messages. The task does not tell the two kinds apart: the repository checks a package as it is (a project against the plugins it depends on), and the repository has to hold those plugins before a project that uses their blocks can be published.
+
+`cringlePublish` hands the package of the build to a Cringle repository. It runs `cringlePackage` first, reads and validates the package, uploads it unchanged with `RepositoryClient` and checks the SHA-256 the repository reports against the SHA-256 of the local file. `cringlePackage` in turn runs `cringleValidate` first in both plugins, so a package that does not pass the validation is never written and never uploaded; `cringlePublish` itself depends on `cringlePackage` alone:
 
 ```bash
 ./gradlew cringlePublish
@@ -199,7 +201,7 @@ Everything below `src/main/cringle` goes into the package, each kind under a fix
 
 The manifest is derived from those files: the list of blueprints, schemas and binaries is what the build found, so the package cannot claim a file it does not carry.
 
-`./gradlew cringlePackage` writes `build/distributions/acme-shop-0.3.1.cringle`, `cringleValidate` checks the sources and the assembled package without writing it. Both find
+`./gradlew cringlePackage` writes `build/distributions/acme-shop-0.3.1.cringle` (after `cringleValidate` has passed, which it depends on), `cringleValidate` checks the sources and the assembled package without writing it, and `./gradlew cringlePublish` uploads the package to a repository. Both validation and packaging find
 
 * a blueprint with a name that another blueprint already has, or a block id that another block of it already has,
 * a fabric that names a blueprint the project does not have,
@@ -214,4 +216,4 @@ and fail the build with one line per finding as `<path>: <message>`, where the t
 
 Nothing in a project package is resolved at build time: the dependencies are Cringle plugins, and the deploy resolves them against the Cringle repository (chapter 8.4), so `cringleValidate` runs without a network. Of a tether only the port number and the `delivery` are checked, and only against the contract: the blocks a blueprint names are declared by the plugins the deploy installs.
 
-**What is not there yet.** The plugin is nowhere but in Maven Local: no Gradle Plugin Portal, no Maven Central. A plugin project publishes into a Cringle repository of its own, with `cringlePublish` (see above). A project project has no publish task yet, so its blueprints, schemas and binaries reach an engine through the CLI, and the build of a project project needs no repository at all.
+**What is not there yet.** The plugin is nowhere but in Maven Local: no Gradle Plugin Portal, no Maven Central. Both kinds of project publish into a Cringle repository of their own with `cringlePublish` (see "Publishing a plugin" above, which holds for both ids). The build of a project project still needs no repository: only `cringlePublish` talks to one, and it is the deploy, not the build, that places a project on engines (`cringle deploy`).

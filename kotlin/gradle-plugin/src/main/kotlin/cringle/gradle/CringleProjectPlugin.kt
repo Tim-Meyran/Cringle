@@ -13,9 +13,9 @@ import java.io.File
 import java.util.concurrent.Callable
 
 /**
- * The `cringle.project` plugin. It adds the `cringle { }` extension and the tasks `cringlePackage` and
- * `cringleValidate`, which turn a normal Gradle project into a Cringle project package (chapter 8.5): blueprints,
- * fabric configs, schemas and binaries.
+ * The `cringle.project` plugin. It adds the `cringle { }` extension and the tasks `cringlePackage`, `cringleValidate`
+ * and `cringlePublish`, which turn a normal Gradle project into a Cringle project package (chapter 8.5): blueprints,
+ * fabric configs, schemas and binaries, and publish it to a repository.
  *
  * A project package contains no code, so this plugin adds no dependency to the build and needs no Java plugin. The
  * Cringle dependencies a project declares are resolved at deploy time against the repository (chapter 8.4), not by
@@ -44,9 +44,21 @@ public class CringleProjectPlugin : Plugin<Project> {
         }
         packageProject.configure {
             common(project, extension, manifest)
+            // a package is only written if it passes the validation, so `cringlePublish` never uploads an invalid one
+            dependsOn(validate)
             group = TASK_GROUP
             description = "Builds the Cringle project package."
             packageFile.set(packageFile(project, manifest))
+        }
+
+        // the same task as in cringle.plugin: it does not tell the two kinds of package apart
+        project.tasks.register(TASK_PUBLISH, PublishPluginTask::class.java).configure {
+            dependsOn(packageProject)
+            packageFile.set(packageProject.flatMap { it.packageFile })
+            server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
+            dryRun.convention(false)
+            group = TASK_GROUP
+            description = "Publishes the Cringle project package to a repository."
         }
     }
 
@@ -98,7 +110,13 @@ public class CringleProjectPlugin : Plugin<Project> {
         /** Name of the task that writes the package. */
         public const val TASK_PACKAGE: String = "cringlePackage"
 
-        /** The task group both tasks appear under. */
+        /** Name of the task that publishes the package to a repository. */
+        public const val TASK_PUBLISH: String = "cringlePublish"
+
+        /** The project property that names the repository, as `-Pcringle.server=host:port`. */
+        public const val PROPERTY_SERVER: String = "cringle.server"
+
+        /** The task group the tasks appear under. */
         public const val TASK_GROUP: String = "cringle"
 
         /** The blueprints folder, if the project names no other one. */
