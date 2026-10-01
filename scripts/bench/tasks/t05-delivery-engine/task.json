@@ -1,0 +1,21 @@
+{
+  "id": "t05-delivery-engine",
+  "title": "BUFFER delivery policy in TetherNetwork",
+  "difficulty": "hard",
+  "commit": "ea441d3",
+  "module": "engine",
+  "setup_files": [
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/Model.kt",
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/ManifestJson.kt"
+  ],
+  "oracle_tests": [
+    "kotlin/engine/src/test/kotlin/cringle/engine/tether/DeliveryPolicyTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.engine.tether.DeliveryPolicyTest"
+  ],
+  "allowed": [
+    "kotlin/engine/src/main/kotlin/cringle/engine/tether/TetherNetwork.kt",
+    "kotlin/engine/src/test/**"
+  ]
+}

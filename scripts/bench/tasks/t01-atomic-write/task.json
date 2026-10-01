@@ -1,0 +1,18 @@
+{
+  "id": "t01-atomic-write",
+  "title": "writeAtomically helper (new file)",
+  "difficulty": "easy",
+  "commit": "ed4c196",
+  "module": "management-server",
+  "setup_files": [],
+  "oracle_tests": [
+    "kotlin/management-server/src/test/kotlin/cringle/management/AtomicFileTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.management.AtomicFileTest"
+  ],
+  "allowed": [
+    "kotlin/management-server/src/main/kotlin/cringle/management/AtomicFile.kt",
+    "kotlin/management-server/src/test/**"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "t04-repository-versions",
+  "title": "Repository rejects unparseable versions, index warns",
+  "difficulty": "medium",
+  "commit": "af4e986",
+  "module": "repository",
+  "setup_files": [
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/Version.kt",
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/ManifestJson.kt"
+  ],
+  "oracle_tests": [
+    "kotlin/repository/src/test/kotlin/cringle/repository/RepositoryTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.repository.RepositoryTest"
+  ],
+  "allowed": [
+    "kotlin/repository/src/main/kotlin/cringle/repository/IndexStore.kt",
+    "kotlin/repository/src/main/kotlin/cringle/repository/PackageRepository.kt",
+    "kotlin/repository/src/test/**"
+  ]
+}
