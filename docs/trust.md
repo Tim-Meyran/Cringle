@@ -1,6 +1,6 @@
 # Trust foundation
 
-Cringle has no central certificate authority. Trust comes from a manual act (Architecture 5.1). This page describes the building blocks in `kotlin/common` (#13): the identity of a component, the fingerprint trust is given to, the trust store and the TLS helper. They are not used by the servers and channels yet; see "What is missing".
+Cringle has no central certificate authority. Trust comes from a manual act (Architecture 5.1). This page describes the building blocks in `kotlin/common` (#13): the identity of a component, the fingerprint trust is given to, the trust store and the TLS helper. The router uses them for the trust API (#82, see "Flows"); the other servers and channels follow, see "What is missing".
 
 ## Identity
 
@@ -34,9 +34,34 @@ Cringle has no central certificate authority. Trust comes from a manual act (Arc
 - The trust store is asked at every handshake, so an entry that is added or removed counts for the next new session. The JDK lets a client **resume** a session without a new check of the certificate, and the server cannot take such a ticket back. A peer that was removed from the trust store can therefore still resume an old session for up to `TlsHelper.SESSION_TIMEOUT_SECONDS` (60) seconds; connections that are already open are not closed by a removal.
 - The JDK TLS provider is used, not OpenSSL: the tests show that it gives the behavior above, and ALPN for HTTP/2 works with it.
 
+## Flows
+
+All three run on a router with TLS (`RouterServer(tls = RouterTls(identity, trustStore))`). Without TLS the router has no trust: `TrustRemoteRouter`, `ListTrust` and `PrepareEngine` answer `FAILED_PRECONDITION` and `AddRemoteRouter` keeps its old behavior (#13 "insecure dev mode", removed in #86).
+
+### Trust a remote router
+
+1. An admin calls `AddRemoteRouter` or `TrustRemoteRouter` (role ADMINISTER) with the address and the `expected_fingerprint` that was read from the other router by hand (Architecture 5.1). A blank fingerprint is `INVALID_ARGUMENT`.
+2. The router connects, takes the key fingerprint from the certificate of the target and compares it with the expected one. A mismatch is `FAILED_PRECONDITION` and names both values; the trust store is not changed.
+3. On a match the router is stored as `ROUTER` (direct, `origin = null`) and the router is refreshed at once.
+4. At every refresh the engines of that router (with their key fingerprints) are stored as `ENGINE` entries with `origin = <fingerprint of the router>`. An engine that the remote router no longer reports loses its entry at the next refresh.
+5. Engines of a router that is not in the trust store are not returned by `ListEngines(include_remote = true)`.
+
+### Revoke
+
+1. An admin calls `RevokeRemoteRouter` with the address (`NOT_FOUND` for an unknown one).
+2. `TrustStore.remove` deletes the router and every entry with its `origin`; the cached engines of that router leave the registry.
+3. `TrustInterceptor` listens to the store. Running calls of every peer that is no longer trusted are closed with `UNAUTHENTICATED`; calls of other peers go on.
+4. Every new call is checked by the fingerprint of the TLS peer, so a peer that resumes an old TLS session (up to 60 s, see TLS helper) or keeps its connection is refused as well. gRPC cannot close the TCP connection of a server; "closed" means: running calls end, new calls fail.
+
+### Enrollment of a local engine
+
+1. The daemon (trusted `COMPONENT`) calls `PrepareEngine` with the engine id and the SHA-256 of a one-time secret and hands the secret to the engine. A client that is trusted but not a component gets `PERMISSION_DENIED`.
+2. The engine calls `RegisterEngine` with its certificate and the secret. The router checks that the key of the certificate is the key of the TLS connection and that the certificate is valid, then compares the secret with the announced hash.
+3. On success the fingerprint is stored as `ENGINE` (direct, named like the id) and the secret is used up. A wrong, missing or used secret is `PERMISSION_DENIED` with one message for all three.
+4. Later registrations of the same id need the same key and no secret; another key for a bound id is refused. Announcements are kept in memory: after a restart of the router the daemon announces again.
+
 ## What is missing
 
-- The servers and channels still use plaintext; they are switched to these contexts in #83 (router routes), #84 (the other components) and #85 (CLI and ManagementServer). `--insecure-dev-mode` is removed in #86.
-- The trust API, enrollment and transitive trust through routers: #82.
+- The servers and channels still use plaintext; they are switched to these contexts in #83 (router routes), #84 (the other components); the CLI and the ManagementServer use pinned TLS since #85. `--insecure-dev-mode` is removed in #86.
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.
