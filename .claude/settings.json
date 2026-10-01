@@ -14,7 +14,7 @@
       "Bash(gh run list *)",
       "Bash(gh run view *)",
       "Bash(gh auth status*)",
-      "Bash(python3 scripts/next-issue.py*)"
+      "Bash(python scripts/next-issue.py*)"
     ],
     "ask": [
       "Edit(/.github/workflows/**)",

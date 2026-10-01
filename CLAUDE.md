@@ -20,7 +20,7 @@ Keep token use low in every step; quality of the issues stays the priority.
 
 - **Answers:** result first, in a few lines: issue numbers, decisions, open questions. No recap of steps, no restating the issue text, no tables or lists where one sentence does. Put hand-over text for opencode in one short block.
 - **Reading:** read only what the task needs. Use `gh issue view <n> --json body,labels --jq ...`, `git show origin/master:<path>` with `sed -n`/`grep -n` for ranges, and `git ls-tree` for file lists. Do not read whole files or whole diffs when a range answers the question, and do not re-read what is already in the conversation.
-- **Writing:** edit issues with targeted replacements (`python3`/`sed` on the fetched body) and never re-type a whole body. Write each issue body once; state decisions as decisions. Reuse the structure of `.github/ISSUE_TEMPLATE/task.md` and keep sections short; link to documents instead of copying them.
+- **Writing:** edit issues with targeted replacements (`python`/`sed` on the fetched body) and never re-type a whole body. Write each issue body once; state decisions as decisions. Reuse the structure of `.github/ISSUE_TEMPLATE/task.md` and keep sections short; link to documents instead of copying them.
 - **Commands:** batch independent `gh` calls into one shell call; print only the fields needed (`--jq`), `head`/`cut` long output.
 - **Reviews and broad searches:** delegate to sub-agents with a word limit on the report (for example 300 words) and ask for file:line and severity only; do not repeat their reports at length.
 - **Questions to the owner:** ask only for decisions that change the issue, all at once (up to four per round), with a recommended option first.

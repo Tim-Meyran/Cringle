@@ -62,3 +62,21 @@ Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-
 cringle-daemon.exe install
 cringle-daemon.exe start
 ```
+
+## mTLS and Enrollment
+
+When starting an engine with mTLS (not using `--insecure-dev-mode`), the daemon performs the following steps:
+
+1. **Generate Enrollment Secret**: The daemon generates a random byte array as the enrollment secret.
+2. **Hash the Secret**: The secret is hashed using SHA-256 to create a secret hash.
+3. **Prepare Engine**: The daemon calls `PrepareEngine` on the router with the engine ID and the secret hash.
+4. **Pass Secret to Engine**: The enrollment secret is passed to the engine via the `CRINGLE_ENROLLMENT_SECRET` environment variable. The secret is hex-encoded (each byte as two lowercase hex digits).
+5. **Engine Registration**: The engine uses the secret during its `RegisterEngine` call to prove it is authorized.
+
+The enrollment secret is single-use and expires after successful registration. If the engine fails to register, the secret remains valid until the daemon restarts (announcements are kept in memory).
+
+**Enrollment Secret Environment Variable**
+
+The `CRINGLE_ENROLLMENT_SECRET` environment variable contains the hex-encoded enrollment secret. For example, if the secret is the byte array `[0xAB, 0xCD, 0xEF]`, the environment variable will contain `abcdef`.
+
+This variable is only set when starting engines with mTLS. Engines using `--insecure-dev-mode` do not receive this variable.

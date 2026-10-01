@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark local models as the opencode `coder` agent on real, already merged Cringle issues.
 

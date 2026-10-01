@@ -4,11 +4,15 @@ package cringle.daemon
 
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.EngineManagementServiceGrpc
+import cringle.router.v1.PrepareEngineRequest
+import cringle.router.v1.RegistryServiceGrpc
 import io.grpc.ManagedChannelBuilder
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
@@ -59,6 +63,8 @@ public class EngineSupervisor(
     },
     /** Where the supervisor reports problems of its own (at most once per engine process for a failing log file). */
     private val onWarning: (String) -> Unit = { System.err.println("WARNING: $it") },
+    /** Secure random number generator for enrollment secrets. */
+    private val secureRandom: SecureRandom = SecureRandom(),
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -117,6 +123,16 @@ public class EngineSupervisor(
             m.state = ProcessState.STARTING
             m.lastError = ""
             m.exitCode = 0
+            
+            // Generate enrollment secret if router is configured
+            val enrollmentSecret = if (routerAddress() != null) {
+                val secret = ByteArray(32)
+                secureRandom.nextBytes(secret)
+                secret
+            } else {
+                null
+            }
+            
             val cmd = listOf(command.java) + command.jvmArgs + listOf(
                 "-cp", command.classPath, command.mainClass,
                 "--id", m.id, "--name", m.name, "--home", home.toString(), "--insecure-dev-mode",
@@ -124,6 +140,13 @@ public class EngineSupervisor(
             val builder = ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()
+            
+            // Pass enrollment secret to engine via environment
+            enrollmentSecret?.let { secret ->
+                builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("\") {
+                    "%02x".format(it)
+                }
+            }
             val process = try {
                 builder.start()
             } catch (e: Exception) {
@@ -146,7 +169,7 @@ public class EngineSupervisor(
             m.port = managementPort
             m.startedAt = Instant.now()
             m.state = ProcessState.RUNNING
-            configureRouter(m)
+            configureRouter(m, enrollmentSecret)
             return snapshot(m)
         }
     }
@@ -203,14 +226,28 @@ public class EngineSupervisor(
         }
     }
 
-    private fun configureRouter(m: Managed) {
+    private fun configureRouter(m: Managed, enrollmentSecret: ByteArray?) {
         val router = routerAddress() ?: return
         val channel = ManagedChannelBuilder.forAddress("127.0.0.1", m.port).usePlaintext().build()
         try {
+            enrollmentSecret?.let { secret ->
+                val secretHash = MessageDigest.getInstance("SHA-256").digest(secret)
+                
+                // Call PrepareEngine to register the secret hash
+                val prepareEngineStub = RegistryServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
+                prepareEngineStub.prepareEngine(
+                    PrepareEngineRequest.newBuilder()
+                        .setEngineId(cringle.common.v1.EngineId.newBuilder().setValue(m.id))
+                        .setEnrollmentSecretHash(secretHash)
+                        .build()
+                )
+            }
+            
+            // Configure the router address
             EngineManagementServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
                 .configure(ConfigureRequest.newBuilder().setRouterAddress(router).build())
         } catch (e: Exception) {
-            m.lastError = "engine is running but could not be pointed to the router: ${e.message}"
+            m.lastError = "engine is running but could not be configured: ${e.message}"
         } finally {
             channel.shutdownNow()
         }
