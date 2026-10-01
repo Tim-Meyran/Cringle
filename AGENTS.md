@@ -76,7 +76,7 @@ gh issue comment <n> --body "Claimed on branch issue/<n>-short-slug."
 
 ### 3. Read
 
-`gh issue view <n> --comments`, `docs/decisions.md`, and the architecture chapters named in the issue's **Architecture** line. Look at the pull requests of the issues it depends on. Do not implement anything marked `[Offen]` unless the issue says so. Treat `[Zu bestätigen]` as proposals: implement as described, keep the decision easy to change, and mention it in the pull request.
+`gh issue view <n> --json number,title,body,labels,milestone,comments` (not `--comments` alone: without a terminal it prints only the comments, nothing if there are none), `docs/decisions.md`, and the architecture chapters named in the issue's **Architecture** line. Look at the pull requests of the issues it depends on. Do not implement anything marked `[Offen]` unless the issue says so. Treat `[Zu bestätigen]` as proposals: implement as described, keep the decision easy to change, and mention it in the pull request.
 
 ### 4. Implement
 

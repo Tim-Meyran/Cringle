@@ -1,0 +1,20 @@
+{
+  "id": "t06-classloaders",
+  "title": "Class loaders per provider and fabric instance (new file)",
+  "difficulty": "hard",
+  "commit": "cd3f4c4",
+  "module": "engine",
+  "setup_files": [
+    "kotlin/engine/build.gradle.kts"
+  ],
+  "oracle_tests": [
+    "kotlin/engine/src/test/kotlin/cringle/engine/classloading/ClassLoadingTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.engine.classloading.ClassLoadingTest"
+  ],
+  "allowed": [
+    "kotlin/engine/src/main/kotlin/cringle/engine/classloading/ClassLoaders.kt",
+    "kotlin/engine/src/test/**"
+  ]
+}

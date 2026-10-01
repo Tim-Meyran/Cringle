@@ -1,0 +1,19 @@
+{
+  "id": "t02-version-grammar",
+  "title": "Version grammar: leading zeros and Int range",
+  "difficulty": "easy-medium",
+  "commit": "af4e986",
+  "module": "packaging",
+  "setup_files": [],
+  "oracle_tests": [
+    "kotlin/packaging/src/test/kotlin/cringle/packaging/VersionTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.packaging.VersionTest"
+  ],
+  "allowed": [
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/Version.kt",
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/ManifestJson.kt",
+    "kotlin/packaging/src/test/**"
+  ]
+}

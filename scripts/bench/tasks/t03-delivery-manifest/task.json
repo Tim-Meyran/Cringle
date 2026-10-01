@@ -1,0 +1,19 @@
+{
+  "id": "t03-delivery-manifest",
+  "title": "DeliveryPolicy in the blueprint model and JSON",
+  "difficulty": "medium",
+  "commit": "ea441d3",
+  "module": "packaging",
+  "setup_files": [],
+  "oracle_tests": [
+    "kotlin/packaging/src/test/kotlin/cringle/packaging/ManifestJsonTest.kt"
+  ],
+  "oracle_classes": [
+    "cringle.packaging.ManifestJsonTest"
+  ],
+  "allowed": [
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/Model.kt",
+    "kotlin/packaging/src/main/kotlin/cringle/packaging/ManifestJson.kt",
+    "kotlin/packaging/src/test/**"
+  ]
+}
