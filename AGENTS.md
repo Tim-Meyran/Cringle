@@ -56,7 +56,7 @@ The architecture and decision documents are in German, issues and code are in En
 ### 1. Find work
 
 ```bash
-python3 scripts/next-issue.py
+python scripts/next-issue.py
 ```
 
 It lists issues that are open, labeled `agent-task` and `ready`, not `in-progress`/`blocked`/`deferred`, not claimed by a branch, and whose `**Depends on:**` issues are all closed. Prefer the lowest milestone, then the lowest issue number.
