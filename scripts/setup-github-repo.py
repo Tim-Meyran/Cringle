@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # SPDX-License-Identifier: Apache-2.0
 """One-time repository setup for the agent workflow (run by the repository owner).
 
