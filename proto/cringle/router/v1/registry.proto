@@ -36,6 +36,18 @@ service RegistryService {
 
   // Lists remote Routers.
   rpc ListRemoteRouters(ListRemoteRoutersRequest) returns (ListRemoteRoutersResponse);
+
+  // Trusts a remote Router after its fingerprint was confirmed, without adding it to the registry. Needs a router with TLS.
+  rpc TrustRemoteRouter(TrustRemoteRouterRequest) returns (TrustRemoteRouterResponse);
+
+  // Removes the trust in a remote Router, in every Engine trusted through it and the cached Engines of the Router.
+  rpc RevokeRemoteRouter(RevokeRemoteRouterRequest) returns (RevokeRemoteRouterResponse);
+
+  // Lists the trust store with kind and origin of every entry.
+  rpc ListTrust(ListTrustRequest) returns (ListTrustResponse);
+
+  // Announces a local Engine that is going to register with a one-time secret (caller: a trusted COMPONENT, the daemon).
+  rpc PrepareEngine(PrepareEngineRequest) returns (PrepareEngineResponse);
 }
 
 // Whether an Engine has sent a heartbeat recently.
@@ -55,12 +67,18 @@ message EngineEntry {
   repeated cringle.common.v1.FabricStateSummary fabrics = 6;
   // Address of the remote Router this entry was learned from; empty for local Engines.
   string origin_router = 7;
+  // SHA-256 of the public key of the Engine (lowercase hex); empty if the Engine never enrolled.
+  string fingerprint = 8;
 }
 
 message RegisterEngineRequest {
   cringle.common.v1.EngineId engine_id = 1;
   string name = 2;
   string management_address = 3;
+  // X.509 certificate of the Engine (DER). Its key is bound to the Engine id at the first registration.
+  bytes certificate = 4;
+  // The one-time secret from PrepareEngine; only needed for the first registration of an id.
+  bytes enrollment_secret = 5;
 }
 
 message RegisterEngineResponse {}
@@ -109,6 +127,8 @@ message RemoteRouterEntry {
 
 message AddRemoteRouterRequest {
   string address = 1;
+  // Fingerprint of the public key of the remote Router, as the operator confirmed it. Required by a router with TLS.
+  string expected_fingerprint = 2;
 }
 
 message AddRemoteRouterResponse {
@@ -126,3 +146,47 @@ message ListRemoteRoutersRequest {}
 message ListRemoteRoutersResponse {
   repeated RemoteRouterEntry routers = 1;
 }
+
+message TrustRemoteRouterRequest {
+  string address = 1;
+  string expected_fingerprint = 2;
+}
+
+message TrustRemoteRouterResponse {
+  // Fingerprint that was found and is now trusted.
+  string fingerprint = 1;
+}
+
+message RevokeRemoteRouterRequest {
+  string address = 1;
+}
+
+message RevokeRemoteRouterResponse {
+  // Number of trust entries removed: the Router and every entry that came through it.
+  int32 removed_entries = 1;
+}
+
+message ListTrustRequest {}
+
+message TrustEntryInfo {
+  string fingerprint = 1;
+  string name = 2;
+  // ROUTER, ENGINE, COMPONENT or SERVER.
+  string kind = 3;
+  string address = 4;
+  // Fingerprint of the Router that vouched for the entry; empty for direct trust.
+  string origin = 5;
+  google.protobuf.Timestamp added_at = 6;
+}
+
+message ListTrustResponse {
+  repeated TrustEntryInfo entries = 1;
+}
+
+message PrepareEngineRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+  // SHA-256 of the one-time secret (32 bytes).
+  bytes enrollment_secret_hash = 2;
+}
+
+message PrepareEngineResponse {}

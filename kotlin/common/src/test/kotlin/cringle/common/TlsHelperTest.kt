@@ -238,4 +238,27 @@ class TlsHelperTest {
         // a new context has no session to resume; an old session can be resumed for TlsHelper.SESSION_TIMEOUT_SECONDS
         assertRefused(port, TlsHelper.channelCredentials(client.identity, client.trust))
     }
-}
+
+    @Test
+    fun theFingerprintOfAServerCanBeProbedWithoutTrustingIt() {
+        val server = peer("server")
+        val port = serve(TlsHelper.serverCredentials(server.identity, server.trust))
+        assertEquals(server.fingerprint, TlsHelper.probeServerFingerprint("127.0.0.1", port))
+        // a plaintext server has no certificate to show
+        val plain = io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder.forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), 0)).build().start()
+        closeables += { plain.shutdownNow().awaitTermination(5, TimeUnit.SECONDS) }
+        assertThrows<java.io.IOException> { TlsHelper.probeServerFingerprint("127.0.0.1", plain.port, Duration.ofSeconds(3)) }
+    }
+
+    @Test
+    fun aServerThatDecidesPerCallAlsoLetsInUnknownClientsAndClientsWithoutACertificate() {
+        val server = peer("server")
+        val stranger = peer("stranger")
+        val expired = peer("expired", Duration.ofSeconds(-120))
+        trust(stranger, server)
+        trust(expired, server)
+        val port = serve(TlsHelper.serverCredentials(server.identity, server.trust, requireTrustedClients = false))
+        assertEquals("hello", call(port, TlsHelper.channelCredentials(stranger.identity, stranger.trust)))
+        assertEquals("hello", call(port, TlsHelper.channelCredentials(null, stranger.trust)))
+        assertRefused(port, TlsHelper.channelCredentials(expired.identity, expired.trust))
+    }}

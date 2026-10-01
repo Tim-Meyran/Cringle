@@ -27,6 +27,8 @@ public data class EngineRecord(
     val managementAddress: String,
     val fabrics: List<FabricSummary> = emptyList(),
     val origin: String? = null,
+    /** Public key fingerprint of the engine once it enrolled (Architecture 5); empty for engines without one. */
+    val fingerprint: String = "",
 )
 
 /** An [EngineRecord] with its current reachability and last heartbeat. */
@@ -96,12 +98,13 @@ public class Registry(
     }
 
     /** Registers or refreshes an engine; counts as a heartbeat. Keeps the fabric list of an existing registration. */
-    public fun register(id: String, name: String, managementAddress: String) {
+    public fun register(id: String, name: String, managementAddress: String, fingerprint: String = "") {
         synchronized(lock) {
             val existing = engines[id]
-            engines[id] = EngineRecord(id, name, managementAddress, existing?.fabrics.orEmpty())
+            val bound = fingerprint.ifEmpty { existing?.fingerprint.orEmpty() }
+            engines[id] = EngineRecord(id, name, managementAddress, existing?.fabrics.orEmpty(), fingerprint = bound)
             heartbeats[id] = clock.instant()
-            changed(persist = existing?.name != name || existing.managementAddress != managementAddress)
+            changed(persist = existing?.name != name || existing.managementAddress != managementAddress || existing.fingerprint != bound)
         }
     }
 
