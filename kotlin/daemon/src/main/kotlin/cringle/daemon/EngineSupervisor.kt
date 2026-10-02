@@ -55,8 +55,8 @@ public class EngineSupervisor(
     private val routerAddress: () -> String? = { null },
     private val startTimeout: Duration = Duration.ofSeconds(90),
     private val stopTimeout: Duration = Duration.ofSeconds(30),
-    /** Called after the daemon stopped an engine process, with the engine id. */
-    private val onStopped: (String) -> Unit = {},
+    /** Called after the daemon stopped an engine process, with the engine id and its environment. */
+    private val onStopped: (String, Map<String, String>) -> Unit = { id, _ -> },
     /** Appends one line to a log file; replaced in tests to make writing fail. */
     private val appendLog: (Path, String) -> Unit = { file, line ->
         Files.writeString(file, line + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
@@ -82,6 +82,8 @@ public class EngineSupervisor(
         @Volatile var lastError = ""
 
         @Volatile var pump: Thread? = null
+
+        @Volatile var environment: Map<String, String>? = null
     }
 
     private val engines = LinkedHashMap<String, Managed>()
@@ -152,6 +154,8 @@ public class EngineSupervisor(
             } catch (e: Exception) {
                 fail(m, "cannot start engine process: ${e.message}")
             }
+            // Capture the process environment for onStopped callback
+            m.environment = builder.environment()
             m.process = process
             val port = CompletableFuture<Int>()
             m.pump = Thread({ pumpOutput(m, process, port) }, "engine-out-${m.id}").apply { isDaemon = true }
@@ -274,7 +278,7 @@ public class EngineSupervisor(
             m.state = ProcessState.STOPPED
             m.port = 0
             m.lastError = ""
-            runCatching { onStopped(m.id) }
+            runCatching { onStopped(m.id, m.environment ?: emptyMap()) }
             return snapshot(m)
         }
     }
