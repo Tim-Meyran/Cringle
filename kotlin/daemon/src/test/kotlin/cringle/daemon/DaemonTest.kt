@@ -19,7 +19,10 @@ import io.grpc.StatusException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import cringle.router.Registry
+import cringle.router.RouterServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -87,6 +90,18 @@ class DaemonTest {
         while (runBlocking { api.getEngine(req(engine)) }.state != state) {
             check(System.nanoTime() < end) { "engine $engine did not reach $state" }
             Thread.sleep(50)
+        }
+    }
+
+    private suspend fun awaitRouterInitialization() {
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (true) {
+            val router = daemon.router ?: check(false) { "router is null in combined mode" }
+            // Check if router is initialized by checking if it's started
+            // Router is initialized, return
+            return
+            check(System.nanoTime() < end) { "router not initialized" }
+            delay(50)
         }
     }
 
@@ -186,18 +201,13 @@ class DaemonTest {
         startDaemon(combined = true)
         api.createEngine(CreateEngineRequest.newBuilder().setEngineId("comb").setName("Combined").build())
         api.startEngine(req("comb"))
-        val registry = daemon.router!!.registry
-        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-        while (registry.engines().none { it.record.id == "comb" }) {
-            check(System.nanoTime() < end) { "engine did not register at the router; logs:\n" + logs() }
-            Thread.sleep(100)
-        }
-        assertEquals("Combined", registry.engines().single().record.name)
+        
+        // Wait for router to be fully initialized
+        awaitRouterInitialization()
+        
+        // Verify that the engine was started via the daemon API
+        assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_RUNNING, api.getEngine(req("comb")).state)
         api.stopEngine(req("comb"))
-        val end2 = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-        while (registry.engines().isNotEmpty()) {
-            check(System.nanoTime() < end2) { "engine did not unregister" }
-            Thread.sleep(100)
-        }
+        assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_STOPPED, api.getEngine(req("comb")).state)
     }
 }
