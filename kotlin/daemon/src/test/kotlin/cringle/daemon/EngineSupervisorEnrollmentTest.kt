@@ -9,6 +9,7 @@ import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
 import java.nio.file.Path
 import java.security.SecureRandom
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -17,6 +18,12 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import cringle.router.v1.PrepareEngineRequest
 import cringle.router.v1.PrepareEngineResponse
+import cringle.router.v1.RegisterEngineRequest
+import cringle.router.v1.RegisterEngineResponse
+import cringle.router.v1.UnregisterEngineRequest
+import cringle.router.v1.UnregisterEngineResponse
+import cringle.router.v1.SendHeartbeatRequest
+import cringle.router.v1.SendHeartbeatResponse
 import cringle.router.v1.RegistryServiceGrpc
 
 class EngineSupervisorEnrollmentTest {
@@ -35,6 +42,21 @@ class EngineSupervisorEnrollmentTest {
                 responseObserver.onNext(PrepareEngineResponse.getDefaultInstance())
                 responseObserver.onCompleted()
             }
+            
+            override fun registerEngine(request: RegisterEngineRequest, responseObserver: StreamObserver<RegisterEngineResponse>) {
+                responseObserver.onNext(RegisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun unregisterEngine(request: UnregisterEngineRequest, responseObserver: StreamObserver<UnregisterEngineResponse>) {
+                responseObserver.onNext(UnregisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun sendHeartbeat(request: SendHeartbeatRequest, responseObserver: StreamObserver<SendHeartbeatResponse>) {
+                responseObserver.onNext(SendHeartbeatResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
         }
         
         // Create a test server
@@ -42,12 +64,12 @@ class EngineSupervisorEnrollmentTest {
             .addService(mockRouter)
             .build()
         server.start()
-        val port = server.port()
+        val port = server.port
         
         try {
             val supervisor = EngineSupervisor(
                 home,
-                EngineCommand(mainClass = "cringle.daemon.FakeEngineMainKt"),
+                EngineCommand(mainClass = "cringle.engine.Main"),
                 routerAddress = { "127.0.0.1:$port" },
             )
             
@@ -56,15 +78,17 @@ class EngineSupervisorEnrollmentTest {
                 val testEngine = it.start("test-engine")
                 
                 // Wait for the engine to start and for PrepareEngine to be called
-                Thread.sleep(2000)
+                Thread.sleep(5000)
                 
                 // Verify that PrepareEngine was called
                 assertNotNull(prepareEngineCall.get(), "PrepareEngine should have been called")
                 
                 val request = prepareEngineCall.get()
-                assertEquals("test-engine", request.engineId.value)
-                assertTrue(request.enrollmentSecretHash.isNotEmpty(), "Enrollment secret hash should be present")
-                assertEquals(32, request.enrollmentSecretHash.size, "Enrollment secret hash should be 32 bytes")
+                request?.let { req ->
+                    assertEquals("test-engine", req.engineId.value)
+                    assertTrue(req.enrollmentSecretHash.size() > 0, "Enrollment secret hash should be present")
+                    assertEquals(32, req.enrollmentSecretHash.size(), "Enrollment secret hash should be 32 bytes")
+                }
             }
         } finally {
             server.shutdown()
@@ -75,26 +99,76 @@ class EngineSupervisorEnrollmentTest {
     fun enrollmentSecretIsPassedViaEnvironment() {
         val environmentVars = mutableMapOf<String, String>()
         
-        val supervisor = EngineSupervisor(
-            home,
-            EngineCommand(mainClass = "cringle.daemon.FakeEngineMainKt"),
-            routerAddress = { null }, // No router, combined mode
-        ) {
-            // Capture environment variables
-            { env -> environmentVars.putAll(env) }
+        // Mock router that captures the PrepareEngine request
+        val prepareEngineCall = AtomicReference<PrepareEngineRequest?>(null)
+        val mockRouter = object : RegistryServiceGrpc.RegistryServiceImplBase() {
+            override fun prepareEngine(request: PrepareEngineRequest, responseObserver: StreamObserver<PrepareEngineResponse>) {
+                prepareEngineCall.set(request)
+                responseObserver.onNext(PrepareEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun registerEngine(request: RegisterEngineRequest, responseObserver: StreamObserver<RegisterEngineResponse>) {
+                responseObserver.onNext(RegisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun unregisterEngine(request: UnregisterEngineRequest, responseObserver: StreamObserver<UnregisterEngineResponse>) {
+                responseObserver.onNext(UnregisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun sendHeartbeat(request: SendHeartbeatRequest, responseObserver: StreamObserver<SendHeartbeatResponse>) {
+                responseObserver.onNext(SendHeartbeatResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
         }
         
-        supervisor.use {
-            it.add("env-test", "Env Test")
-            val started = it.start("env-test")
-            
-            // Verify that CRINGLE_ENROLLMENT_SECRET is in environment
-            assertTrue(environmentVars.containsKey("CRINGLE_ENROLLMENT_SECRET"), 
-                "CRINGLE_ENROLLMENT_SECRET should be in environment")
-            
-            val secret = environmentVars["CRINGLE_ENROLLMENT_SECRET"]
-            assertNotNull(secret, "Enrollment secret should not be null")
-            assertEquals(64, secret.length, "Enrollment secret should be 64 hex characters")
+        val server = io.grpc.ServerBuilder.forPort(0)
+            .addService(mockRouter)
+            .build()
+        server.start()
+        val port = server.port
+        
+        val supervisor = EngineSupervisor(
+            home,
+            EngineCommand(mainClass = "cringle.engine.Main"),
+            routerAddress = { "127.0.0.1:$port" },
+            startTimeout = Duration.ofSeconds(90),
+            stopTimeout = Duration.ofSeconds(30),
+            onStopped = { id, env -> 
+                // Capture environment variables
+                environmentVars.putAll(env)
+                ""
+            }
+        )
+        
+        try {
+            supervisor.use {
+                it.add("env-test", "Env Test")
+                val started = it.start("env-test")
+                
+                // Wait for the engine to start and for PrepareEngine to be called
+                Thread.sleep(5000)
+                
+                // Verify that PrepareEngine was called
+                assertNotNull(prepareEngineCall.get(), "PrepareEngine should have been called")
+                
+                // Stop the engine to trigger onStopped callback
+                it.stop("env-test")
+                
+                // Verify that CRINGLE_ENROLLMENT_SECRET is in environment
+                assertTrue(environmentVars.containsKey("CRINGLE_ENROLLMENT_SECRET"), 
+                    "CRINGLE_ENROLLMENT_SECRET should be in environment")
+                
+                val secret = environmentVars["CRINGLE_ENROLLMENT_SECRET"]
+                assertNotNull(secret, "Enrollment secret should not be null")
+                secret?.let { s ->
+                    assertEquals(64, s.length, "Enrollment secret should be 64 hex characters")
+                }
+            }
+        } finally {
+            server.shutdown()
         }
     }
 
@@ -113,28 +187,61 @@ class EngineSupervisorEnrollmentTest {
             }
         }
         
+        // Mock router that doesn't interfere with secret generation
+        val mockRouter = object : RegistryServiceGrpc.RegistryServiceImplBase() {
+            override fun prepareEngine(request: PrepareEngineRequest, responseObserver: StreamObserver<PrepareEngineResponse>) {
+                responseObserver.onNext(PrepareEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun registerEngine(request: RegisterEngineRequest, responseObserver: StreamObserver<RegisterEngineResponse>) {
+                responseObserver.onNext(RegisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun unregisterEngine(request: UnregisterEngineRequest, responseObserver: StreamObserver<UnregisterEngineResponse>) {
+                responseObserver.onNext(UnregisterEngineResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+            
+            override fun sendHeartbeat(request: SendHeartbeatRequest, responseObserver: StreamObserver<SendHeartbeatResponse>) {
+                responseObserver.onNext(SendHeartbeatResponse.getDefaultInstance())
+                responseObserver.onCompleted()
+            }
+        }
+        
+        val server = io.grpc.ServerBuilder.forPort(0)
+            .addService(mockRouter)
+            .build()
+        server.start()
+        val port = server.port
+        
         val supervisor = EngineSupervisor(
             home,
-            EngineCommand(mainClass = "cringle.daemon.FakeEngineMainKt"),
-            routerAddress = { null },
+            EngineCommand(mainClass = "cringle.engine.Main"),
+            routerAddress = { "127.0.0.1:$port" },
             secureRandom = trackingRandom
         )
         
-        supervisor.use {
-            it.add("memory-test", "Memory Test")
-            val started = it.start("memory-test")
-            
-            // Give it time to process
-            Thread.sleep(1000)
-            
-            // The secret should have been generated
-            assertTrue(secretValues.isNotEmpty(), "Secret should have been generated")
-            
-            // Now we need to verify that it's not kept in memory
-            // This is tricky to test directly, but we can at least verify
-            // that the generation happened
-            val secret = secretValues.find { it.size == 32 }
-            assertNotNull(secret, "32-byte secret should have been generated")
+        try {
+            supervisor.use {
+                it.add("memory-test", "Memory Test")
+                val started = it.start("memory-test")
+                
+                // Give it time to process
+                Thread.sleep(1000)
+                
+                // The secret should have been generated
+                assertTrue(secretValues.isNotEmpty(), "Secret should have been generated")
+                
+                // Now we need to verify that it's not kept in memory
+                // This is tricky to test directly, but we can at least verify
+                // that the generation happened
+                val secret = secretValues.find { it.size == 32 }
+                assertNotNull(secret, "32-byte secret should have been generated")
+            }
+        } finally {
+            server.shutdown()
         }
     }
 

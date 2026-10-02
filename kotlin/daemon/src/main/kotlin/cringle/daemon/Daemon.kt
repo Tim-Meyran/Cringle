@@ -45,7 +45,7 @@ public class Daemon(
         startTimeout,
         stopTimeout,
         // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
-        onStopped = { id -> router?.registry?.unregister(id) },
+        onStopped = { id, _ -> router?.registry?.unregister(id) },
     )
 
     private val server: Server = NettyServerBuilder
