@@ -100,11 +100,11 @@ internal class RegistryLink(
                             .setName(name)
                             .setManagementAddress(managementAddress)
                         
-                        // Add certificate and enrollment secret if using mTLS
-                        if (_identity != null && _trustStore != null) {
-                            builder.setCertificate(_identity!!.certificate.encoded)
-                            _enrollmentSecret?.let { builder.setEnrollmentSecret(ByteString.copyFrom(it)) }
-                        }
+                         // Add certificate and enrollment secret if using mTLS
+                         if (_identity != null && _trustStore != null) {
+                             builder.setCertificate(ByteString.copyFrom(_identity!!.certificate.encoded))
+                             _enrollmentSecret?.let { builder.setEnrollmentSecret(ByteString.copyFrom(it)) }
+                         }
                         
                         stub.registerEngine(builder.build())
                         registered = true

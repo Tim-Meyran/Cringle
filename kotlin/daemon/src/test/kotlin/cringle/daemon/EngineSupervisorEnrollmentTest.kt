@@ -7,9 +7,9 @@ import io.grpc.insecure.InsecureChannelCredentials
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import cringle.router.v1.PrepareEngineRequest
