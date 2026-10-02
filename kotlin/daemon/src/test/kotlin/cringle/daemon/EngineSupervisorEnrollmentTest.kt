@@ -3,13 +3,16 @@
 package cringle.daemon
 
 import io.grpc.ManagedChannel
-import io.grpc.insecure.InsecureChannelCredentials
+import io.grpc.Server
+import io.grpc.ServerBuilder
+import io.grpc.ServerServiceDefinition
+import io.grpc.stub.StreamObserver
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import cringle.router.v1.PrepareEngineRequest
@@ -50,7 +53,7 @@ class EngineSupervisorEnrollmentTest {
             
             supervisor.use {
                 it.add("test-engine", "Test Engine")
-                val started = it.start("test-engine")
+                val testEngine = it.start("test-engine")
                 
                 // Wait for the engine to start and for PrepareEngine to be called
                 Thread.sleep(2000)

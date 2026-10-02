@@ -143,8 +143,8 @@ public class EngineSupervisor(
             
             // Pass enrollment secret to engine via environment
             enrollmentSecret?.let { secret ->
-                builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("\") {
-                    "%02x".format(it)
+                builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("\\") { byte ->
+                    "%02x".format(byte)
                 }
             }
             val process = try {
@@ -235,12 +235,12 @@ public class EngineSupervisor(
                 
                 // Call PrepareEngine to register the secret hash
                 val prepareEngineStub = RegistryServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
-                prepareEngineStub.prepareEngine(
-                    PrepareEngineRequest.newBuilder()
-                        .setEngineId(cringle.common.v1.EngineId.newBuilder().setValue(m.id))
-                        .setEnrollmentSecretHash(secretHash)
-                        .build()
-                )
+                 prepareEngineStub.prepareEngine(
+                     PrepareEngineRequest.newBuilder()
+                         .setEngineId(cringle.common.v1.EngineId.newBuilder().setValue(m.id))
+                         .setEnrollmentSecretHash(com.google.protobuf.ByteString.copyFrom(secretHash))
+                         .build()
+                 )
             }
             
             // Configure the router address
