@@ -1,6 +1,70 @@
 # Running the Cringle daemon as a service
 
-One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with systemd and as a Windows service. The daemon is a plain JVM process (`cringle.daemon.MainKt`); until trust management exists (#13) it must be started with `--insecure-dev-mode` and listens on the loopback interface only.
+One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it using the Linux installer script and as a Windows service. The daemon is a plain JVM process (`cringle.daemon.MainKt`); until trust management exists (#13) it must be started with `--insecure-dev-mode` and listens on the loopback interface only.
+
+## Linux Installer
+
+The primary method for installing the Cringle daemon on Linux is the `install.sh` script. This script automates the installation process, including creating the systemd service.
+
+### Download and Installation
+
+The `install.sh` script is located in the Cringle repository at `scripts/install.sh`. You can download it directly:
+
+```bash
+wget https://raw.githubusercontent.com/Cringle/Cringle/master/scripts/install.sh
+chmod +x install.sh
+```
+
+### Command-line Options
+
+The installer provides several command-line options:
+
+- `--version`: Display the installer version and exit
+- `--with-management`: Install the ManagementServer alongside the daemon
+- `--uninstall`: Remove the Cringle daemon installation
+- `--purge`: Completely remove all Cringle data and configuration
+
+### Example Installation Commands
+
+Basic installation:
+```bash
+./install.sh
+```
+
+Install with ManagementServer:
+```bash
+./install.sh --with-management
+```
+
+Uninstall:
+```bash
+./install.sh --uninstall
+```
+
+Purge (removes all data):
+```bash
+./install.sh --purge
+```
+
+### Verification Steps
+
+After installation, verify that the daemon is running correctly:
+
+```bash
+# Check service status
+sudo systemctl status cringle-daemon
+
+# Check if daemon is listening on the expected port
+etc
+
+# View daemon logs
+journalctl -u cringle-daemon -f
+
+# Verify daemon API is responsive
+curl http://localhost:7400/health
+```
+
+The installer creates a systemd service at `/etc/systemd/system/cringle-daemon.service` and sets up the Cringle home directory at `/var/lib/cringle` by default.
 
 ## Command line
 
