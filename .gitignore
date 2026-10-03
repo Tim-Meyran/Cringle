@@ -1,5 +1,6 @@
 # Gradle
 .gradle/
+.kotlin/
 build/
 **/build/
 
@@ -27,3 +28,13 @@ __pycache__/
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Scratch and test output of agents (use $TMPDIR or build/, never the project)
+test-output*.txt
+test_output*.txt
+test-results*.txt
+*-debug-output.txt
+check_test_error.txt
+temp_*.txt
+test_*.json
+test_main.kt

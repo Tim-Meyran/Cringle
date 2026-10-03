@@ -85,9 +85,11 @@ Implement exactly the issue's **Scope**. Anything under **Out of scope** belongs
 ### 5. Verify locally
 
 ```bash
-./gradlew spotlessApply
-./gradlew build
+./gradlew spotlessApply --quiet --console=plain --no-daemon
+./gradlew build --quiet --console=plain --no-daemon
 ```
+
+Run every Gradle command in this form: `./gradlew <task> --quiet --console=plain --no-daemon`. Do not redirect or filter the output (no `> file`, no `| tail`, no `nohup`/background run); read the output of the command itself. Test and build output never goes into a file in the project.
 
 Every acceptance criterion needs a test or a documented manual check. Never disable or weaken tests, style checks or CI to get a green build.
 
@@ -123,6 +125,8 @@ gh pr merge --squash --delete-branch
 - **Merging** is allowed only through `gh pr merge --squash --delete-branch` after `./gradlew build` was green locally on the final commit (while the CI is suspended, see section 6). Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
 - **Technical guard rails.** `opencode.json` (opencode) and `.claude/settings.json` (Claude Code) enforce the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
+- **No commits to `master`.** Every change goes through `issue/<n>-<slug>` and a pull request. Scratch, log and test-output files go to `$TMPDIR` or `build/`, never into the project (`git status` must show none before you commit).
+- **Do not make a test pass by weakening production code.** If a test fails and you think the production rule is wrong, set `blocked` and describe it.
 - One issue per branch and pull request. Do not start a second issue before the first pull request is merged or you have marked the issue `blocked`.
 
 ## Code conventions
