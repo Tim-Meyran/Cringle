@@ -6,8 +6,6 @@ import cringle.common.OwnerOnlyFiles
 import cringle.contract.UserRole
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray

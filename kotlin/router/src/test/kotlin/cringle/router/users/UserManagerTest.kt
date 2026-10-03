@@ -10,6 +10,7 @@ import java.nio.file.attribute.AclEntryType
 import java.nio.file.attribute.AclFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Duration
+import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -149,9 +150,25 @@ class UserManagerTest {
         // second save keeps the rights
         m.createUser("bob", setOf(UserRole.VIEWER))
         assertOwnerOnly(file)
-        // no temporary file left behind after a failed save
-        Files.writeString(dir.resolve("users.json"), "{ corrupt")
-        assertThrows<UserStoreException> { manager() }
+    }
+
+    @Test
+    fun noTempFileLeftAfterFailedSave() {
+        val store = FileUserStore(file)
+        // Create a directory at the file location to make save fail
+        Files.createDirectories(file.resolve("inner"))
+        // Create a non-empty UserData to save
+        val data = UserData(
+            users = listOf(User(UUID.randomUUID().toString(), "test", setOf(UserRole.VIEWER), emptySet())),
+            groups = emptyList(),
+            tokens = emptyList(),
+            bootstrapped = true
+        )
+        assertThrows<java.io.IOException> {
+            store.save(data)
+        }
+        // Verify that the inner directory still exists and no temp file was left
+        assertTrue(Files.isDirectory(file.resolve("inner")))
         assertEquals(listOf("users.json"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.toList() })
     }
 }
