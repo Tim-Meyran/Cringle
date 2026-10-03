@@ -236,11 +236,18 @@ public class PackageCache internal constructor(
         Files.deleteIfExists(dir)
     }
 
-    private fun readUsage(file: Path): List<Triple<ArtifactType, String, String>> =
-        Files.readAllLines(file).filter { it.isNotBlank() }.map { line ->
+    /** The versions a usage file names; a file that was removed in the meantime (the fabric ended) names none. */
+    private fun readUsage(file: Path): List<Triple<ArtifactType, String, String>> {
+        val lines = try {
+            Files.readAllLines(file)
+        } catch (e: java.nio.file.NoSuchFileException) {
+            return emptyList()
+        }
+        return lines.filter { it.isNotBlank() }.map { line ->
             val (type, name, version) = line.split(' ')
             Triple(ArtifactType.valueOf(type), name, version)
         }
+    }
 
     private fun inUse(): Set<Triple<ArtifactType, String, String>> {
         val usage = root.resolve("usage")

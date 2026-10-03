@@ -4,8 +4,6 @@ package cringle.daemon
 
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.EngineManagementServiceGrpc
-import cringle.router.v1.PrepareEngineRequest
-import cringle.router.v1.RegistryServiceGrpc
 import io.grpc.ManagedChannelBuilder
 import java.io.File
 import java.nio.file.Files
@@ -65,6 +63,11 @@ public class EngineSupervisor(
     private val onWarning: (String) -> Unit = { System.err.println("WARNING: $it") },
     /** Secure random number generator for enrollment secrets. */
     private val secureRandom: SecureRandom = SecureRandom(),
+    /**
+     * Announces at the router that [engine] will register with the secret whose SHA-256 is the second argument
+     * (`PrepareEngine`). Called before the engine process starts; if it throws, the engine is not started.
+     */
+    private val announce: (engine: String, secretHash: ByteArray) -> Unit = { _, _ -> },
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -126,13 +129,16 @@ public class EngineSupervisor(
             m.lastError = ""
             m.exitCode = 0
             
-            // Generate enrollment secret if router is configured
-            val enrollmentSecret = if (routerAddress() != null) {
-                val secret = ByteArray(32)
-                secureRandom.nextBytes(secret)
-                secret
-            } else {
-                null
+            // One-time enrollment secret (docs/trust.md): the router learns its hash before the engine can register
+            val enrollmentSecret = if (routerAddress() != null) ByteArray(32).also { secureRandom.nextBytes(it) } else null
+            if (enrollmentSecret != null) {
+                try {
+                    announce(m.id, MessageDigest.getInstance("SHA-256").digest(enrollmentSecret))
+                } catch (e: Exception) {
+                    m.state = ProcessState.STOPPED
+                    m.lastError = "the enrollment of engine '$id' could not be announced at the router: ${e.message}"
+                    throw DaemonException(DaemonError.FAILED_PRECONDITION, m.lastError, e)
+                }
             }
             
             val cmd = listOf(command.java) + command.jvmArgs + listOf(
@@ -143,12 +149,8 @@ public class EngineSupervisor(
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()
             
-            // Pass enrollment secret to engine via environment
-            enrollmentSecret?.let { secret ->
-                builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("\\") { byte ->
-                    "%02x".format(byte)
-                }
-            }
+            // the secret goes to the engine through its environment, never as an argument
+            enrollmentSecret?.let { secret -> builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("") { "%02x".format(it) } }
             val process = try {
                 builder.start()
             } catch (e: Exception) {
@@ -173,7 +175,7 @@ public class EngineSupervisor(
             m.port = managementPort
             m.startedAt = Instant.now()
             m.state = ProcessState.RUNNING
-            configureRouter(m, enrollmentSecret)
+            configureRouter(m)
             return snapshot(m)
         }
     }
@@ -230,24 +232,10 @@ public class EngineSupervisor(
         }
     }
 
-    private fun configureRouter(m: Managed, enrollmentSecret: ByteArray?) {
+    private fun configureRouter(m: Managed) {
         val router = routerAddress() ?: return
-        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", m.port).usePlaintext().build()
+        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", m.port).usePlaintext().build() // TLS to the engine: #84
         try {
-            enrollmentSecret?.let { secret ->
-                val secretHash = MessageDigest.getInstance("SHA-256").digest(secret)
-                
-                // Call PrepareEngine to register the secret hash
-                val prepareEngineStub = RegistryServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
-                 prepareEngineStub.prepareEngine(
-                     PrepareEngineRequest.newBuilder()
-                         .setEngineId(cringle.common.v1.EngineId.newBuilder().setValue(m.id))
-                         .setEnrollmentSecretHash(com.google.protobuf.ByteString.copyFrom(secretHash))
-                         .build()
-                 )
-            }
-            
-            // Configure the router address
             EngineManagementServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
                 .configure(ConfigureRequest.newBuilder().setRouterAddress(router).build())
         } catch (e: Exception) {

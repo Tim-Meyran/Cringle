@@ -46,6 +46,8 @@ public class Daemon(
         stopTimeout,
         // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
         onStopped = { id, _ -> router?.registry?.unregister(id) },
+        // combined mode: the router of this process; a separate router is announced to by mTLS from the daemon (#114)
+        announce = { id, hash -> router?.enrollment?.prepare(id, hash) },
     )
 
     private val server: Server = NettyServerBuilder

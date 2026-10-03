@@ -5,22 +5,29 @@ package cringle.router
 import cringle.common.ComponentKind
 import cringle.common.Identity
 import cringle.common.TlsHelper
-import cringle.common.TrustStore
 import cringle.common.TrustEntry
 import cringle.common.TrustKind
+import cringle.common.TrustStore
 import cringle.router.v1.ListEnginesRequest
-import cringle.router.v1.ListEnginesResponse
 import cringle.router.v1.RegistryServiceGrpcKt
 import io.grpc.ManagedChannel
+import io.grpc.Status
+import io.grpc.StatusException
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
+/**
+ * Router with TLS. mTLS needs trust in both directions: the caller trusts the key of the server (client side check of
+ * the handshake) and the server trusts the key of the caller (`TrustInterceptor`, every method that is not open).
+ */
 class RouterServerTlsTest {
     @TempDir
     lateinit var dir: Path
@@ -50,9 +57,10 @@ class RouterServerTlsTest {
         return Node(name, identity, trust, server)
     }
 
-    private fun channel(to: Node, me: Identity?): ManagedChannel {
+    /** A channel to [to]; [serverTrusted] says whether the caller trusts the key of [to]; [me] is the client certificate or null. */
+    private fun channel(to: Node, me: Identity?, serverTrusted: Boolean = true): ManagedChannel {
         val store = TrustStore(dir.resolve("client-${counter++}-trust.json"))
-        store.add(TrustEntry(to.fp, to.name, TrustKind.ROUTER))
+        if (serverTrusted) store.add(TrustEntry(to.fp, to.name, TrustKind.ROUTER))
         val channel = NettyChannelBuilder.forAddress("127.0.0.1", to.server.port)
             .sslContext(TlsHelper.channelCredentials(me, store))
             .build()
@@ -60,85 +68,89 @@ class RouterServerTlsTest {
         return channel
     }
 
-    private fun api(channel: ManagedChannel): RegistryServiceGrpcKt.RegistryServiceCoroutineStub {
-        return RegistryServiceGrpcKt.RegistryServiceCoroutineStub(channel).withDeadlineAfter(30, java.util.concurrent.TimeUnit.SECONDS)
+    private fun listEngines(channel: ManagedChannel) = runBlocking {
+        RegistryServiceGrpcKt.RegistryServiceCoroutineStub(channel)
+            .withDeadlineAfter(30, TimeUnit.SECONDS)
+            .listEngines(ListEnginesRequest.getDefaultInstance())
     }
+
+    private fun trust(who: Node, other: Node) = who.trust.add(TrustEntry(other.fp, other.name, TrustKind.ROUTER, address = other.address))
 
     @Test
     fun routerWithTlsRejectsUntrustedRouterDuringRefresh() {
         val a = node("a")
         val b = node("b")
-        
-        // Add b as remote router to a without trusting it
         a.server.registry.addRemote(b.address)
-        
-        // Try to refresh - should fail because b is not trusted
+
         runBlocking { a.server.remoteRouters.refresh(b.address) }
-        
-        // Check that the remote router has an error status
-        val remote = a.server.registry.remotes().find { it.address == b.address }
-        assertEquals("remote router is not trusted", remote?.lastError)
+
+        assertEquals("remote router is not trusted", a.server.registry.remotes().single { it.address == b.address }.lastError)
     }
 
     @Test
-    fun routerWithTlsSucceedsWhenRouterIsTrusted() {
+    fun routerWithTlsSucceedsWhenRouterIsTrustedInBothDirections() {
         val a = node("a")
         val b = node("b")
-        
-        // Trust b as a router
-        a.trust.add(TrustEntry(b.fp, "b", TrustKind.ROUTER, address = b.address))
-        
-        // Add b as remote router to a
+        trust(a, b)
+        trust(b, a)
         a.server.registry.addRemote(b.address)
-        
-        // Refresh should succeed
+
         runBlocking { a.server.remoteRouters.refresh(b.address) }
-        
-        // Check that the remote router has no error
-        val remote = a.server.registry.remotes().find { it.address == b.address }
-        assertEquals(null, remote?.lastError)
+
+        assertEquals(null, a.server.registry.remotes().single { it.address == b.address }.lastError)
     }
 
     @Test
-    fun routerWithTlsRejectsConnectionFromUntrustedRouter() {
+    fun refreshFailsWhenTheRemoteRouterDoesNotTrustTheCaller() {
         val a = node("a")
         val b = node("b")
-        
-        // Try to list engines from b without trusting it
-        val channel = NettyChannelBuilder.forAddress("127.0.0.1", b.server.port)
-            .sslContext(TlsHelper.channelCredentials(null, TrustStore(dir.resolve("empty-trust.json"))))
-            .build()
-        closeables += { channel.shutdownNow() }
-        
-        val stub = RegistryServiceGrpcKt.RegistryServiceCoroutineStub(channel)
-        try {
-            runBlocking { stub.listEngines(ListEnginesRequest.getDefaultInstance()) }
-        } catch (e: Exception) {
-            // Expected to fail with UNAUTHENTICATED
-            assertEquals("UNAUTHENTICATED", e.message?.substringBefore(":")?.trim())
-        }
+        trust(a, b) // b does not trust a: the handshake works, the interceptor of b refuses the call
+        a.server.registry.addRemote(b.address)
+
+        runBlocking { a.server.remoteRouters.refresh(b.address) }
+
+        val error = a.server.registry.remotes().single { it.address == b.address }.lastError
+        assertEquals(true, error?.startsWith("UNAUTHENTICATED"), error)
+    }
+
+    @Test
+    fun routerWithTlsRejectsCallWithoutClientCertificate() {
+        val b = node("b")
+
+        val e = assertThrows(StatusException::class.java) { listEngines(channel(b, null)) }
+
+        assertEquals(Status.Code.UNAUTHENTICATED, e.status.code)
+    }
+
+    @Test
+    fun routerWithTlsRejectsCallFromUntrustedRouter() {
+        val a = node("a")
+        val b = node("b")
+
+        val e = assertThrows(StatusException::class.java) { listEngines(channel(b, a.identity)) }
+
+        assertEquals(Status.Code.UNAUTHENTICATED, e.status.code)
+    }
+
+    @Test
+    fun callerThatDoesNotTrustTheServerFailsInTheHandshake() {
+        val a = node("a")
+        val b = node("b")
+        trust(b, a)
+
+        val e = assertThrows(StatusException::class.java) { listEngines(channel(b, a.identity, serverTrusted = false)) }
+
+        assertEquals(Status.Code.UNAVAILABLE, e.status.code)
     }
 
     @Test
     fun routerWithTlsAllowsConnectionFromTrustedRouter() {
         val a = node("a")
         val b = node("b")
-        
-        // Trust a as a router
-        b.trust.add(TrustEntry(a.fp, "a", TrustKind.ROUTER, address = a.address))
-        
-        // List engines from a
-        val channel = NettyChannelBuilder.forAddress("127.0.0.1", a.server.port)
-            .sslContext(TlsHelper.channelCredentials(b.identity, TrustStore(dir.resolve("client-trust.json")).apply {
-                add(TrustEntry(a.fp, "a", TrustKind.ROUTER))
-            }))
-            .build()
-        closeables += { channel.shutdownNow() }
-        
-        val stub = RegistryServiceGrpcKt.RegistryServiceCoroutineStub(channel)
-        val response = runBlocking { stub.listEngines(ListEnginesRequest.getDefaultInstance()) }
-        
-        // Should succeed
+        trust(a, b) // the server a trusts the caller b; b trusts a through the channel helper
+
+        val response = listEngines(channel(a, b.identity))
+
         assertEquals(0, response.enginesList.size)
     }
 }
