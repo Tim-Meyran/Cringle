@@ -70,7 +70,7 @@ cringle-daemon.exe start
 For a simpler installation, use the provided PowerShell installer script. The script is attached to releases as `install.ps1` and can be downloaded from the GitHub releases page.
 
 ```powershell
-./install.ps1 -Version "1.0.0" -WithManagement
+./install.ps1 -Version "1.0.0"
 ```
 
 The installer:
@@ -80,10 +80,11 @@ The installer:
 - Uses `--insecure-dev-mode` for development
 
 Available parameters:
-- `-Version`: Specify the daemon version to install
+- `-Version`: Specify the daemon version to install (default: latest)
 - `-WithManagement`: Include the ManagementServer for engine recovery
 - `-Uninstall`: Remove the service
-- `-Purge`: Remove service and configuration data
+- `-Purge`: Remove service and configuration data (use with -Uninstall)
+- `-BaseUrl`: Base URL for testing (overrides default repository)
 
 ## mTLS and Enrollment
 

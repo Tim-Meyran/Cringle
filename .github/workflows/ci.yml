@@ -33,3 +33,15 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build --no-daemon
+
+  test-windows-installer:
+    name: Windows Installer Tests
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell installer tests
+        run: .\dist\tests\InstallerTest.ps1
+        shell: pwsh

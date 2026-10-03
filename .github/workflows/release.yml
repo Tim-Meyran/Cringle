@@ -45,7 +45,6 @@ jobs:
           mkdir -p build/dist
           curl -fsSL https://github.com/winsw/winsw/releases/download/v2.12.1/WinSW-x64.exe -o build/dist/WinSW-winsw.exe
           sha256sum build/dist/WinSW-winsw.exe | awk '{print $1}' > build/dist/WinSW-winsw.exe.sha256
-          echo "a80b4f2b7766a37911b6f9e8c7d2a1b5c6e7f8d9a1b2c3d4e5f6a7b8c9d0e1f2" > build/dist/WinSW-winsw.exe.sha256
 
       - name: Build the distribution
         run: ./gradlew cringleDist --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
