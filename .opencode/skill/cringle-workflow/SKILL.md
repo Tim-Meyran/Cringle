@@ -29,3 +29,15 @@ Source of truth: `AGENTS.md` (roles, Definition of Ready, workflow, rules). This
 4. `./gradlew spotlessApply` then `./gradlew build` (module tests first, then the full build, see `AGENTS.md` 5).
 5. `git status`: only intended files. PR text: what changed, test counts, OS, what was not run, `Closes #<n>`.
 6. Label `needs-review`, remove `in-progress`, comment `PR #<pr> ready for review.` Stop; the reviewer merges.
+
+## Working with Gradle efficiently
+Always the form `./gradlew <task> --quiet --console=plain --no-daemon`; never redirect or `nohup` it. `--quiet` prints errors only, so **no output means green**. To see results use `--info` and filter the same command: `./gradlew :router:test --info --console=plain --no-daemon | grep -E " FAILED|tests completed|BUILD "`.
+
+1. **Narrow first, wide last.** In this order: `:<module>:compileKotlin :<module>:compileTestKotlin` (seconds), then `:<module>:test --tests '*ClassName'`, then `:<module>:test`, and the full `build` only once at the end. Module order by dependency: `common`, `contract`, `router`, `engine`, `daemon`, `management-server`, `cli`.
+2. **One failure hides the rest.** Gradle stops at the first failing module, so later modules show no result at all (their report files are old). To see every failure run `./gradlew build --continue` once and list all failing tests before you fix any.
+3. **Read the report, not the log.** Failures with message and line are in `kotlin/<module>/build/test-results/test/TEST-*.xml` (`<failure message=...>`); check that the file is newer than your run, otherwise it is an old result. A test that shows `UP-TO-DATE` did not run: use `:<module>:cleanTest :<module>:test`.
+4. **One Gradle run at a time.** A second run waits for the first one and looks like a hang. If a run does not end, find and stop the old one first (`Gradle Test Executor` and the daemon of the previous run), then start again.
+5. **Slow tests are not failing tests.** `DeploymentTest` and `ManagementServerTest` start real engine JVMs and take minutes. Run them alone (`--tests '*DeploymentTest'`), last, with a timeout of at least 10 minutes, and do not rerun them while they are running. If a tool limits the runtime of one command, split the work (compile, one module, the slow tests separately) instead of retrying the same command.
+6. **Do not change the code to get past a build problem.** `Cannot find a Java installation` needs JDK 21 (set `JAVA_HOME` or `-Porg.gradle.java.installations.paths=<jdk>`); a missing network needs `--offline`; `spotlessCheck` complaints are fixed with `./gradlew spotlessApply`, not by hand. Deleting `build/` or `.gradle/` is only for "stale output" errors.
+7. **Line endings (Windows).** The working tree may be CRLF and show hundreds of changed files. Judge changes with `git diff --ignore-space-at-eol`, stage only the files you changed (`git -c core.autocrlf=true add <file>`), and never commit line-ending-only changes.
+8. **Tests that stay green.** `@TempDir` for files, port `0` for servers, no `Thread.sleep` (wait for a condition), no debug `println`; to find out why a test fails use the XML report or `--info`, not new prints in the code.
