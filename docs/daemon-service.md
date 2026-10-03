@@ -67,20 +67,23 @@ cringle-daemon.exe start
 
 ### Automated installation
 
-For a simpler installation, use the provided PowerShell installer script:
+For a simpler installation, use the provided PowerShell installer script. The script is attached to releases as `install.ps1` and can be downloaded from the GitHub releases page.
 
 ```powershell
-./install.ps1 -Port 7400 -Home "C:\cringle\data" -Combined
+./install.ps1 -Version "1.0.0" -WithManagement
 ```
 
 The installer:
-- Requires administrative privileges
-- Installs the daemon as a Windows service
-- Configures the service with specified port and home directory
-- Sets up the `--combined` flag by default
+- Requires administrative privileges (run PowerShell as Administrator)
+- Installs the daemon as a Windows service named "Cringle Daemon"
+- Sets `CRINGLE_HOME` to `%ProgramData%\Cringle` by default
 - Uses `--insecure-dev-mode` for development
 
-The script is located in the distribution package under `dist/install.ps1`.
+Available parameters:
+- `-Version`: Specify the daemon version to install
+- `-WithManagement`: Include the ManagementServer for engine recovery
+- `-Uninstall`: Remove the service
+- `-Purge`: Remove service and configuration data
 
 ## mTLS and Enrollment
 

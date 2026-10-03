@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 <#
 Cringle Windows Installer Tests
@@ -13,8 +13,6 @@ Tests:
 - TestUninstall - Verifies service removal
 - TestNonAdmin - Verifies privilege detection
 #>
-
-#Requires -RunAsAdministrator
 
 $ErrorActionPreference = "Stop"
 
@@ -36,7 +34,7 @@ function Record-TestResult {
         Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     }
     
-    $testResults += $result
+    $global:testResults += $result
     
     if ($Passed) {
         Write-Host "✓ $TestName: PASSED - $Message" -ForegroundColor Green
@@ -47,7 +45,7 @@ function Record-TestResult {
 
 # Helper function to create temporary test directory
 function New-TempTestDirectory {
-    $tempDir = "$env:TEMP	est-cringle-$" + [System.Guid]::NewGuid().ToString()")
+    $tempDir = "$env:TEMPtest-cringle-$" + [System.Guid]::NewGuid().ToString()""
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     return $tempDir
 }
@@ -102,57 +100,36 @@ function Verify-SHA256Checksum {
 
 # TestInstallation - Verifies successful installation
 function TestInstallation {
-    Write-Host "`n=== TestInstallation ===" -ForegroundColor Cyan
+    Write-Host "\n=== TestInstallation ===" -ForegroundColor Cyan
     
     $testDir = New-TempTestDirectory
-    $installScript = "$testDir	est-install.ps1"
-    
     try {
-        # Create a mock installer script
-        $mockInstallScript = @"
-// SPDX-License-Identifier: Apache-2.0
-
-param([string]$Version = "1.0.0", [switch]$SkipVerify)
-
-$installDir = "$testDir	est-install"
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-
-# Create mock service files
-New-Item -ItemType Directory -Path "$installDirin" -Force | Out-Null
-New-Item -ItemType Directory -Path "$installDirin" -Force | Out-Null
-$null = New-Item -Path "$installDirin	est-exe.exe" -ItemType File
-$null = New-Item -Path "$installDirin	est-exe2.exe" -ItemType File
-
-# Create mock service wrapper
-$null = New-Item -Path "$installDir	est-service.exe" -ItemType File
-
-# Create mock config
-$serviceConfig = @"
-<service>
-  <id>TestService</id>
-  <name>Test Service</name>
-  <description>Test Service</description>
-  <executable>$installDir	est-service.exe</executable>
-  <arguments>-home "$env:TEMP	est-cringle"</arguments>
-  <logmode>rotate</logmode>
-  <onfailure>restart</onfailure>
-</service>
-"@
-Set-Content -Path "$installDir	est-service.xml" -Value $serviceConfig
-
-Write-Host "Mock installation completed for version $Version" -ForegroundColor Green
-"@
-
-Set-Content -Path $installScript -Value $mockInstallScript
-
-        # Execute mock installation
-        & $installScript -Version "1.0.0"
+        # Create fake release assets
+        $releaseDir = "$testDir\release"
+        $zipFile = "$releaseDir\cringle-1.0.0.zip"
+        $checksumFile = "$releaseDir\SHA256SUMS"
+        $winswFile = "$releaseDir\service.exe"
         
-        # Verify installation
-        if (Test-Path "$testDir	est-installin	est-exe.exe") {
+        New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+        
+        # Create fake zip file
+        "fake zip content" | Out-File -FilePath $zipFile -Encoding utf8
+        
+        # Create fake checksum file
+        $zipChecksum = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
+        "$zipChecksum  $zipFile" | Out-File -FilePath $checksumFile -Encoding utf8
+        
+        # Create fake WinSW file
+        "fake winsw content" | Out-File -FilePath $winswFile -Encoding utf8
+        
+        # Test installation with fake assets
+        $installScript = "$PSScriptRoot\..\install.ps1"
+        $exitCode = (& $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0")
+        
+        if ($exitCode -eq 0) {
             Record-TestResult -TestName "TestInstallation" -Passed $true -Message "Installation completed successfully"
         } else {
-            Record-TestResult -TestName "TestInstallation" -Passed $false -Message "Installation files not found"
+            Record-TestResult -TestName "TestInstallation" -Passed $false -Message "Installation failed with exit code $exitCode"
         }
     } catch {
         Record-TestResult -TestName "TestInstallation" -Passed $false -Message "Exception: $_"
@@ -163,33 +140,32 @@ Set-Content -Path $installScript -Value $mockInstallScript
 
 # TestSHA256Verification - Verifies checksum validation
 function TestSHA256Verification {
-    Write-Host "`n=== TestSHA256Verification ===" -ForegroundColor Cyan
+    Write-Host "\n=== TestSHA256Verification ===" -ForegroundColor Cyan
     
     $testDir = New-TempTestDirectory
-    
     try {
         # Create test files
-        $testFile1 = "$testDir	est1.txt"
-        $testFile2 = "$testDir	est2.txt"
+        $releaseDir = "$testDir\release"
+        $zipFile = "$releaseDir\cringle-1.0.0.zip"
+        $checksumFile = "$releaseDir\SHA256SUMS"
         
-        # Write content to first file
-        "Test content 1" | Out-File -FilePath $testFile1 -Encoding utf8
+        New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
         
-        # Get expected checksum
-        $expectedChecksum = (Get-FileHash -Path $testFile1 -Algorithm SHA256).Hash.ToLower()
+        # Create fake zip file
+        "fake zip content" | Out-File -FilePath $zipFile -Encoding utf8
         
-        # Verify with correct checksum
-        $correctResult = Verify-SHA256Checksum -FilePath $testFile1 -ExpectedChecksum $expectedChecksum
+        # Create checksum file with WRONG checksum
+        $wrongChecksum = "0000000000000000000000000000000000000000000000000000000000000000"
+        "$wrongChecksum  $zipFile" | Out-File -FilePath $checksumFile -Encoding utf8
         
-        # Modify file and verify with incorrect checksum
-        "Modified content" | Out-File -FilePath $testFile1 -Encoding utf8
-        $incorrectResult = Verify-SHA256Checksum -FilePath $testFile1 -ExpectedChecksum $expectedChecksum
+        # Test installation with wrong checksum (should fail)
+        $installScript = "$PSScriptRoot\..\install.ps1"
+        $exitCode = (& $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0")
         
-        # Test passed if correct verification passed and incorrect failed
-        if ($correctResult -and (-not $incorrectResult)) {
-            Record-TestResult -TestName "TestSHA256Verification" -Passed $true -Message "Checksum validation works correctly"
+        if ($exitCode -ne 0) {
+            Record-TestResult -TestName "TestSHA256Verification" -Passed $true -Message "Checksum validation correctly rejected wrong checksum"
         } else {
-            Record-TestResult -TestName "TestSHA256Verification" -Passed $false -Message "Checksum validation failed"
+            Record-TestResult -TestName "TestSHA256Verification" -Passed $false -Message "Checksum validation failed to detect wrong checksum"
         }
     } catch {
         Record-TestResult -TestName "TestSHA256Verification" -Passed $false -Message "Exception: $_"
@@ -200,69 +176,42 @@ function TestSHA256Verification {
 
 # TestUpgrade - Verifies version switching
 function TestUpgrade {
-    Write-Host "`n=== TestUpgrade ===" -ForegroundColor Cyan
+    Write-Host "\n=== TestUpgrade ===" -ForegroundColor Cyan
     
     $testDir = New-TempTestDirectory
-    $installScript = "$testDir	est-upgrade.ps1"
-    
     try {
-        # Create a mock upgrade script
-        $mockUpgradeScript = @"
-// SPDX-License-Identifier: Apache-2.0
-
-param([string]$Version = "2.0.0")
-
-$installDir = "$testDir	est-upgrade"
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-
-# Create version-specific files
-New-Item -ItemType Directory -Path "$installDirin" -Force | Out-Null
-$null = New-Item -Path "$installDirin
-ew-exe.exe" -ItemType File
-$null = New-Item -Path "$installDirin
-ew-exe2.exe" -ItemType File
-
-# Create version-specific service wrapper
-$null = New-Item -Path "$installDir
-ew-service.exe" -ItemType File
-
-# Create version-specific config
-$serviceConfig = @"
-<service>
-  <id>TestService-$Version</id>
-  <name>Test Service $Version</name>
-  <description>Test Service $Version</description>
-  <executable>$installDir
-ew-service.exe</executable>
-  <arguments>-home "$env:TEMP	est-cringle"</arguments>
-  <logmode>rotate</logmode>
-  <onfailure>restart</onfailure>
-</service>
-"@
-Set-Content -Path "$installDir
-ew-service.xml" -Value $serviceConfig
-
-Write-Host "Mock upgrade completed for version $Version" -ForegroundColor Green
-"@
-
-Set-Content -Path $installScript -Value $mockUpgradeScript
-
-        # Execute first version
-        & $installScript -Version "1.0.0"
+        # Create fake release assets for two versions
+        $releaseDir = "$testDir\release"
+        $zipFile1 = "$releaseDir\cringle-1.0.0.zip"
+        $zipFile2 = "$releaseDir\cringle-2.0.0.zip"
+        $checksumFile = "$releaseDir\SHA256SUMS"
         
-        # Execute second version
-        & $installScript -Version "2.0.0"
+        New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
         
-        # Verify both versions exist
-        $version1Exists = Test-Path "$testDir	est-upgradein
-ew-exe.exe"
-        $version2Exists = Test-Path "$testDir	est-upgradein
-ew-exe2.exe"
+        # Create fake zip files
+        "fake zip content 1" | Out-File -FilePath $zipFile1 -Encoding utf8
+        "fake zip content 2" | Out-File -FilePath $zipFile2 -Encoding utf8
         
-        if ($version1Exists -and $version2Exists) {
+        # Create checksum file
+        $checksum1 = (Get-FileHash -Path $zipFile1 -Algorithm SHA256).Hash.ToLower()
+        $checksum2 = (Get-FileHash -Path $zipFile2 -Algorithm SHA256).Hash.ToLower()
+        "$checksum1  $zipFile1`n$checksum2  $zipFile2" | Out-File -FilePath $checksumFile -Encoding utf8
+        
+        # Install first version
+        $installScript = "$PSScriptRoot\..\install.ps1"
+        $exitCode1 = (& $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0")
+        
+        # Install second version
+        $exitCode2 = (& $installScript -BaseUrl "file://$releaseDir" -Version "2.0.0")
+        
+        # Check that current version is 2.0.0
+        $currentVersion = Get-Content "$env:ProgramFiles\Cringle\current\version.txt" -ErrorAction SilentlyContinue
+        
+        if ($exitCode1 -eq 0 -and $exitCode2 -eq 0 -and $currentVersion -eq "2.0.0") {
             Record-TestResult -TestName "TestUpgrade" -Passed $true -Message "Version switching completed successfully"
         } else {
-            Record-TestResult -TestName "TestUpgrade" -Passed $false -Message "Version files not found"
+            $message = "Upgrade failed: exitCode1=$exitCode1, exitCode2=$exitCode2, currentVersion=$currentVersion"
+            Record-TestResult -TestName "TestUpgrade" -Passed $false -Message $message
         }
     } catch {
         Record-TestResult -TestName "TestUpgrade" -Passed $false -Message "Exception: $_"
@@ -273,89 +222,45 @@ ew-exe2.exe"
 
 # TestUninstall - Verifies service removal
 function TestUninstall {
-    Write-Host "`n=== TestUninstall ===" -ForegroundColor Cyan
+    Write-Host "\n=== TestUninstall ===" -ForegroundColor Cyan
     
     $testDir = New-TempTestDirectory
-    $installScript = "$testDir	est-uninstall.ps1"
-    $uninstallScript = "$testDir	est-uninstall.ps1"
-    
     try {
-        # Create mock install and uninstall scripts
-        $mockInstallScript = @"
-// SPDX-License-Identifier: Apache-2.0
-
-param([string]$Version = "1.0.0")
-
-$installDir = "$testDir	est-uninstall"
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-
-# Create mock service files
-New-Item -ItemType Directory -Path "$installDirin" -Force | Out-Null
-$null = New-Item -Path "$installDirin	est-exe.exe" -ItemType File
-$null = New-Item -Path "$installDir	est-service.exe" -ItemType File
-
-# Create mock config
-$serviceConfig = @"
-<service>
-  <id>TestService-$Version</id>
-  <name>Test Service $Version</name>
-  <description>Test Service</description>
-  <executable>$installDir	est-service.exe</executable>
-  <arguments>-home "$env:TEMP	est-cringle"</arguments>
-  <logmode>rotate</logmode>
-  <onfailure>restart</onfailure>
-</service>
-"@
-Set-Content -Path "$installDir	est-service.xml" -Value $serviceConfig
-
-Write-Host "Mock installation completed for version $Version" -ForegroundColor Green
-"@
-
-$mockUninstallScript = @"
-// SPDX-License-Identifier: Apache-2.0
-
-param([string]$Version = "1.0.0", [switch]$Purge)
-
-$installDir = "$testDir	est-uninstall"
-
-if (Test-Path $installDir) {
-    Write-Host "Removing installation directory..." -ForegroundColor Cyan
-    Remove-Item $installDir -Recurse -Force
-    Write-Host "Uninstallation completed" -ForegroundColor Green
-}
-
-if ($Purge) {
-    $dataDir = "$testDir	est-data"
-    if (Test-Path $dataDir) {
-        Write-Host "Purging data directory..." -ForegroundColor Cyan
-        Remove-Item $dataDir -Recurse -Force
-    }
-}
-"@
-
-Set-Content -Path $installScript -Value $mockInstallScript
-Set-Content -Path $uninstallScript -Value $mockUninstallScript
-
+        # Create fake release assets
+        $releaseDir = "$testDir\release"
+        $zipFile = "$releaseDir\cringle-1.0.0.zip"
+        $checksumFile = "$releaseDir\SHA256SUMS"
+        
+        New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+        
+        # Create fake zip file
+        "fake zip content" | Out-File -FilePath $zipFile -Encoding utf8
+        
+        # Create checksum file
+        $checksum = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
+        "$checksum  $zipFile" | Out-File -FilePath $checksumFile -Encoding utf8
+        
         # Install
-        & $installScript -Version "1.0.0"
+        $installScript = "$PSScriptRoot\..\install.ps1"
+        & $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0"
         
         # Verify installation
-        $beforeUninstall = Test-Path "$testDir	est-uninstallin	est-exe.exe"
+        $beforeUninstall = Test-Path "$env:ProgramFiles\Cringle\current\service.exe"
         
         # Uninstall without purge
-        & $uninstallScript -Version "1.0.0"
+        & $installScript -Uninstall
         
-        $afterUninstall = Test-Path "$testDir	est-uninstallin	est-exe.exe"
+        $afterUninstall = Test-Path "$env:ProgramFiles\Cringle\current\service.exe"
         
         # Install again for purge test
-        & $installScript -Version "1.0.0"
+        & $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0"
         
         # Create data directory
-        $dataDir = "$testDir	est-data"
+        $dataDir = "$env:ProgramData\Cringle"
         New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
         
         # Uninstall with purge
-        & $uninstallScript -Version "1.0.0" -Purge
+        & $installScript -Uninstall -Purge
         
         $afterPurge = Test-Path $dataDir
         
@@ -375,7 +280,7 @@ Set-Content -Path $uninstallScript -Value $mockUninstallScript
 
 # TestNonAdmin - Verifies privilege detection
 function TestNonAdmin {
-    Write-Host "`n=== TestNonAdmin ===" -ForegroundColor Cyan
+    Write-Host "\n=== TestNonAdmin ===" -ForegroundColor Cyan
     
     try {
         # Check if running as administrator
@@ -404,7 +309,7 @@ TestUninstall
 TestNonAdmin
 
 # Display summary
-Write-Host "`n=== Test Summary ===" -ForegroundColor Cyan
+Write-Host "\n=== Test Summary ===" -ForegroundColor Cyan
 $passedCount = ($testResults | Where-Object { $_.Passed }).Count
 $totalCount = $testResults.Count
 $passedPercent = if ($totalCount -gt 0) { ($passedCount / $totalCount) * 100 } else { 0 }
