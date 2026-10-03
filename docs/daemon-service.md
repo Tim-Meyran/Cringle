@@ -44,6 +44,8 @@ sudo systemctl enable --now cringle-daemon
 
 ## Windows service
 
+### Manual installation with WinSW
+
 Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-daemon.xml` next to `cringle-daemon.exe` (the renamed WinSW binary):
 
 ```xml
@@ -62,6 +64,23 @@ Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-
 cringle-daemon.exe install
 cringle-daemon.exe start
 ```
+
+### Automated installation
+
+For a simpler installation, use the provided PowerShell installer script:
+
+```powershell
+./install.ps1 -Port 7400 -Home "C:\cringle\data" -Combined
+```
+
+The installer:
+- Requires administrative privileges
+- Installs the daemon as a Windows service
+- Configures the service with specified port and home directory
+- Sets up the `--combined` flag by default
+- Uses `--insecure-dev-mode` for development
+
+The script is located in the distribution package under `dist/install.ps1`.
 
 ## mTLS and Enrollment
 

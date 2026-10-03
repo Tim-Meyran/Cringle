@@ -40,6 +40,11 @@ jobs:
       - name: Build and test
         run: ./gradlew build --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
 
+      - name: Download WinSW
+        run: |
+          curl -s https://github.com/winsw/winsw/releases/download/v2.11.0/WinSW-x64.exe -o build/dist/WinSW-winsw.exe
+          sha256sum build/dist/WinSW-winsw.exe | awk '{print $1}' > build/dist/WinSW-winsw.exe.sha256
+
       - name: Build the distribution
         run: ./gradlew cringleDist --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
 
@@ -54,6 +59,8 @@ jobs:
             build/dist/cringle-${{ steps.version.outputs.version }}-windows.zip \
             build/dist/SHA256SUMS \
             build/dist/manifest.json \
+            build/dist/WinSW-winsw.exe \
+            build/dist/WinSW-winsw.exe.sha256 \
             --title "Cringle ${{ steps.version.outputs.version }}" \
             --generate-notes \
             $prerelease
