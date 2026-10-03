@@ -54,6 +54,7 @@ jobs:
             build/dist/cringle-${{ steps.version.outputs.version }}-windows.zip \
             build/dist/SHA256SUMS \
             build/dist/manifest.json \
+            build/dist/install.sh \
             --title "Cringle ${{ steps.version.outputs.version }}" \
             --generate-notes \
             $prerelease

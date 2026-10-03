@@ -8,10 +8,10 @@ The primary method for installing the Cringle daemon on Linux is the `install.sh
 
 ### Download and Installation
 
-The `install.sh` script is located in the Cringle repository at `scripts/install.sh`. You can download it directly:
+The `install.sh` script is attached to releases. You can download it directly:
 
 ```bash
-wget https://raw.githubusercontent.com/Cringle/Cringle/master/scripts/install.sh
+wget https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.sh
 chmod +x install.sh
 ```
 
@@ -54,14 +54,11 @@ After installation, verify that the daemon is running correctly:
 # Check service status
 sudo systemctl status cringle-daemon
 
-# Check if daemon is listening on the expected port
-etc
-
 # View daemon logs
 journalctl -u cringle-daemon -f
 
-# Verify daemon API is responsive
-curl http://localhost:7400/health
+# Verify daemon version
+cringle --version
 ```
 
 The installer creates a systemd service at `/etc/systemd/system/cringle-daemon.service` and sets up the Cringle home directory at `/var/lib/cringle` by default.

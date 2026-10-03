@@ -24,16 +24,33 @@ NC='\033[0m' # No Color
 
 # Default values
 VERSION="latest"
+RELEASE_VERSION=""
 WITH_MANAGEMENT=false
 UNINSTALL=false
 PURGE=false
 SHOW_VERSION=false
+START_SERVICES=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)
-            SHOW_VERSION=true
+            echo "Cringle installer version: 1.0.0"
+            exit 0
+            ;;
+        --release)
+            if [[ $# -gt 1 ]]; then
+                if ! [[ "$2" =~ ^- ]]; then
+                    RELEASE_VERSION="$2"
+                    shift
+                else
+                    echo "${RED}Error:${NC} --release requires a version argument" >&2
+                    exit 1
+                fi
+            else
+                echo "${RED}Error:${NC} --release requires a version argument" >&2
+                exit 1
+            fi
             shift
             ;;
         --with-management)
@@ -48,28 +65,16 @@ while [[ $# -gt 0 ]]; do
             PURGE=true
             shift
             ;;
-        -v|--version)
-            SHOW_VERSION=true
-            shift
-            ;;
-        -m|--with-management)
-            WITH_MANAGEMENT=true
-            shift
-            ;;
-        -u|--uninstall)
-            UNINSTALL=true
-            shift
-            ;;
-        -p|--purge)
-            PURGE=true
+        -s|--start)
+            START_SERVICES=true
             shift
             ;;
         -*)
-            echo "Unknown option: $1" >&2
+            echo "${RED}Error:${NC} Unknown option: $1" >&2
             exit 1
             ;;
         *)
-            if [[ "$1" != "latest" && "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            if [[ "$1" != "latest" ]] && [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
                 VERSION="$1"
             fi
             shift
@@ -109,7 +114,7 @@ get_latest_version() {
     
     # Try to get latest release from GitHub
     if command -v curl >/dev/null 2>&1; then
-        LATEST_RELEASE=$(curl -s https://api.github.com/repos/CringleProject/Cringle/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"([^"]*)".*/\1/')
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"([^\"]*)\".*/\1/')
         if [[ -n "$LATEST_RELEASE" ]]; then
             VERSION="${LATEST_RELEASE#v}"
             echo "${GREEN}Latest version found:${NC} $VERSION"
@@ -125,30 +130,40 @@ get_latest_version() {
 
 # Download release files
 download_release() {
-    local base_url="https://github.com/CringleProject/Cringle/releases/download/v${VERSION}"
+    local base_url="https://github.com/Tim-Meyran/Cringle/releases/download/v${VERSION}"
     local archive_name="cringle-${VERSION}-linux.tar.gz"
     local checksums_name="SHA256SUMS"
     local manifest_name="manifest.json"
+    local temp_dir
     
     echo "${BLUE}Downloading Cringle ${VERSION}...${NC}"
     
-    # Download files
-    if ! curl -L --fail --silent --show-error --output "${archive_name}" "${base_url}/${archive_name}"; then
+    # Create temporary directory for downloads
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "${temp_dir}"' EXIT
+    
+    # Download files to temp directory
+    if ! curl -L --fail --silent --show-error --output "${temp_dir}/${archive_name}" "${base_url}/${archive_name}"; then
         echo "${RED}Error:${NC} Failed to download ${archive_name}" >&2
         exit 1
     fi
     
-    if ! curl -L --fail --silent --show-error --output "${checksums_name}" "${base_url}/${checksums_name}"; then
+    if ! curl -L --fail --silent --show-error --output "${temp_dir}/${checksums_name}" "${base_url}/${checksums_name}"; then
         echo "${RED}Error:${NC} Failed to download ${checksums_name}" >&2
         exit 1
     fi
     
-    if ! curl -L --fail --silent --show-error --output "${manifest_name}" "${base_url}/${manifest_name}"; then
+    if ! curl -L --fail --silent --show-error --output "${temp_dir}/${manifest_name}" "${base_url}/${manifest_name}"; then
         echo "${RED}Error:${NC} Failed to download ${manifest_name}" >&2
         exit 1
     fi
     
     echo "${GREEN}Download completed:${NC} ${archive_name}, ${checksums_name}, ${manifest_name}"
+    
+    # Move files to current directory after successful download
+    mv "${temp_dir}/"* .
+    trap - EXIT  # Remove trap since we've moved files
+    rm -rf "${temp_dir}"
 }
 
 # Verify SHA-256 checksum
@@ -157,17 +172,11 @@ verify_checksum() {
     
     echo "${BLUE}Verifying SHA-256 checksum...${NC}"
     
-    if ! sha256sum -c SHA256SUMS 2>&1 | grep -q "OK"; then
+    # Verify specific Linux archive only
+    if ! grep "${archive_name}$" SHA256SUMS | sha256sum -c -; then
         echo "${RED}Error:${NC} SHA-256 checksum verification failed" >&2
-        exit 1
-    fi
-    
-    # Verify specific file
-    local expected_sum=$(grep "${archive_name}" SHA256SUMS | awk '{print $1}')
-    local actual_sum=$(sha256sum "${archive_name}" | awk '{print $1}')
-    
-    if [[ "$expected_sum" != "$actual_sum" ]]; then
-        echo "${RED}Error:${NC} SHA-256 checksum mismatch for ${archive_name}" >&2
+        # Remove any downloaded files on checksum failure
+        rm -f "${archive_name}" SHA256SUMS manifest.json
         exit 1
     fi
     
@@ -178,20 +187,30 @@ verify_checksum() {
 install_release() {
     local archive_name="cringle-${VERSION}-linux.tar.gz"
     local install_path="${INSTALL_DIR}/${VERSION}"
+    local temp_extract_dir
     
     echo "${BLUE}Extracting and installing...${NC}"
+    
+    # Create temporary directory for extraction
+    temp_extract_dir=$(mktemp -d)
+    trap 'rm -rf "${temp_extract_dir}"' EXIT
     
     # Create installation directory
     mkdir -p "${install_path}"
     
-    # Extract archive
-    if ! tar -xzf "${archive_name}" -C "${install_path}" --strip-components=1; then
+    # Extract archive to temp directory
+    if ! tar -xzf "${archive_name}" -C "${temp_extract_dir}" --strip-components=1; then
         echo "${RED}Error:${NC} Failed to extract ${archive_name}" >&2
         exit 1
     fi
     
+    # Move extracted contents to final location
+    mv "${temp_extract_dir}/"* "${install_path}/"
+    trap - EXIT  # Remove trap since we've moved files
+    rm -rf "${temp_extract_dir}"
+    
     # Create current symlink
-    ln -sf "${install_path}" "${INSTALL_DIR}/current"
+    ln -sfn "${install_path}" "${INSTALL_DIR}/current"
     
     echo "${GREEN}Installation completed:${NC} ${install_path}"
 }
@@ -203,22 +222,22 @@ create_system_user() {
     # Create system user if it doesn't exist
     if ! id "${SYSTEM_USER}" >/dev/null 2>&1; then
         if command -v useradd >/dev/null 2>&1; then
-            useradd -r -s /bin/false "${SYSTEM_USER}"
+            useradd --system --user-group -s /usr/sbin/nologin "${SYSTEM_USER}"
         elif command -v adduser >/dev/null 2>&1; then
-            adduser -D -H -s /bin/false "${SYSTEM_USER}"
+            adduser -D -H -s /usr/sbin/nologin "${SYSTEM_USER}"
         else
             echo "${RED}Error:${NC} Neither useradd nor adduser found" >&2
             exit 1
         fi
     fi
     
-    # Create directories
-    mkdir -p /var/lib/cringle
-    mkdir -p /etc/cringle
-    
-    # Set ownership
-    chown -R "${SYSTEM_USER}:${SYSTEM_GROUP}" /var/lib/cringle 2>/dev/null || true
-    chown -R "${SYSTEM_USER}:${SYSTEM_GROUP}" /etc/cringle 2>/dev/null || true
+    # Create directories with proper ownership if they don't exist
+    if [[ ! -d "/var/lib/cringle" ]]; then
+        install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /var/lib/cringle || exit 1
+    fi
+    if [[ ! -d "/etc/cringle" ]]; then
+        install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /etc/cringle || exit 1
+    fi
     
     echo "${GREEN}System user and directories created:${NC} ${SYSTEM_USER}"
 }
@@ -235,7 +254,7 @@ After=network.target
 [Service]
 User=${SYSTEM_USER}
 Environment=CRINGLE_HOME=/var/lib/cringle
-ExecStart=/usr/bin/java -cp "${INSTALL_DIR}/current/lib/*" cringle.daemon.MainKt --port 7400 --combined --insecure-dev-mode
+ExecStart=/opt/cringle/current/bin/cringle-daemon --port 7400 --combined --insecure-dev-mode
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=60s
@@ -246,7 +265,10 @@ EOF
     
     # Reload systemd and enable service
     systemctl daemon-reload
-    systemctl enable --now cringle-daemon.service
+    systemctl enable cringle-daemon.service
+    if [[ "$START_SERVICES" = true ]]; then
+        systemctl start cringle-daemon.service
+    fi
     
     echo "${GREEN}Daemon service installed and enabled:${NC} cringle-daemon.service"
 }
@@ -263,9 +285,10 @@ After=network.target
 [Service]
 User=${SYSTEM_USER}
 Environment=CRINGLE_HOME=/var/lib/cringle
-ExecStart=/usr/bin/java -cp "${INSTALL_DIR}/current/lib/*" cringle.management.server.MainKt --port 7401 --insecure-dev-mode
+ExecStart=/opt/cringle/current/bin/cringle-management-server --port 7401 --insecure-dev-mode
 Restart=on-failure
 RestartSec=5s
+TimeoutStopSec=60s
 
 [Install]
 WantedBy=multi-user.target
@@ -273,7 +296,10 @@ EOF
     
     # Reload systemd and enable service
     systemctl daemon-reload
-    systemctl enable --now cringle-management.service
+    systemctl enable cringle-management.service
+    if [[ "$START_SERVICES" = true ]]; then
+        systemctl start cringle-management.service
+    fi
     
     echo "${GREEN}Management server service installed and enabled:${NC} cringle-management.service"
 }
@@ -303,15 +329,16 @@ uninstall() {
     
     # Stop services
     if [[ -f "${DAEMON_SERVICE}" ]]; then
-        systemctl stop cringle-daemon.service
-        systemctl disable cringle-daemon.service
+        systemctl stop cringle-daemon.service || true
+        systemctl disable cringle-daemon.service || true
         rm "${DAEMON_SERVICE}"
         echo "${GREEN}Stopped and removed daemon service${NC}"
     fi
     
-    if [[ "$WITH_MANAGEMENT" = true ]] && [[ -f "${MANAGEMENT_SERVICE}" ]]; then
-        systemctl stop cringle-management.service
-        systemctl disable cringle-management.service
+    # Always remove management service if present (not conditional on --with-management)
+    if [[ -f "${MANAGEMENT_SERVICE}" ]]; then
+        systemctl stop cringle-management.service || true
+        systemctl disable cringle-management.service || true
         rm "${MANAGEMENT_SERVICE}"
         echo "${GREEN}Stopped and removed management service${NC}"
     fi
@@ -354,8 +381,12 @@ install_cringle() {
     check_root
     check_java
     
-    if [[ "$VERSION" == "latest" ]]; then
+    if [[ "$VERSION" == "latest" ]] && [[ -z "$RELEASE_VERSION" ]]; then
         get_latest_version
+    fi
+    
+    if [[ -n "$RELEASE_VERSION" ]]; then
+        VERSION="$RELEASE_VERSION"
     fi
     
     download_release
@@ -396,6 +427,11 @@ install_cringle() {
 if [[ "$SHOW_VERSION" = true ]]; then
     show_installed_version
 elif [[ "$UNINSTALL" = true ]]; then
+    # Check if purge is used without uninstall
+    if [[ "$PURGE" = true ]] && [[ "$UNINSTALL" = false ]]; then
+        echo "${RED}Error:${NC} --purge must be used with --uninstall" >&2
+        exit 1
+    fi
     uninstall
 else
     install_cringle
