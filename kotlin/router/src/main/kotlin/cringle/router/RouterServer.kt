@@ -176,13 +176,16 @@ public class RouterServer(
     public val remoteRouters: RemoteRouters = RemoteRouters(registry, tls = tls)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Enrollment of local engines (`docs/trust.md`); `null` without TLS. */
+    public val enrollment: Enrollment? = tls?.let { Enrollment(it.trustStore) }
+
     private val trustInterceptor: TrustInterceptor? = tls?.let {
         TrustInterceptor(it.trustStore, open = TOKEN_METHODS.keys + REGISTER_ENGINE, componentOnly = setOf(PREPARE_ENGINE))
     }
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .apply { if (tls != null) sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore, requireTrustedClients = false)) }
-        .addService(guarded(Service(registry, remoteRouters, tls, tls?.let { Enrollment(it.trustStore) }), users))
+        .addService(guarded(Service(registry, remoteRouters, tls, enrollment), users))
         .build()
 
     private fun guarded(service: Service, users: UserManager?) = ServerInterceptors.intercept(
