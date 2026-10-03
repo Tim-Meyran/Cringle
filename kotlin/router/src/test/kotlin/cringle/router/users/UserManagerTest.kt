@@ -6,7 +6,11 @@ import cringle.contract.UserRole
 import cringle.router.MutableClock
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
+import java.nio.file.attribute.PosixFilePermissions
 import java.time.Duration
+import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -14,6 +18,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.fail
 import org.junit.jupiter.api.io.TempDir
 
 class UserManagerTest {
@@ -120,5 +125,50 @@ class UserManagerTest {
         Files.writeString(file, "{ nope")
         assertThrows<UserStoreException> { manager() }
         assertEquals("{ nope", Files.readString(file))
+    }
+
+    /** Only the owner may access [file]: `rw-------` on POSIX, one ACL entry for the owner and nothing inherited on Windows. */
+    private fun assertOwnerOnly(file: Path) {
+        val views = file.fileSystem.supportedFileAttributeViews()
+        when {
+            "posix" in views -> assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file)), file.toString())
+            "acl" in views -> {
+                val acl = Files.getFileAttributeView(file, AclFileAttributeView::class.java).acl
+                assertEquals(1, acl.size, "the access list of $file has other entries: $acl")
+                assertEquals(AclEntryType.ALLOW, acl.single().type())
+                assertEquals(Files.getOwner(file), acl.single().principal())
+            }
+            else -> fail("this test needs a file system with POSIX permissions or ACLs, found $views")
+        }
+    }
+
+    @Test
+    fun usersJsonHasOwnerOnlyRightsAfterSave() {
+        val m = manager()
+        m.createUser("alice", setOf(UserRole.VIEWER))
+        assertOwnerOnly(file)
+        // second save keeps the rights
+        m.createUser("bob", setOf(UserRole.VIEWER))
+        assertOwnerOnly(file)
+    }
+
+    @Test
+    fun noTempFileLeftAfterFailedSave() {
+        val store = FileUserStore(file)
+        // Create a directory at the file location to make save fail
+        Files.createDirectories(file.resolve("inner"))
+        // Create a non-empty UserData to save
+        val data = UserData(
+            users = listOf(User(UUID.randomUUID().toString(), "test", setOf(UserRole.VIEWER), emptySet())),
+            groups = emptyList(),
+            tokens = emptyList(),
+            bootstrapped = true
+        )
+        assertThrows<java.io.IOException> {
+            store.save(data)
+        }
+        // Verify that the inner directory still exists and no temp file was left
+        assertTrue(Files.isDirectory(file.resolve("inner")))
+        assertEquals(listOf("users.json"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.toList() })
     }
 }
