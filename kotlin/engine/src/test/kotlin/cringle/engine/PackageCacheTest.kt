@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -280,6 +281,47 @@ class PackageCacheTest {
         }
         assertEquals(emptyList<Throwable>(), cleanerFailures)
         assertTrue(cleanups.get() > 0, "the cleanup ran")
+        // what the cleanup removed while it ran left nothing that is older work in progress
+        assertEquals(emptyList<String>(), leftovers().filter { it.contains(".part") })
+    }
+
+    @Test
+    @Disabled("#92: between ensure and recordUsage the cleanup can still remove the version; enable when #92 is done")
+    fun aVersionIsNotRemovedBetweenEnsureAndRecordUsage(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val a = artifact("busy")
+        val f = fetcher()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        val cleanerFailures = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val cleanups = AtomicInteger()
+        // a second engine of the same machine cleans up as fast as it can, removing everything that is unused
+        val cleaner = Thread {
+            val cache = PackageCache(home, onWarning = {})
+            try {
+                while (!done.get()) {
+                    cache.cleanupReport(Duration.ZERO)
+                    cleanups.incrementAndGet()
+                }
+            } catch (e: Throwable) {
+                cleanerFailures += e
+            }
+        }
+        cleaner.start()
+        try {
+            val cache = PackageCache(home, onWarning = {})
+            // ensure throws if it meets a directory without marker (a half-deleted version): it must never happen
+            repeat(150) { i ->
+                cache.ensure(a, f)
+                cache.recordUsage("e1", "fab$i", listOf(a))
+                cache.clearUsage("e1", "fab$i")
+            }
+            cache.ensure(a, f)
+            cache.recordUsage("e1", "last", listOf(a))
+        } finally {
+            done.set(true)
+            cleaner.join()
+        }
+        assertEquals(emptyList<Throwable>(), cleanerFailures)
         // the version that is in use is there, complete, and is not removed
         assertTrue(Files.exists(versionDir("busy").resolve(PackageCache.MARKER)))
         assertEquals(emptyList<String>(), PackageCache(home).cleanup(Duration.ZERO))
