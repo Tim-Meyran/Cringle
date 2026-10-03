@@ -2,6 +2,7 @@
 
 package cringle.router.users
 
+import cringle.common.OwnerOnlyFiles
 import cringle.contract.UserRole
 import java.nio.file.Files
 import java.nio.file.Path
@@ -82,13 +83,6 @@ public class FileUserStore(private val file: Path) : UserStore {
             }
         }
         Files.createDirectories(file.parent)
-        val tmp = file.resolveSibling(file.fileName.toString() + ".tmp")
-        Files.writeString(tmp, Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), json) + "\n")
-        try {
-            Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"))
-        } catch (_: Exception) {
-            // not a POSIX file system
-        }
-        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        OwnerOnlyFiles.writeAtomically(file, Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), json) + "\n")
     }
 }
