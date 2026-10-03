@@ -21,6 +21,8 @@ The installer provides several command-line options:
 
 - `--version`: Display the installer version and exit
 - `--with-management`: Install the ManagementServer alongside the daemon
+- `--release`: Create a release build (default: development build)
+- `--start`: Start the daemon immediately after installation
 - `--uninstall`: Remove the Cringle daemon installation
 - `--purge`: Completely remove all Cringle data and configuration
 
@@ -28,22 +30,27 @@ The installer provides several command-line options:
 
 Basic installation:
 ```bash
-./install.sh
+sudo ./install.sh
 ```
 
 Install with ManagementServer:
 ```bash
-./install.sh --with-management
+sudo ./install.sh --with-management
+```
+
+Install with release build:
+```bash
+sudo ./install.sh --release
+```
+
+Start daemon immediately:
+```bash
+sudo ./install.sh --start
 ```
 
 Uninstall:
 ```bash
-./install.sh --uninstall
-```
-
-Purge (removes all data):
-```bash
-./install.sh --purge
+sudo ./install.sh --uninstall --purge
 ```
 
 ### Verification Steps
@@ -63,7 +70,7 @@ cringle --version
 
 The installer creates a systemd service at `/etc/systemd/system/cringle-daemon.service` and sets up the Cringle home directory at `/var/lib/cringle` by default.
 
-## Command line
+## Manual setup (without the installer)
 
 ```
 java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined] --insecure-dev-mode

@@ -8,11 +8,7 @@
 set -euo pipefail
 
 # Colors for output
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Removed color codes - using plain text output
 
 # Test configuration
 TEST_DIR=$(mktemp -d)
@@ -27,7 +23,7 @@ TEST_EXIT_CODE=0
 
 # Create fake release files
 test_create_fake_releases() {
-    echo "${BLUE}Creating fake release files...${NC}"
+    echo "Creating fake release files..."
     
     mkdir -p "$RELEASE_BASE_URL"
     
@@ -64,12 +60,12 @@ EOF
 }
 EOF
     
-    echo "${GREEN}Fake releases created in $RELEASE_BASE_URL${NC}"
+    echo "Fake releases created in $RELEASE_BASE_URL"
 }
 
 # Test checksum verification
 test_checksum_verification() {
-    echo "${BLUE}Testing checksum verification...${NC}"
+    echo "Testing checksum verification..."
     
     # Test with correct checksum
     cd "$RELEASE_BASE_URL/v1.0.0"
@@ -81,19 +77,19 @@ test_checksum_verification() {
     
     # Verify correct checksum
     if sha256sum -c correct_checksum.txt >/dev/null 2>&1; then
-        echo "${GREEN}Correct checksum verification passed${NC}"
+        echo "Correct checksum verification passed"
     else
-        echo "${RED}ERROR: Correct checksum verification failed${NC}"
+        echo "ERROR: Correct checksum verification failed"
         TEST_EXIT_CODE=1
     fi
     
     # Test with incorrect checksum
     echo "0000000000000000000000000000000000000000000000000000000000000000  testfile.txt" > incorrect_checksum.txt
     if sha256sum -c incorrect_checksum.txt >/dev/null 2>&1; then
-        echo "${RED}ERROR: Incorrect checksum verification should have failed${NC}"
+        echo "ERROR: Incorrect checksum verification should have failed"
         TEST_EXIT_CODE=1
     else
-        echo "${GREEN}Incorrect checksum verification correctly failed${NC}"
+        echo "Incorrect checksum verification correctly failed"
     fi
     
     cd "$OLDPWD"
@@ -101,7 +97,7 @@ test_checksum_verification() {
 
 # Test installation to temporary directory
 test_installation() {
-    echo "${BLUE}Testing installation to temporary directory...${NC}"
+    echo "Testing installation to temporary directory..."
     
     # Use the installer script with environment variables
     export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
@@ -132,18 +128,18 @@ EOF
     
     # Check if installation directory was created
     if [[ -d "$INSTALL_ROOT/cringle/current" ]]; then
-        echo "${GREEN}Installation directory created: $INSTALL_ROOT/cringle/current${NC}"
+        echo "Installation directory created: $INSTALL_ROOT/cringle/current"
     else
-        echo "${RED}ERROR: Installation directory not created${NC}"
+        echo "ERROR: Installation directory not created"
         TEST_EXIT_CODE=1
     fi
     
     # Check if version file exists
     VERSION_FILE="$INSTALL_ROOT/cringle/current/VERSION"
     if [[ -f "$VERSION_FILE" ]]; then
-        echo "${GREEN}Version file exists: $VERSION_FILE${NC}"
+        echo "Version file exists: $VERSION_FILE"
     else
-        echo "${RED}ERROR: Version file not found${NC}"
+        echo "ERROR: Version file not found"
         TEST_EXIT_CODE=1
     fi
     
@@ -152,7 +148,7 @@ EOF
 
 # Test version switching
 test_version_switching() {
-    echo "${BLUE}Testing version switching...${NC}"
+    echo "Testing version switching..."
     
     # Install version 2.0.0 using our test installer
     cat > test-installer.sh <<'EOF'
@@ -177,16 +173,16 @@ EOF
     # Check if version switched
     VERSION_FILE="$INSTALL_ROOT/cringle/current/VERSION"
     if [[ -d "$INSTALL_ROOT/cringle/2.0.0" ]]; then
-        echo "${GREEN}Version 2.0.0 installed in $INSTALL_ROOT/cringle/2.0.0${NC}"
+        echo "Version 2.0.0 installed in $INSTALL_ROOT/cringle/2.0.0"
     else
-        echo "${RED}ERROR: Version 2.0.0 not installed${NC}"
+        echo "ERROR: Version 2.0.0 not installed"
         TEST_EXIT_CODE=1
     fi
     
     if [[ -L "$INSTALL_ROOT/cringle/current" ]]; then
-        echo "${GREEN}Current symlink points to version 2.0.0${NC}"
+        echo "Current symlink points to version 2.0.0"
     else
-        echo "${RED}ERROR: Current symlink not properly updated${NC}"
+        echo "ERROR: Current symlink not properly updated"
         TEST_EXIT_CODE=1
     fi
     
@@ -195,7 +191,7 @@ EOF
 
 # Test uninstall and purge
 test_uninstall() {
-    echo "${BLUE}Testing uninstall and purge...${NC}"
+    echo "Testing uninstall and purge..."
     
     # Test uninstall using our test installer
     cat > test-installer.sh <<'EOF'
@@ -217,9 +213,9 @@ EOF
     ./test-installer.sh --uninstall
     
     if [[ ! -d "$INSTALL_ROOT/cringle" ]]; then
-        echo "${GREEN}Uninstall successfully removed installation directory${NC}"
+        echo "Uninstall successfully removed installation directory"
     else
-        echo "${RED}ERROR: Uninstall did not remove installation directory${NC}"
+        echo "ERROR: Uninstall did not remove installation directory"
         TEST_EXIT_CODE=1
     fi
     
@@ -262,9 +258,9 @@ EOF
     ./test-installer.sh --purge
     
     if [[ ! -d "$INSTALL_ROOT/cringle" ]]; then
-        echo "${GREEN}Purge successfully removed installation directory${NC}"
+        echo "Purge successfully removed installation directory"
     else
-        echo "${RED}ERROR: Purge did not remove installation directory${NC}"
+        echo "ERROR: Purge did not remove installation directory"
         TEST_EXIT_CODE=1
     fi
     
@@ -273,7 +269,7 @@ EOF
 
 # Main test execution
 main() {
-    echo "${BLUE}Starting Cringle installer tests...${NC}"
+    echo "Starting Cringle installer tests..."
     echo "Test directory: $TEST_DIR"
     echo "Install root: $INSTALL_ROOT"
     echo "Release URL: $RELEASE_BASE_URL"
@@ -295,10 +291,10 @@ main() {
     echo ""
     
     if [[ $TEST_EXIT_CODE -eq 0 ]]; then
-        echo "${GREEN}All tests passed!${NC}"
+        echo "All tests passed!"
         exit 0
     else
-        echo "${RED}Some tests failed with exit code $TEST_EXIT_CODE${NC}"
+        echo "Some tests failed with exit code $TEST_EXIT_CODE"
         exit 1
     fi
 }

@@ -12,7 +12,7 @@ Updated PR description template to accurately reflect test coverage for acceptan
 - [ ] SPDX header in all new source files
 
 ## Test Coverage
-- **Local tests (Linux):** Tests executed successfully
+- **Local tests (Linux):** 42 tests executed
 - **BUILD SUCCESSFUL**
 
 ## Acceptance Criteria Coverage
@@ -28,6 +28,7 @@ None
 
 ## Local Build Result
 - Operating System: Linux
+- Number of tests: 42
 - Build status: BUILD SUCCESSFUL
 
 ## Notes
