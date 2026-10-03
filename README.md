@@ -33,7 +33,7 @@ Cringle/
 - **Architecture:** See [docs/Architecture.md](docs/Architecture.md) for detailed architectural documentation.
 - **Project Decisions:** See [docs/decisions.md](docs/decisions.md) for binding design decisions.
 - **Tasks:** Work items are GitHub issues (label `agent-task`), grouped by milestones M0–M9.
-- **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and the issue → pull request → auto-merge flow.
+- **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and the issue → pull request → independent review → merge flow.
 - **Documentation index:** [docs/README.md](docs/README.md).
 
 ## Building & Testing

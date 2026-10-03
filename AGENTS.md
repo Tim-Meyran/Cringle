@@ -6,12 +6,13 @@ You work by implementing **one GitHub issue at a time**. Tasks live as GitHub is
 
 ## Roles
 
-Two agents work on this project. Each has one job, and the owner decides everything else.
+Three agents work on this project. Each has one job, and the owner decides everything else.
 
 | Who | Job |
 |---|---|
 | **Claude** | Defines tasks: turns issues into clear, implementable tasks and marks them `ready`. Creates and defines follow-up issues. Does not implement issues. |
-| **opencode** | Implements tasks: takes `ready` issues, implements exactly the defined scope and opens the pull request. Does not redefine tasks. |
+| **opencode** | Implements tasks: takes `ready` issues, implements exactly the defined scope and opens the pull request. Does not redefine tasks and **does not merge**. Also reworks issues the reviewer sent back (label `changes-requested`). |
+| **Reviewer** (opencode agent `reviewer`, strong model) | Reviews the pull request of an issue independently (acceptance criteria, correctness, scope, tests, code quality, local build) and then merges it or sends the issue back with concrete findings. Never edits code. |
 | **Owner** | Decides `[Offen]` points and everything labeled `needs-owner-decision`; can override any rule. |
 
 Handoff rules:
@@ -19,6 +20,7 @@ Handoff rules:
 - opencode only picks up issues labeled `ready`. An issue is `ready` only when it meets the *Definition of Ready* below.
 - opencode never changes an issue's Scope, Out of scope or Acceptance criteria. If the task is unclear, contradictory or impossible: comment what exactly is unclear, add the label `blocked`, remove `ready`, and stop. Claude sharpens the issue and sets `ready` again.
 - Findings while implementing (missing pieces, follow-up work) go into an issue comment and a follow-up issue (label `follow-up`, not `ready`). Claude defines it later.
+- Review loop: after opening the pull request, opencode adds the label `needs-review` and stops. The reviewer either merges (approve) or comments the findings on the issue (`Review round <k>: CHANGES REQUESTED`), adds `changes-requested` and removes `needs-review`; the pull request and the branch stay open. opencode then reworks exactly those findings on the existing branch, pushes, and sets `needs-review` again. After three review rounds the reviewer adds `needs-owner-decision` and stops.
 - The workflow, conventions and rules in the sections below are written for the implementer (opencode). Claude's planner procedure is in `CLAUDE.md`.
 
 ### Definition of Ready
@@ -93,9 +95,9 @@ Run every Gradle command in this form: `./gradlew <task> --quiet --console=plain
 
 Every acceptance criterion needs a test or a documented manual check. Never disable or weaken tests, style checks or CI to get a green build.
 
-### 6. Pull request and merge (CI suspended)
+### 6. Pull request and review (CI suspended)
 
-**Status (decided by the owner, 2026-09-30): the GitHub CI is suspended** (the account's Actions billing is not available; the workflow `CI` is disabled). Until the owner re-enables it, the local build replaces the CI checks. The rules of the previous procedure (automatic merge after green CI checks) apply again as soon as the owner says the CI runs.
+**Status (decided by the owner, 2026-09-30): the GitHub CI is suspended** (the account's Actions billing is not available; the workflow `CI` is disabled). Until the owner re-enables it, the local build replaces the CI checks. The rules of the previous procedure (automatic merge after green CI checks) apply again as soon as the owner says the CI runs. **The implementer does not merge:** the independent reviewer verifies and merges.
 
 When the acceptance criteria are met, do this **without asking**:
 
@@ -103,13 +105,14 @@ When the acceptance criteria are met, do this **without asking**:
 ./gradlew build                                   # must pass locally, all modules, all tests
 git push
 gh pr create --base master --title "<issue title> (#<n>)" --body-file <file>   # body: use .github/pull_request_template.md, must contain "Closes #<n>"
-gh pr merge --squash --delete-branch
+gh issue edit <n> --add-label needs-review --remove-label changes-requested     # create the label once if missing: gh label create needs-review
+gh issue comment <n> --body "PR #<pr> ready for review."
 ```
 
 - The pull request text states the result of the local build (operating system, number of tests, `BUILD SUCCESSFUL`) and names every test that could not run on this machine (for example tests that are skipped on Windows or Linux). Code that only one platform can exercise is called out explicitly, so the owner can run it there.
-- Merge only if `./gradlew build` was green **on the final commit of the branch**. A red or unfinished build is never merged; add the label `blocked`, comment what is wrong, and stop.
-- The merge closes the issue through `Closes #<n>` (the squash commit message must contain it); remove the label `in-progress` yourself, because the housekeeping workflow does not run either.
-- After the merge: `git switch master && git pull` and delete your local branch.
+- Open the pull request only if `./gradlew build` was green **on the final commit of the branch**. A red or unfinished build is never handed over; add the label `blocked`, comment what is wrong, and stop.
+- **Rework** (issue has the label `changes-requested`): do not claim a new branch. Switch to the existing `issue/<n>-*` branch, take the last issue comment that starts with `Review round` as the spec, implement exactly those blocker/major findings, run `./gradlew build`, push, and set `needs-review` again. Do not change anything else.
+- **Reviewer:** checks out the branch, reviews the diff and runs `./gradlew build` on the final commit. On approval it merges with `gh pr merge --squash --delete-branch` (the squash commit message must contain `Closes #<n>`), verifies that the issue is closed, removes the labels `in-progress`, `needs-review` and `changes-requested` (the housekeeping workflow does not run either), runs `git switch master && git pull` and deletes the local branch. A pull request with an open blocker or major finding, or without a green local build, is never merged.
 
 ### Findings, follow-ups, blockers
 
@@ -122,12 +125,12 @@ gh pr merge --squash --delete-branch
 
 - **Scope discipline.** No refactoring of unrelated code, no renames, no extra features.
 - **Never edit** `docs/Architecture.md` or `docs/decisions.md` as part of an issue. Propose changes in a comment.
-- **Merging** is allowed only through `gh pr merge --squash --delete-branch` after `./gradlew build` was green locally on the final commit (while the CI is suspended, see section 6). Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
+- **Merging** is done only by the reviewer (or the owner), and only through `gh pr merge --squash --delete-branch` after `./gradlew build` was green locally on the final commit and the review found no blocker or major problem (while the CI is suspended, see section 6). The implementer never merges. Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
 - **Technical guard rails.** `opencode.json` (opencode) and `.claude/settings.json` (Claude Code) enforce the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
 - **No commits to `master`.** Every change goes through `issue/<n>-<slug>` and a pull request. Scratch, log and test-output files go to `$TMPDIR` or `build/`, never into the project (`git status` must show none before you commit).
 - **Do not make a test pass by weakening production code.** If a test fails and you think the production rule is wrong, set `blocked` and describe it.
-- One issue per branch and pull request. Do not start a second issue before the first pull request is merged or you have marked the issue `blocked`.
+- One issue per branch and pull request. Do not start a second issue before the first pull request is handed over for review (`needs-review`) or you have marked the issue `blocked`.
 
 ## Code conventions
 
@@ -145,7 +148,8 @@ gh pr merge --squash --delete-branch
 - [ ] `./gradlew build` passes locally on the final commit (the CI is suspended; see section 6), and the pull request text states the result.
 - [ ] Pull request contains `Closes #<n>`, follows the template, and has no unrelated changes.
 - [ ] Findings and follow-ups are written down (issue comment, follow-up issues).
-- [ ] The pull request is merged and the issue is closed.
+- [ ] Implementer: the pull request is open and the issue has the label `needs-review`.
+- [ ] Reviewer: the pull request is approved and merged, and the issue is closed.
 
 ## Token economy (applies to every agent)
 
