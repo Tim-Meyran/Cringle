@@ -147,6 +147,59 @@ class SelfUpdateTest {
         assertNoStaging()
     }
 
+    @Test
+    fun rollbackWhenTheNewVersionDoesNotComeUp() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0")
+        val services = FakeServices(healthy = false)
+        assertThrows(IllegalStateException::class.java) { update("1.0.0", services = services) }
+        assertEquals("1.0.0", currentTarget())
+        assertFalse(Files.exists(installRoot.resolve("1.1.0")))
+        assertEquals(listOf("restart cringle-daemon.service", "restart cringle-daemon.service"), services.calls)
+        assertNoStaging()
+    }
+
+    @Test
+    fun cleanupKeepsOnlyTheTwoNewestVersions() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0")
+        update("1.0.0")
+        release("1.2.0")
+        update("1.1.0")
+        release("1.3.0")
+        update("1.2.0")
+        assertEquals(setOf("1.2.0", "1.3.0"), versionDirs())
+        assertEquals("1.3.0", currentTarget())
+    }
+
+    @Test
+    fun majorJumpIsRefusedWithoutAllowMajor() {
+        install("1.0.0", "1.0.0")
+        release("2.0.0")
+        assertThrows(UsageException::class.java) { update("1.0.0") }
+        assertEquals("1.0.0", currentTarget())
+        assertTrue(requests.keys.none { it.startsWith("v2.0.0/") }, "nothing of 2.0.0 may be downloaded: ${requests.keys}")
+    }
+
+    @Test
+    fun majorJumpIsAllowedWithAllowMajor() {
+        install("1.0.0", "1.0.0")
+        release("2.0.0")
+        update("1.0.0", allowMajor = true)
+        assertEquals("2.0.0", currentTarget())
+    }
+
+    @Test
+    fun windowsUpdateStopsSwitchesAndStarts() {
+        install("1.0.0", "1.0.0")
+        releaseWindows("1.1.0")
+        val services = FakeServices()
+        val lines = SelfUpdate(installRoot, "1.0.0", Platform.WINDOWS, source, services, SymlinkLinkSwitcher(), Duration.ZERO).update(null)
+        assertEquals("1.1.0", currentTarget())
+        assertEquals(listOf("stop cringle-daemon.service", "start cringle-daemon.service"), services.calls)
+        assertTrue(lines.contains("updated to 1.1.0"))
+    }
+
     // --- helpers ---
 
     /** Creates the release files for [version] and points `latest` at it. */
@@ -174,6 +227,43 @@ class SelfUpdateTest {
         val archive = temp.resolve("cringle-$version-linux.tar.gz")
         val tar = ProcessBuilder("tar", "-czf", archive.toString(), "-C", top.parent.toString(), "cringle-$version").start()
         check(tar.waitFor(60, TimeUnit.SECONDS) && tar.exitValue() == 0) { "tar failed" }
+        return archive
+    }
+
+    /** The names of the version directories below the install root. */
+    private fun versionDirs(): Set<String> =
+        Files.list(installRoot).use { stream -> stream.map { it.fileName.toString() }.filter { SemVer.parse(it) != null }.toList() }.toSet()
+
+    /** Creates the Windows release files for [version] and points `latest` at it. */
+    private fun releaseWindows(version: String) {
+        val dir = Files.createDirectories(releaseDir.resolve("v$version"))
+        val name = Platform.WINDOWS.archiveName(version)
+        Files.copy(makeWindowsArchive(version), dir.resolve(name), StandardCopyOption.REPLACE_EXISTING)
+        val actualSha = sha256(dir.resolve(name))
+        val actualSize = Files.size(dir.resolve(name))
+        val manifest = """{"version":"$version","files":[{"name":"$name","size":$actualSize,"sha256":"$actualSha","minJava":21}]}"""
+        Files.writeString(dir.resolve("manifest.json"), manifest)
+        Files.writeString(dir.resolve("SHA256SUMS"), "$actualSha  $name\n")
+        val latest = Files.createDirectories(releaseDir.resolve("latest"))
+        Files.writeString(latest.resolve("manifest.json"), manifest)
+    }
+
+    /** A zip with `cringle-<version>/bin/cringle.bat` and `cringle-<version>/VERSION`. */
+    private fun makeWindowsArchive(version: String): Path {
+        val top = Files.createDirectories(temp.resolve("build-win-$version/cringle-$version"))
+        Files.createDirectories(top.resolve("bin"))
+        Files.writeString(top.resolve("bin/cringle.bat"), "@echo off\r\n")
+        Files.writeString(top.resolve("VERSION"), "$version\n")
+        val archive = temp.resolve(Platform.WINDOWS.archiveName(version))
+        java.util.zip.ZipOutputStream(Files.newOutputStream(archive)).use { zip ->
+            Files.walk(top).use { stream ->
+                stream.filter { Files.isRegularFile(it) }.forEach { file ->
+                    zip.putNextEntry(java.util.zip.ZipEntry("cringle-$version/" + top.relativize(file).toString().replace('\\', '/')))
+                    zip.write(Files.readAllBytes(file))
+                    zip.closeEntry()
+                }
+            }
+        }
         return archive
     }
 
