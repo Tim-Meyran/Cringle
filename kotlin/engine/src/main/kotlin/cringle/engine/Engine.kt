@@ -23,6 +23,7 @@ import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
 import cringle.common.v1.FabricStateSummary
 import cringle.common.EngineTls
+import cringle.common.TrustStore
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.ConfigureResponse
 import cringle.engine.v1.EngineManagementServiceGrpcKt
@@ -358,23 +359,42 @@ public class Engine private constructor(
 
         /**
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
-         * started yet. Throws [EngineArgsException] if insecure dev mode is missing.
+         * started yet. With [EngineArgs.insecureDevMode] the router channel is plaintext (`tls` and `enrollmentSecret`
+         * are `null`); otherwise the engine opens its trust store and reads the enrollment secret from the environment.
          */
         public fun create(
             args: EngineArgs,
             env: Map<String, String> = System.getenv(),
             heartbeatInterval: Duration = Duration.ofSeconds(5),
         ): Engine {
-            if (!args.insecureDevMode) {
-                throw EngineArgsException(
-                    "secure (mTLS) management is not available yet (issue #13); start with --insecure-dev-mode",
-                )
-            }
             val dir = CringleHome.engineDir(CringleHome.resolve(args.home, env), args.id)
             Files.createDirectories(dir)
             val config = EngineConfig.loadOrCreate(dir, args.id, args.name)
             val identity = EngineIdentity.loadOrCreate(dir, args.id)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, null, null)
+            val trustStore = TrustStore(dir.resolve("trust.json"))
+            val tls: EngineTls?
+            val enrollmentSecret: ByteArray?
+            if (args.insecureDevMode) {
+                tls = null
+                enrollmentSecret = null
+            } else {
+                tls = EngineTls(identity.common, trustStore)
+                enrollmentSecret = readEnrollmentSecret(env)
+            }
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, tls, enrollmentSecret)
+        }
+
+        /**
+         * Reads `CRINGLE_ENROLLMENT_SECRET` from [env]. Returns `null` if the variable is absent (the engine will try
+         * to register without a secret; the router accepts it if already enrolled, refuses otherwise). If present, the
+         * value must be 64 lowercase hex characters; otherwise throws [EngineArgsException].
+         */
+        private fun readEnrollmentSecret(env: Map<String, String>): ByteArray? {
+            val hex = env["CRINGLE_ENROLLMENT_SECRET"] ?: return null
+            require(Regex("[0-9a-f]{64}").matches(hex)) {
+                "CRINGLE_ENROLLMENT_SECRET must be 64 lowercase hex characters"
+            }
+            return ByteArray(32) { ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte() }
         }
 
         private fun timestamp(i: Instant): Timestamp = Timestamp.newBuilder().setSeconds(i.epochSecond).setNanos(i.nano).build()

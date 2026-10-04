@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,10 +35,18 @@ class EngineTest {
     }
 
     @Test
-    fun refusesToStartWithoutInsecureDevMode() {
-        val e = assertThrows<EngineArgsException> { Engine.create(args("e1").copy(insecureDevMode = false)) }
-        assertTrue(e.message!!.contains("--insecure-dev-mode"))
-        assertFalse(Files.exists(home.resolve("engines")))
+    fun engineStartsWithoutInsecureDevModeAndUsesMtlsForTheRouterChannel() {
+        // Without --insecure-dev-mode the engine starts and the management server is still reachable (plaintext, loopback only).
+        // The router channel uses mTLS; that is verified by the mTLS-specific tests.
+        val engine = Engine.create(args("e1", "Edge").copy(insecureDevMode = false), emptyMap()).start()
+        try {
+            val status = withClient(engine) { it.getStatus(GetStatusRequest.getDefaultInstance()) }
+            assertEquals("e1", status.engineId.value)
+            assertEquals("Edge", status.name)
+            assertEquals(EngineState.ENGINE_STATE_RUNNING, status.state)
+        } finally {
+            engine.stop()
+        }
     }
 
     @Test
