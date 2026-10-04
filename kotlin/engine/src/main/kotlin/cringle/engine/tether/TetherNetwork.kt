@@ -8,6 +8,9 @@ import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.PortInUseException
 import cringle.contract.PortRef
+import cringle.contract.SerialConnection
+import cringle.contract.SerialDriver
+import cringle.contract.SerialSettings
 import cringle.contract.TcpConnection
 import cringle.contract.TcpDriver
 import cringle.contract.Tether
@@ -15,6 +18,7 @@ import cringle.contract.TetherByteStream
 import cringle.contract.TetherEvent
 import cringle.contract.TetherStream
 import cringle.contract.TetherType
+import cringle.engine.drivers.DeviceInUseException
 import cringle.engine.fabric.FabricException
 import cringle.engine.fabric.PortWiring
 import cringle.packaging.Backoff
@@ -22,6 +26,7 @@ import cringle.packaging.Blueprint
 import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
 import cringle.packaging.RetryConfig
+import cringle.packaging.SerialTetherConfig
 import cringle.schema.SchemaValidator
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -71,9 +76,13 @@ public class TetherNetwork private constructor(
     @Volatile private var scope: CoroutineScope? = null
     private val streamChannels = ConcurrentHashMap.newKeySet<Channel<*>>()
     private val tcpDrivers = CopyOnWriteArrayList<TcpDriver>()
+    private val serialDrivers = CopyOnWriteArrayList<SerialDriver>()
 
     /** The TCP drivers the last [close] closed; [awaitClosed] waits for them. */
     @Volatile private var closingDrivers: List<TcpDriver> = emptyList()
+
+    /** The serial drivers the last [close] closed; [awaitClosed] waits for them. */
+    @Volatile private var closingSerialDrivers: List<SerialDriver> = emptyList()
     private val pendingRequests = ConcurrentHashMap.newKeySet<CompletableDeferred<Any>>()
 
     /** The reason the queues and streams were closed last, or `null` while the network is open. */
@@ -97,12 +106,21 @@ public class TetherNetwork private constructor(
         val s = CoroutineScope(SupervisorJob() + config.dispatcher)
         scope = s
         for (c in connections.values.distinctBy { it.info.id }) {
-            if (c.info.type == TetherType.TCP) continue
+            if (c.info.type == TetherType.TCP || c.info.type == TetherType.SERIAL) continue
             c.queue = Channel(c.bufferCapacity)
             s.launch { pump(c) }
         }
         try {
-            for (c in connections.values.distinctBy { it.info.id }) if (c.info.type == TetherType.TCP) openTcp(c, s, deliverer)
+            for (c in connections.values.distinctBy { it.info.id }) {
+                when (c.info.type) {
+                    TetherType.TCP -> openTcp(c, s, deliverer)
+                    TetherType.SERIAL -> openSerial(c, s, deliverer)
+                    else -> {}
+                }
+            }
+        } catch (e: TetherWiringException) {
+            close()
+            throw e
         } catch (e: PortInUseException) {
             close()
             throw TetherWiringException("tether cannot start: ${e.message}")
@@ -131,6 +149,30 @@ public class TetherNetwork private constructor(
                     onDeliveryFailure(c.info, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
                 }
             }
+        }
+    }
+
+    private suspend fun openSerial(c: Connection, s: CoroutineScope, deliverer: TetherDeliverer) {
+        val provider = config.serial ?: throw TetherWiringException("tether ${c.info.id}: this fabric has no serial driver")
+        val serial = checkNotNull(c.serialConfig)
+        val driver = provider(c.info.to.block).also { serialDrivers += it }
+        val connection = try {
+            driver.open(serial.device, SerialSettings(serial.baudRate, serial.dataBits, serial.parity, serial.stopBits))
+        } catch (e: DeviceInUseException) {
+            throw TetherWiringException("tether ${c.info.id}: ${e.message}")
+        } catch (e: java.io.IOException) {
+            throw TetherWiringException("tether ${c.info.id}: cannot open serial device '${serial.device}': ${e.message}")
+        }
+        c.serialConnection = connection
+        val target = PortRef(c.info.to.port, c.info.to.index)
+        try {
+            deliverer.deliver(c.info.to.block, TetherEvent.ByteStreamOpened(target, connection))
+        } catch (e: CancellationException) {
+            connection.close()
+            throw e
+        } catch (e: Throwable) {
+            connection.close()
+            onDeliveryFailure(c.info, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
         }
     }
 
@@ -166,6 +208,9 @@ public class TetherNetwork private constructor(
         for (d in tcpDrivers) (d as? AutoCloseable)?.close()
         closingDrivers = tcpDrivers.toList()
         tcpDrivers.clear()
+        for (d in serialDrivers) (d as? AutoCloseable)?.close()
+        closingSerialDrivers = serialDrivers.toList()
+        serialDrivers.clear()
     }
 
     /** The reason a sender gets when the network stops under it. */
@@ -194,6 +239,10 @@ public class TetherNetwork private constructor(
             val left = timeout.minusNanos(System.nanoTime() - start)
             if (!d.awaitClosed(if (left.isNegative) Duration.ZERO else left)) allClosed = false
         }
+        for (d in closingSerialDrivers) {
+            val left = timeout.minusNanos(System.nanoTime() - start)
+            if (!d.awaitClosed(if (left.isNegative) Duration.ZERO else left)) allClosed = false
+        }
         return allClosed
     }
 
@@ -206,10 +255,13 @@ public class TetherNetwork private constructor(
         val bufferCapacity: Int,
         val requestTimeout: Duration,
         val retry: RetryConfig,
+        val serialConfig: SerialTetherConfig?,
     ) {
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
+
+        @Volatile var serialConnection: SerialConnection? = null
     }
 
     private sealed interface Envelope {
@@ -364,8 +416,8 @@ public class TetherNetwork private constructor(
         }
 
         private fun requireByteStream() {
-            check(type == TetherType.BYTE_STREAM || type == TetherType.TCP) {
-                "tether ${c.info.id} has type $type; openByteStream is only valid for BYTE_STREAM and TCP"
+            check(type == TetherType.BYTE_STREAM || type == TetherType.TCP || type == TetherType.SERIAL) {
+                "tether ${c.info.id} has type $type; openByteStream is only valid for BYTE_STREAM, TCP and SERIAL"
             }
         }
 
@@ -403,6 +455,7 @@ public class TetherNetwork private constructor(
 
         override suspend fun openByteStream(): TetherByteStream {
             requireByteStream()
+            if (type == TetherType.SERIAL) return c.serialConnection ?: throw IllegalStateException("tether ${c.info.id}: the fabric is not running")
             if (type == TetherType.TCP) {
                 val driver = c.sender ?: throw IllegalStateException("tether ${c.info.id}: the fabric is not running")
                 val connection = try {
@@ -504,7 +557,7 @@ public class TetherNetwork private constructor(
                 if (from == null || to == null) continue
                 if (t.type !in from.tetherTypes) problems += "tether $id: port '${t.from.port}' does not support ${t.type}"
                 if (t.type !in to.tetherTypes) problems += "tether $id: port '${t.to.port}' does not support ${t.type}"
-                if (t.type != TetherType.BYTE_STREAM && t.type != TetherType.TCP) {
+                if (t.type != TetherType.BYTE_STREAM && t.type != TetherType.TCP && t.type != TetherType.SERIAL) {
                     val registry = config.schemas
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
                     if (!ok) problems += "tether $id: schema ${from.schema} is not assignable to ${to.schema}"
@@ -512,6 +565,10 @@ public class TetherNetwork private constructor(
                 if (t.type == TetherType.TCP) {
                     if (t.port == null) problems += "tether $id: a TCP tether needs a port"
                     if (config.tcp == null) problems += "tether $id: this fabric has no TCP driver"
+                }
+                if (t.type == TetherType.SERIAL) {
+                    if (t.serial == null) problems += "tether $id: a SERIAL tether needs a serial device"
+                    if (config.serial == null) problems += "tether $id: this fabric has no serial driver"
                 }
                 val c = Connection(
                     TetherInfo(id, t.type, t.from, t.to),
@@ -522,6 +579,7 @@ public class TetherNetwork private constructor(
                     t.bufferCapacity ?: config.bufferCapacity,
                     t.requestTimeout ?: config.requestTimeout,
                     t.retry ?: RetryConfig(),
+                    t.serial,
                 )
                 for (e in listOf(t.from, t.to)) {
                     val k = key(e.block, e.port, e.index)
