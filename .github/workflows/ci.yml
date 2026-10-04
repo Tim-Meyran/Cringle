@@ -33,3 +33,29 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build --no-daemon
+
+  installer-linux:
+    name: Installer (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu:24.04, debian:stable]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test install.sh in a container
+        run: installer/tests/test-install-container.sh ${{ matrix.image }}
+
+  installer-windows:
+    name: Installer (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # the runner is administrative: this includes the tests of the service and of PATH
+      - name: Test install.ps1
+        shell: powershell
+        run: .\installer\tests\InstallerTest.ps1
