@@ -26,6 +26,9 @@ public enum class TetherType {
      * the receiving (IN) end listens on it, the sending (OUT) end connects with [Tether.openByteStream].
      */
     TCP,
+
+    /** A raw byte stream carried over a serial connection to an external device. */
+    SERIAL,
 }
 
 /**

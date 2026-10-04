@@ -17,11 +17,14 @@ public object BuiltinDriverTypes {
     /** [TcpDriver]. */
     public val TCP: DriverType = DriverType("tcp", IsolationLevel.SHARED)
 
+    /** [SerialDriver]. */
+    public val SERIAL: DriverType = DriverType("serial", IsolationLevel.SHARED)
+
     /** [UserManagementDriver]; provided by the daemon, not by every engine. */
     public val USER_MANAGEMENT: DriverType = DriverType("user-management", IsolationLevel.SHARED)
 
     /** The types every engine ships, by id. */
-    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP).associateBy { it.id }
+    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP, SERIAL).associateBy { it.id }
 }
 
 /** Severity of a log entry. */
@@ -126,6 +129,56 @@ public interface TcpDriver : Driver {
      * Waits at most [timeout] until every listener of this driver has stopped and every port it claimed is free, and
      * returns whether that happened. Closing a driver never blocks (Architecture chapter 10), so this is how a caller
      * waits for the ports to be really free.
+     */
+    public suspend fun awaitClosed(timeout: Duration): Boolean = true
+}
+
+/** Parity of a serial connection. */
+public enum class Parity {
+    /** No parity bit. */
+    NONE,
+
+    /** Even parity. */
+    EVEN,
+
+    /** Odd parity. */
+    ODD,
+}
+
+/** The line settings of a serial connection. */
+public data class SerialSettings(
+    /** Baud rate in bits per second. */
+    public val baudRate: Int = 9600,
+    /** Number of data bits (5 to 8). */
+    public val dataBits: Int = 8,
+    /** Parity. */
+    public val parity: Parity = Parity.NONE,
+    /** Number of stop bits (1 or 2). */
+    public val stopBits: Int = 1,
+)
+
+/** One serial connection, seen as a raw byte stream. */
+public interface SerialConnection : TetherByteStream {
+    /** The serial device name (e.g. `/dev/ttyUSB0` or `COM1`). */
+    public val device: String
+}
+
+/**
+ * Serial access. Opens a serial device as a raw byte stream. The engine keeps one registry of all devices opened
+ * through this driver, so a second block that asks for a device that is already in use fails at once, before the
+ * operating system is asked.
+ */
+public interface SerialDriver : Driver {
+    /**
+     * Opens [device] with the given [settings] and returns the connection. Throws if the device is missing, cannot be
+     * opened, or is already used by another block.
+     */
+    public suspend fun open(device: String, settings: SerialSettings): SerialConnection
+
+    /**
+     * Waits at most [timeout] until every connection of this driver has been closed, and returns whether that happened.
+     * Closing a driver never blocks (Architecture chapter 10), so this is how a caller waits for the devices to be
+     * really free.
      */
     public suspend fun awaitClosed(timeout: Duration): Boolean = true
 }
