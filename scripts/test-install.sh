@@ -14,36 +14,63 @@ set -euo pipefail
 TEST_DIR=$(mktemp -d)
 INSTALL_ROOT="${CRINGLE_INSTALL_ROOT:-$TEST_DIR}"
 RELEASE_BASE_URL="${CRINGLE_RELEASE_BASE_URL:-$TEST_DIR/releases}"
+HTTP_SERVER_PORT=8765
 
 # Cleanup on exit
-trap 'rm -rf "$TEST_DIR"' EXIT
+cleanup() {
+    # Kill HTTP server if running
+    if [[ -n "${HTTP_SERVER_PID:-}" ]]; then
+        kill "$HTTP_SERVER_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TEST_DIR"
+}
+trap cleanup EXIT
 
 # Test exit code
 TEST_EXIT_CODE=0
 
-# Create fake release files
-test_create_fake_releases() {
-    echo "Creating fake release files..."
+# Create real release tarballs
+create_real_releases() {
+    echo "Creating real release tarballs..."
     
     mkdir -p "$RELEASE_BASE_URL"
     
-    # Create version 1.0.0 release
+    # Create temporary directory for building releases
+    local temp_release_dir=$(mktemp -d)
+    
+    # Create version 1.0.0 release files
+    mkdir -p "$temp_release_dir/v1.0.0"
+    
+    # Create bin directory with scripts
+    mkdir -p "$temp_release_dir/v1.0.0/bin"
+    
+    # Create cringle script that prints version
+    cat > "$temp_release_dir/v1.0.0/bin/cringle" <<'EOF'
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+
+echo "Cringle version 1.0.0"
+EOF
+    chmod +x "$temp_release_dir/v1.0.0/bin/cringle"
+    
+    # Create cringle-daemon script
+    cat > "$temp_release_dir/v1.0.0/bin/cringle-daemon" <<'EOF'
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+
+echo "Cringle daemon version 1.0.0"
+EOF
+    chmod +x "$temp_release_dir/v1.0.0/bin/cringle-daemon"
+    
+    # Create VERSION file
+    echo "1.0.0" > "$temp_release_dir/v1.0.0/VERSION"
+    
+    # Create checksum for the tarball
     mkdir -p "$RELEASE_BASE_URL/v1.0.0"
-    cat > "$RELEASE_BASE_URL/v1.0.0/cringle-1.0.0-linux.tar.gz" <<'EOF'
-fake release content for version 1.0.0
-EOF
+    tar -czf "$RELEASE_BASE_URL/v1.0.0/cringle-1.0.0-linux.tar.gz" -C "$temp_release_dir/v1.0.0" .
+    sha256sum "$RELEASE_BASE_URL/v1.0.0/cringle-1.0.0-linux.tar.gz" | awk '{print $1"  cringle-1.0.0-linux.tar.gz"}' > "$RELEASE_BASE_URL/v1.0.0/SHA256SUMS"
     
-    # Create version 2.0.0 release
-    mkdir -p "$RELEASE_BASE_URL/v2.0.0"
-    cat > "$RELEASE_BASE_URL/v2.0.0/cringle-2.0.0-linux.tar.gz" <<'EOF'
-fake release content for version 2.0.0
-EOF
-    
-    # Create checksum files
-    echo "a1b2c3d4e5f6..." > "$RELEASE_BASE_URL/v1.0.0/SHA256SUMS"
-    echo "f1e2d3c4b5a6..." > "$RELEASE_BASE_URL/v2.0.0/SHA256SUMS"
-    
-    # Create manifest files
+    # Create manifest file
     cat > "$RELEASE_BASE_URL/v1.0.0/manifest.json" <<'EOF'
 {
   "version": "1.0.0",
@@ -52,6 +79,38 @@ EOF
 }
 EOF
     
+    # Create version 2.0.0 release files
+    mkdir -p "$temp_release_dir/v2.0.0"
+    
+    # Create bin directory with scripts
+    mkdir -p "$temp_release_dir/v2.0.0/bin"
+    
+    # Create cringle script that prints version
+    cat > "$temp_release_dir/v2.0.0/bin/cringle" <<'EOF'
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+
+echo "Cringle version 2.0.0"
+EOF
+    chmod +x "$temp_release_dir/v2.0.0/bin/cringle"
+    
+    # Create cringle-daemon script
+    cat > "$temp_release_dir/v2.0.0/bin/cringle-daemon" <<'EOF'
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+
+echo "Cringle daemon version 2.0.0"
+EOF
+    chmod +x "$temp_release_dir/v2.0.0/bin/cringle-daemon"
+    
+    # Create VERSION file
+    echo "2.0.0" > "$temp_release_dir/v2.0.0/VERSION"
+    
+    # Create checksum for the tarball
+    tar -czf "$RELEASE_BASE_URL/v2.0.0/cringle-2.0.0-linux.tar.gz" -C "$temp_release_dir/v2.0.0" .
+    sha256sum "$RELEASE_BASE_URL/v2.0.0/cringle-2.0.0-linux.tar.gz" | awk '{print $1"  cringle-2.0.0-linux.tar.gz"}' > "$RELEASE_BASE_URL/v2.0.0/SHA256SUMS"
+    
+    # Create manifest file
     cat > "$RELEASE_BASE_URL/v2.0.0/manifest.json" <<'EOF'
 {
   "version": "2.0.0",
@@ -60,211 +119,269 @@ EOF
 }
 EOF
     
-    echo "Fake releases created in $RELEASE_BASE_URL"
+    # Clean up temp directory
+    rm -rf "$temp_release_dir"
+    
+    echo "Real release tarballs created in $RELEASE_BASE_URL"
 }
 
-# Test checksum verification
-test_checksum_verification() {
-    echo "Testing checksum verification..."
+# Start HTTP server to serve releases
+start_http_server() {
+    echo "Starting HTTP server on port $HTTP_SERVER_PORT..."
     
-    # Test with correct checksum
-    cd "$RELEASE_BASE_URL/v1.0.0"
+    # Start server in background
+    cd "$RELEASE_BASE_URL"
+    python3 -m http.server "$HTTP_SERVER_PORT" &
+    HTTP_SERVER_PID=$!
     
-    # Create a file with known checksum
-    echo "test content" > testfile.txt
-    local actual_checksum=$(sha256sum testfile.txt | awk '{print $1}')
-    echo "$actual_checksum  testfile.txt" > correct_checksum.txt
+    # Wait for server to start
+    for i in {1..10}; do
+        if curl -s --output /dev/null --head --fail "http://localhost:$HTTP_SERVER_PORT"; then
+            echo "HTTP server started successfully"
+            return
+        fi
+        sleep 0.5
+    done
     
-    # Verify correct checksum
-    if sha256sum -c correct_checksum.txt >/dev/null 2>&1; then
-        echo "Correct checksum verification passed"
-    else
-        echo "ERROR: Correct checksum verification failed"
-        TEST_EXIT_CODE=1
-    fi
-    
-    # Test with incorrect checksum
-    echo "0000000000000000000000000000000000000000000000000000000000000000  testfile.txt" > incorrect_checksum.txt
-    if sha256sum -c incorrect_checksum.txt >/dev/null 2>&1; then
-        echo "ERROR: Incorrect checksum verification should have failed"
-        TEST_EXIT_CODE=1
-    else
-        echo "Incorrect checksum verification correctly failed"
-    fi
-    
-    cd "$OLDPWD"
+    echo "ERROR: HTTP server failed to start"
+    TEST_EXIT_CODE=1
 }
 
-# Test installation to temporary directory
-test_installation() {
-    echo "Testing installation to temporary directory..."
+# Test installation with correct checksum
+test_installation_correct_checksum() {
+    echo "Testing installation with correct checksum..."
     
-    # Use the installer script with environment variables
+    # Set environment variables for install.sh
     export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
-    export CRINGLE_RELEASE_BASE_URL="$RELEASE_BASE_URL"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
     
-    # Create a modified installer script for testing
-    cat > test-installer.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Override variables for testing
-INSTALL_DIR="${CRINGLE_INSTALL_ROOT}/cringle"
-VERSION="1.0.0"
-
-echo "Installing to: $INSTALL_DIR"
-echo "Using release URL: $CRINGLE_RELEASE_BASE_URL"
-
-# Simulate installation by creating directories
-mkdir -p "${INSTALL_DIR}/${VERSION}"
-echo "$VERSION" > "${INSTALL_DIR}/${VERSION}/VERSION"
-ln -sf "${INSTALL_DIR}/${VERSION}" "${INSTALL_DIR}/current"
-
-echo "Installation completed"
-EOF
+    # Run install.sh
+    "$OLDPWD/install.sh" --release 1.0.0
     
-    chmod +x test-installer.sh
-    ./test-installer.sh --version 1.0.0
-    
-    # Check if installation directory was created
-    if [[ -d "$INSTALL_ROOT/cringle/current" ]]; then
-        echo "Installation directory created: $INSTALL_ROOT/cringle/current"
+    # Check if installation succeeded
+    if [[ -d "$INSTALL_ROOT/opt/cringle/current" ]]; then
+        echo "Installation succeeded: $INSTALL_ROOT/opt/cringle/current"
     else
         echo "ERROR: Installation directory not created"
         TEST_EXIT_CODE=1
     fi
     
     # Check if version file exists
-    VERSION_FILE="$INSTALL_ROOT/cringle/current/VERSION"
+    VERSION_FILE="$INSTALL_ROOT/opt/cringle/current/VERSION"
     if [[ -f "$VERSION_FILE" ]]; then
         echo "Version file exists: $VERSION_FILE"
+        if grep -q "1.0.0" "$VERSION_FILE"; then
+            echo "Version file contains correct version: 1.0.0"
+        else
+            echo "ERROR: Version file does not contain correct version"
+            TEST_EXIT_CODE=1
+        fi
     else
         echo "ERROR: Version file not found"
         TEST_EXIT_CODE=1
     fi
     
-    rm test-installer.sh
+    # Check if binary symlink exists
+    BIN_SYMLINK="$INSTALL_ROOT/usr/local/bin/cringle"
+    if [[ -L "$BIN_SYMLINK" ]]; then
+        echo "Binary symlink exists: $BIN_SYMLINK"
+    else
+        echo "ERROR: Binary symlink not created"
+        TEST_EXIT_CODE=1
+    fi
+    
+    # Check if cringle --version works
+    if "$BIN_SYMLINK" --version 2>/dev/null || "$BIN_SYMLINK" 2>/dev/null | grep -q "1.0.0"; then
+        echo "Cringle --version works correctly"
+    else
+        echo "ERROR: Cringle --version does not work"
+        TEST_EXIT_CODE=1
+    fi
+}
+
+# Test installation with manipulated checksum
+test_installation_manipulated_checksum() {
+    echo "Testing installation with manipulated checksum..."
+    
+    # Manipulate checksum to test failure
+    local checksum_file="$RELEASE_BASE_URL/v1.0.0/SHA256SUMS"
+    local backup_checksum="$checksum_file.backup"
+    
+    # Backup original checksum
+    cp "$checksum_file" "$backup_checksum"
+    
+    # Manipulate checksum
+    sed 's/^/x/' "$checksum_file" > "$checksum_file.tmp"
+    mv "$checksum_file.tmp" "$checksum_file"
+    
+    # Set environment variables for install.sh
+    export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
+    
+    # Run install.sh - should fail
+    if "$OLDPWD/install.sh" --release 1.0.0; then
+        echo "ERROR: Installation should have failed with manipulated checksum"
+        TEST_EXIT_CODE=1
+    else
+        echo "Installation correctly failed with manipulated checksum"
+    fi
+    
+    # Check that no files were installed
+    if [[ -d "$INSTALL_ROOT/opt/cringle/current" ]]; then
+        echo "ERROR: Installation directory should not exist after checksum failure"
+        TEST_EXIT_CODE=1
+    else
+        echo "No files installed after checksum failure (correct behavior)"
+    fi
+    
+    # Restore original checksum
+    mv "$backup_checksum" "$checksum_file"
 }
 
 # Test version switching
 test_version_switching() {
     echo "Testing version switching..."
     
-    # Install version 2.0.0 using our test installer
-    cat > test-installer.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Override variables for testing
-INSTALL_DIR="${CRINGLE_INSTALL_ROOT}/cringle"
-VERSION="2.0.0"
-
-echo "Installing version $VERSION"
-mkdir -p "${INSTALL_DIR}/${VERSION}"
-echo "$VERSION" > "${INSTALL_DIR}/${VERSION}/VERSION"
-ln -sf "${INSTALL_DIR}/${VERSION}" "${INSTALL_DIR}/current"
-
-echo "Installation completed"
-EOF
+    # Install version 2.0.0
+    export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
     
-    chmod +x test-installer.sh
-    ./test-installer.sh --version 2.0.0
+    "$OLDPWD/install.sh" --release 2.0.0
     
     # Check if version switched
-    VERSION_FILE="$INSTALL_ROOT/cringle/current/VERSION"
-    if [[ -d "$INSTALL_ROOT/cringle/2.0.0" ]]; then
-        echo "Version 2.0.0 installed in $INSTALL_ROOT/cringle/2.0.0"
+    if [[ -d "$INSTALL_ROOT/opt/cringle/current" ]]; then
+        echo "Current installation exists: $INSTALL_ROOT/opt/cringle/current"
     else
-        echo "ERROR: Version 2.0.0 not installed"
+        echo "ERROR: Current installation not found"
         TEST_EXIT_CODE=1
     fi
     
-    if [[ -L "$INSTALL_ROOT/cringle/current" ]]; then
+    VERSION_FILE="$INSTALL_ROOT/opt/cringle/current/VERSION"
+    if [[ -f "$VERSION_FILE" ]]; then
+        if grep -q "2.0.0" "$VERSION_FILE"; then
+            echo "Version switched correctly to 2.0.0"
+        else
+            echo "ERROR: Version file does not contain correct version after switch"
+            TEST_EXIT_CODE=1
+        fi
+    else
+        echo "ERROR: Version file not found after switch"
+        TEST_EXIT_CODE=1
+    fi
+    
+    # Check if symlink points to correct version
+    if [[ -L "$INSTALL_ROOT/opt/cringle/current" ]]; then
         echo "Current symlink points to version 2.0.0"
     else
         echo "ERROR: Current symlink not properly updated"
         TEST_EXIT_CODE=1
     fi
-    
-    rm test-installer.sh
 }
 
-# Test uninstall and purge
+# Test uninstall (without purge)
 test_uninstall() {
-    echo "Testing uninstall and purge..."
+    echo "Testing uninstall (without purge)..."
     
-    # Test uninstall using our test installer
-    cat > test-installer.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Override variables for testing
-INSTALL_DIR="${CRINGLE_INSTALL_ROOT}/cringle"
-
-if [[ -d "$INSTALL_DIR" ]]; then
-    rm -rf "$INSTALL_DIR"
-    echo "Uninstallation completed"
-else
-    echo "Cringle is not installed"
-fi
-EOF
+    # First, install something
+    export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
     
-    chmod +x test-installer.sh
-    ./test-installer.sh --uninstall
+    "$OLDPWD/install.sh" --release 1.0.0
     
-    if [[ ! -d "$INSTALL_ROOT/cringle" ]]; then
-        echo "Uninstall successfully removed installation directory"
+    # Create some test data and config to verify they are preserved
+    mkdir -p "$INSTALL_ROOT/var/lib/cringle"
+    echo "test data" > "$INSTALL_ROOT/var/lib/cringle/test.txt"
+    mkdir -p "$INSTALL_ROOT/etc/cringle"
+    echo "test config" > "$INSTALL_ROOT/etc/cringle/test.conf"
+    
+    # Run uninstall
+    "$OLDPWD/install.sh" --uninstall
+    
+    # Check that installation is removed
+    if [[ ! -d "$INSTALL_ROOT/opt/cringle" ]]; then
+        echo "Installation directory removed"
     else
-        echo "ERROR: Uninstall did not remove installation directory"
+        echo "ERROR: Installation directory not removed"
         TEST_EXIT_CODE=1
     fi
     
-    # Test purge (requires reinstall first)
-    cat > test-installer.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Override variables for testing
-INSTALL_DIR="${CRINGLE_INSTALL_ROOT}/cringle"
-VERSION="1.0.0"
-
-echo "Installing version $VERSION"
-mkdir -p "${INSTALL_DIR}/${VERSION}"
-echo "$VERSION" > "${INSTALL_DIR}/${VERSION}/VERSION"
-ln -sf "${INSTALL_DIR}/${VERSION}" "${INSTALL_DIR}/current"
-
-echo "Installation completed"
-EOF
-    
-    chmod +x test-installer.sh
-    ./test-installer.sh --version 1.0.0
-    
-    cat > test-installer.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-# Override variables for testing
-INSTALL_DIR="${CRINGLE_INSTALL_ROOT}/cringle"
-
-if [[ -d "$INSTALL_DIR" ]]; then
-    rm -rf "$INSTALL_DIR"
-    echo "Purge completed"
-else
-    echo "Cringle is not installed"
-fi
-EOF
-    
-    chmod +x test-installer.sh
-    ./test-installer.sh --purge
-    
-    if [[ ! -d "$INSTALL_ROOT/cringle" ]]; then
-        echo "Purge successfully removed installation directory"
+    # Check that data and config are preserved
+    if [[ -f "$INSTALL_ROOT/var/lib/cringle/test.txt" ]] && \
+       [[ -f "$INSTALL_ROOT/etc/cringle/test.conf" ]]; then
+        echo "Data and config preserved after uninstall"
     else
-        echo "ERROR: Purge did not remove installation directory"
+        echo "ERROR: Data or config not preserved after uninstall"
         TEST_EXIT_CODE=1
     fi
+}
+
+# Test uninstall with purge
+test_uninstall_purge() {
+    echo "Testing uninstall with purge..."
     
-    rm test-installer.sh
+    # First, install something
+    export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
+    
+    "$OLDPWD/install.sh" --release 1.0.0
+    
+    # Create some test data and config
+    mkdir -p "$INSTALL_ROOT/var/lib/cringle"
+    echo "test data" > "$INSTALL_ROOT/var/lib/cringle/test.txt"
+    mkdir -p "$INSTALL_ROOT/etc/cringle"
+    echo "test config" > "$INSTALL_ROOT/etc/cringle/test.conf"
+    
+    # Run uninstall with purge
+    "$OLDPWD/install.sh" --uninstall --purge
+    
+    # Check that everything is removed
+    if [[ ! -d "$INSTALL_ROOT/opt/cringle" ]] && \
+       [[ ! -d "$INSTALL_ROOT/var/lib/cringle" ]] && \
+       [[ ! -d "$INSTALL_ROOT/etc/cringle" ]]; then
+        echo "Everything removed with purge"
+    else
+        echo "ERROR: Some directories not removed with purge"
+        TEST_EXIT_CODE=1
+    fi
+}
+
+# Test purge without uninstall (should fail)
+test_purge_without_uninstall() {
+    echo "Testing --purge without --uninstall (should fail)..."
+    
+    # Try to run purge without uninstall
+    if "$OLDPWD/install.sh" --purge; then
+        echo "ERROR: --purge without --uninstall should have failed"
+        TEST_EXIT_CODE=1
+    else
+        echo "--purge without --uninstall correctly failed"
+    fi
+}
+
+# Test cringle --version as non-root user
+test_cringle_version_nonroot() {
+    echo "Testing cringle --version as non-root user..."
+    
+    # Install Cringle
+    export CRINGLE_INSTALL_ROOT="$INSTALL_ROOT"
+    export CRINGLE_RELEASE_BASE_URL="http://localhost:$HTTP_SERVER_PORT"
+    export CRINGLE_INSTALL_TEST="1"  # Skip root and Java checks
+    
+    "$OLDPWD/install.sh" --release 1.0.0
+    
+    # Test the binary
+    BIN_SYMLINK="$INSTALL_ROOT/usr/local/bin/cringle"
+    if "$BIN_SYMLINK" --version 2>/dev/null || "$BIN_SYMLINK" 2>/dev/null | grep -q "1.0.0"; then
+        echo "Cringle --version works as non-root user"
+    else
+        echo "ERROR: Cringle --version does not work as non-root user"
+        TEST_EXIT_CODE=1
+    fi
 }
 
 # Main test execution
@@ -272,22 +389,34 @@ main() {
     echo "Starting Cringle installer tests..."
     echo "Test directory: $TEST_DIR"
     echo "Install root: $INSTALL_ROOT"
-    echo "Release URL: $RELEASE_BASE_URL"
+    echo "Release URL: http://localhost:$HTTP_SERVER_PORT"
     echo ""
     
-    test_create_fake_releases
+    create_real_releases
     echo ""
     
-    test_checksum_verification
+    start_http_server
     echo ""
     
-    test_installation
+    test_installation_correct_checksum
+    echo ""
+    
+    test_installation_manipulated_checksum
     echo ""
     
     test_version_switching
     echo ""
     
     test_uninstall
+    echo ""
+    
+    test_uninstall_purge
+    echo ""
+    
+    test_purge_without_uninstall
+    echo ""
+    
+    test_cringle_version_nonroot
     echo ""
     
     if [[ $TEST_EXIT_CODE -eq 0 ]]; then

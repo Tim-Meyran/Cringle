@@ -7,86 +7,84 @@
 set -euo pipefail
 
 # Global variables
-INSTALL_DIR="/opt/cringle"
+ROOT="${CRINGLE_INSTALL_ROOT:-}"
+INSTALL_DIR="${ROOT}/opt/cringle"
 SYSTEM_USER="cringle"
 SYSTEM_GROUP="cringle"
-
-DAEMON_SERVICE="/etc/systemd/system/cringle-daemon.service"
-MANAGEMENT_SERVICE="/etc/systemd/system/cringle-management.service"
-BIN_SYMLINK="/usr/local/bin/cringle"
+DAEMON_SERVICE="${ROOT}/etc/systemd/system/cringle-daemon.service"
+MANAGEMENT_SERVICE="${ROOT}/etc/systemd/system/cringle-management.service"
+BIN_SYMLINK="${ROOT}/usr/local/bin/cringle"
 
 # Create temporary directory for the entire script
 TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT
+temp_extract_dir=""
+trap 'rm -rf "$TMP_DIR"; if [[ -n "$temp_extract_dir" ]]; then rm -rf "$temp_extract_dir"; fi' EXIT
 
-# Colors for output
-# Removed color variables - using plain text output
+# Default values
+RELEASE="latest"
+WITH_MANAGEMENT=false
+UNINSTALL=false
+PURGE=false
+START_SERVICES=false
 
-  # Default values
-  RELEASE="latest"
-  WITH_MANAGEMENT=false
-  UNINSTALL=false
-  PURGE=false
-  START_SERVICES=false
-
-  # Parse command line arguments
-  while [[ $# -gt 0 ]]; do
-      case "$1" in
-          --version)
-              echo "Cringle installer version: 1.0.0"
-              exit 0
-              ;;
-          --release)
-              if [[ $# -gt 1 ]]; then
-                  if ! [[ "$2" =~ ^- ]]; then
-                      # Validate release version format
-                      if [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-                          RELEASE="$2"
-                          shift
-                      else
-                          echo "Error: --release value must match pattern ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$" >&2
-                          exit 1
-                      fi
-                  else
-                      echo "Error: --release requires a version argument" >&2
-                      exit 1
-                  fi
-              else
-                  echo "Error: --release requires a version argument" >&2
-                  exit 1
-              fi
-              shift
-              ;;
-          --with-management)
-              WITH_MANAGEMENT=true
-              shift
-              ;;
-          --uninstall)
-              UNINSTALL=true
-              shift
-              ;;
-          --purge)
-              PURGE=true
-              shift
-              ;;
-          --start)
-              START_SERVICES=true
-              shift
-              ;;
-          -*)
-              echo "Error: Unknown option: $1" >&2
-              exit 1
-              ;;
-          *)
-              echo "Error: Unknown positional argument: $1" >&2
-              exit 1
-              ;;
-      esac
-  done
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --version)
+            echo "Cringle installer version: 1.0.0"
+            exit 0
+            ;;
+        --release)
+            if [[ $# -gt 1 ]]; then
+                if ! [[ "$2" =~ ^- ]]; then
+                    # Validate release version format
+                    if [[ "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                        RELEASE="$2"
+                        shift
+                    else
+                        echo "Error: --release value must match pattern ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$" >&2
+                        exit 1
+                    fi
+                else
+                    echo "Error: --release requires a version argument" >&2
+                    exit 1
+                fi
+            else
+                echo "Error: --release requires a version argument" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --with-management)
+            WITH_MANAGEMENT=true
+            shift
+            ;;
+        --uninstall)
+            UNINSTALL=true
+            shift
+            ;;
+        --purge)
+            PURGE=true
+            shift
+            ;;
+        --start)
+            START_SERVICES=true
+            shift
+            ;;
+        -*)
+            echo "Error: Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            echo "Error: Unknown positional argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Check if running as root
 check_root() {
-    if [[ $EUID -ne 0 ]]; then
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]] && [[ $EUID -ne 0 ]]; then
         echo "Error: This script must be run as root" >&2
         exit 1
     fi
@@ -94,20 +92,22 @@ check_root() {
 
 # Check Java version (21+)
 check_java() {
-    if ! command -v java >/dev/null 2>&1; then
-        echo "Error: Java is not installed" >&2
-        exit 1
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+        if ! command -v java >/dev/null 2>&1; then
+            echo "Error: Java is not installed" >&2
+            exit 1
+        fi
+        
+        JAVA_VERSION=$(java -version 2>&1 | head -n 1 | cut -d" " -f2 | tr -d '"')
+        MAJOR_VERSION=$(echo "$JAVA_VERSION" | cut -d. -f1)
+        
+        if [[ "$MAJOR_VERSION" -lt 21 ]]; then
+            echo "Error: Java 21 or later is required (found: $JAVA_VERSION)" >&2
+            exit 1
+        fi
+        
+        echo "Java check passed: $JAVA_VERSION"
     fi
-    
-    JAVA_VERSION=$(java -version 2>&1 | head -n 1 | cut -d" " -f2 | tr -d '"')
-    MAJOR_VERSION=$(echo "$JAVA_VERSION" | cut -d. -f1)
-    
-    if [[ "$MAJOR_VERSION" -lt 21 ]]; then
-        echo "Error: Java 21 or later is required (found: $JAVA_VERSION)" >&2
-        exit 1
-    fi
-    
-    echo "Java check passed: $JAVA_VERSION"
 }
 
 # Get latest version from GitHub
@@ -121,18 +121,20 @@ get_latest_version() {
             RELEASE="${LATEST_RELEASE#v}"
             echo "Latest version found: $RELEASE"
         else
-            echo "Warning: Could not determine latest version from GitHub" >&2
-            RELEASE="latest"
+            echo "Error: Could not determine latest version from GitHub" >&2
+            echo "Please specify a release version using --release <version>" >&2
+            exit 1
         fi
     else
-        echo "Warning: curl not available, using 'latest' as version" >&2
-        RELEASE="latest"
+        echo "Error: curl not available" >&2
+        echo "Please specify a release version using --release <version>" >&2
+        exit 1
     fi
 }
 
 # Download release files
 download_release() {
-    local base_url="https://github.com/Tim-Meyran/Cringle/releases/download/v${RELEASE}"
+    local base_url="${CRINGLE_RELEASE_BASE_URL:-https://github.com/Tim-Meyran/Cringle/releases/download}/v${RELEASE}"
     local archive_name="cringle-${RELEASE}-linux.tar.gz"
     local checksums_name="SHA256SUMS"
     
@@ -184,7 +186,6 @@ install_release() {
     
     # Create temporary directory for extraction inside installation directory
     temp_extract_dir=$(mktemp -d -p "${INSTALL_DIR}")
-    trap 'rm -rf "${temp_extract_dir}"' EXIT
     
     # Extract archive to temp directory
     if ! tar -xzf "${archive_path}" -C "${temp_extract_dir}" --strip-components=1; then
@@ -198,7 +199,6 @@ install_release() {
         rm -rf "${install_path}"
     fi
     mv "${temp_extract_dir}" "${install_path}"
-    trap - EXIT  # Remove trap since we've moved files
     
     # Create current symlink
     ln -sfn "${install_path}" "${INSTALL_DIR}/current"
@@ -211,23 +211,25 @@ create_system_user() {
     echo "Creating system user and directories..."
     
     # Create system user if it doesn't exist
-    if ! id "${SYSTEM_USER}" >/dev/null 2>&1; then
-        if command -v useradd >/dev/null 2>&1; then
-            useradd --system --user-group -s /usr/sbin/nologin "${SYSTEM_USER}"
-        elif command -v adduser >/dev/null 2>&1; then
-            adduser -D -H -s /usr/sbin/nologin "${SYSTEM_USER}"
-        else
-            echo "Error: Neither useradd nor adduser found" >&2
-            exit 1
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+        if ! id "${SYSTEM_USER}" >/dev/null 2>&1; then
+            if command -v useradd >/dev/null 2>&1; then
+                useradd --system --user-group -s /usr/sbin/nologin "${SYSTEM_USER}"
+            elif command -v adduser >/dev/null 2>&1; then
+                adduser -D -H -s /usr/sbin/nologin "${SYSTEM_USER}"
+            else
+                echo "Error: Neither useradd nor adduser found" >&2
+                exit 1
+            fi
         fi
-    fi
-    
-    # Create directories with proper ownership if they don't exist
-    if [[ ! -d "/var/lib/cringle" ]]; then
-        install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /var/lib/cringle || exit 1
-    fi
-    if [[ ! -d "/etc/cringle" ]]; then
-        install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /etc/cringle || exit 1
+        
+        # Create directories with proper ownership if they don't exist
+        if [[ ! -d "/var/lib/cringle" ]]; then
+            install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /var/lib/cringle || exit 1
+        fi
+        if [[ ! -d "/etc/cringle" ]]; then
+            install -d -o "${SYSTEM_USER}" -g "${SYSTEM_GROUP}" /etc/cringle || exit 1
+        fi
     fi
     
     echo "System user and directories created: ${SYSTEM_USER}"
@@ -255,10 +257,12 @@ WantedBy=multi-user.target
 EOF
     
     # Reload systemd and enable service
-    systemctl daemon-reload
-    systemctl enable cringle-daemon.service
-    if [[ "$START_SERVICES" = true ]]; then
-        systemctl start cringle-daemon.service
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+        systemctl daemon-reload
+        systemctl enable cringle-daemon.service
+        if [[ "$START_SERVICES" = true ]]; then
+            systemctl start cringle-daemon.service
+        fi
     fi
     
     echo "Daemon service installed and enabled: cringle-daemon.service"
@@ -286,10 +290,12 @@ WantedBy=multi-user.target
 EOF
     
     # Reload systemd and enable service
-    systemctl daemon-reload
-    systemctl enable cringle-management.service
-    if [[ "$START_SERVICES" = true ]]; then
-        systemctl start cringle-management.service
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+        systemctl daemon-reload
+        systemctl enable cringle-management.service
+        if [[ "$START_SERVICES" = true ]]; then
+            systemctl start cringle-management.service
+        fi
     fi
     
     echo "Management server service installed and enabled: cringle-management.service"
@@ -311,7 +317,7 @@ uninstall() {
     echo "Uninstalling Cringle..."
     
     # Stop services
-    if [[ -f "${DAEMON_SERVICE}" ]]; then
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]] && [[ -f "${DAEMON_SERVICE}" ]]; then
         systemctl stop cringle-daemon.service || true
         systemctl disable cringle-daemon.service || true
         rm "${DAEMON_SERVICE}"
@@ -319,7 +325,7 @@ uninstall() {
     fi
     
     # Always remove management service if present (not conditional on --with-management)
-    if [[ -f "${MANAGEMENT_SERVICE}" ]]; then
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]] && [[ -f "${MANAGEMENT_SERVICE}" ]]; then
         systemctl stop cringle-management.service || true
         systemctl disable cringle-management.service || true
         rm "${MANAGEMENT_SERVICE}"
@@ -339,7 +345,9 @@ uninstall() {
     fi
     
     # Reload systemd
-    systemctl daemon-reload
+    if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+        systemctl daemon-reload
+    fi
     
     echo "Uninstallation completed"
     
@@ -347,13 +355,15 @@ uninstall() {
         echo "Purging system user and data..."
         
         # Remove system user
-        if id "${SYSTEM_USER}" >/dev/null 2>&1; then
+        if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]] && id "${SYSTEM_USER}" >/dev/null 2>&1; then
             userdel "${SYSTEM_USER}"
         fi
         
         # Remove data directories
-        rm -rf /var/lib/cringle
-        rm -rf /etc/cringle
+        if [[ "${CRINGLE_INSTALL_TEST}" != "1" ]]; then
+            rm -rf /var/lib/cringle
+            rm -rf /etc/cringle
+        fi
         
         echo "Purge completed"
     fi

@@ -21,7 +21,7 @@ The installer provides several command-line options:
 
 - `--version`: Display the installer version and exit
 - `--with-management`: Install the ManagementServer alongside the daemon
-- `--release`: Create a release build (default: development build)
+- `--release`: Install this version (default: latest)
 - `--start`: Start the daemon immediately after installation
 - `--uninstall`: Remove the Cringle daemon installation
 - `--purge`: Completely remove all Cringle data and configuration
@@ -40,7 +40,7 @@ sudo ./install.sh --with-management
 
 Install with release build:
 ```bash
-sudo ./install.sh --release
+sudo ./install.sh --release 1.2.3
 ```
 
 Start daemon immediately:
@@ -52,6 +52,8 @@ Uninstall:
 ```bash
 sudo ./install.sh --uninstall --purge
 ```
+
+**Note**: `--purge` requires `--uninstall`
 
 ### Verification Steps
 

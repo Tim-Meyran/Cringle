@@ -116,8 +116,8 @@ test_in_container() {
     # Run the test in a container
     docker run --rm \
         --env CRINGLE_INSTALL_ROOT=/opt/cringle \
-        --env CRINGLE_RELEASE_BASE_URL=${TEST_DIR}/releases \
-        --volume ${TEST_DIR}:/test-dir \
+        --env CRINGLE_RELEASE_BASE_URL=http://localhost:8000 \
+        --volume ${TEST_DIR}/releases:/releases \
         --volume ${PWD}/install.sh:/install.sh \
         ${image} bash -c '
             set -euo pipefail
@@ -125,6 +125,10 @@ test_in_container() {
             # Copy install.sh to container
             cp /install.sh /tmp/install.sh
             chmod +x /tmp/install.sh
+            
+            # Start HTTP server to serve releases in background
+            cd /releases && python3 -m http.server 8000 &
+            sleep 2
             
             # Run installation tests
             echo "Running tests in ${image}"
@@ -152,19 +156,20 @@ test_in_container() {
             
             echo "Version 1.0.0 installed successfully"
             
-            # Switch to version 2.0.0
-            echo "Switching to version 2.0.0..."
-            /tmp/install.sh --release 2.0.0 || exit 1
-            
-            current_version=$(cat /opt/cringle/current/VERSION)
-            if [[ "${current_version}" != "2.0.0" ]]; then
-                echo "ERROR: Expected version 2.0.0, got ${current_version}"
+            # Test user/group creation
+            if ! id -u cringle >/dev/null 2>&1; then
+                echo "ERROR: User 'cringle' not created"
                 exit 1
             fi
             
-            echo "Version 2.0.0 installed successfully"
+            if ! id -g cringle >/dev/null 2>&1; then
+                echo "ERROR: Group 'cringle' not created"
+                exit 1
+            fi
             
-            # Verify /etc/cringle and /var/lib/cringle exist
+            echo "User and group created successfully"
+            
+            # Test directory creation
             if [[ ! -d /etc/cringle ]]; then
                 echo "ERROR: /etc/cringle not created"
                 exit 1
@@ -176,6 +181,41 @@ test_in_container() {
             fi
             
             echo "System directories created successfully"
+            
+            # Test systemd unit files
+            if [[ ! -f /etc/systemd/system/cringle.service ]]; then
+                echo "ERROR: Systemd service file not created"
+                exit 1
+            fi
+            
+            if [[ ! -f /etc/systemd/system/cringle.target ]]; then
+                echo "ERROR: Systemd target file not created"
+                exit 1
+            fi
+            
+            # Guard systemctl commands
+            systemctl daemon-reload || true
+            systemctl enable cringle.service || true
+            systemctl start cringle.service || true
+            
+            echo "Systemd configuration created successfully"
+            
+            # Test cringle --version as normal user
+            su -s /bin/sh -c "cringle --version" cringle || exit 1
+            
+            echo "Version command works as normal user"
+            
+            # Switch to version 2.0.0
+            echo "Switching to version 2.0.0..."
+            /tmp/install.sh --release 2.0.0 || exit 1
+            
+            current_version=$(cat /opt/cringle/current/VERSION)
+            if [[ "${current_version}" != "2.0.0" ]]; then
+                echo "ERROR: Expected version 2.0.0, got ${current_version}"
+                exit 1
+            fi
+            
+            echo "Version 2.0.0 installed successfully"
             
             # Uninstall
             echo "Uninstalling..."

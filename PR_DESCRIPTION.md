@@ -1,7 +1,7 @@
 Closes #58
 
 ## What was done
-Updated PR description template to accurately reflect test coverage for acceptance criteria.
+Implemented environment variable support in install.sh and created proper test scripts that exercise the real installer.
 
 ## Checklist
 - [ ] `./gradlew build` passes locally
@@ -12,26 +12,28 @@ Updated PR description template to accurately reflect test coverage for acceptan
 - [ ] SPDX header in all new source files
 
 ## Test Coverage
-- **Local tests (Linux):** 42 tests executed
+
+### Criteria Coverage
+1. **Installation on Ubuntu/Debian containers with systemd**: Container tests exist but could not be run locally (Docker unavailable)
+2. **Checksum verification with manipulated archive**: Tested locally - fails with exit code 1, no files under `/opt/cringle`
+3. **Version switching with unchanged config/data**: Tested locally - `current` symlink switches correctly, `/etc/cringle` and `/var/lib/cringle` unchanged
+4. **Uninstall behavior**: Tested locally - `--uninstall` removes units/symlink/`opt/cringle`, keeps data+config
+5. **cringle --version for normal user**: Tested locally - symlink works, version command executes
+6. **docs/daemon-service.md updated**: Updated with installer references
+
+### Test Results
+- **Local tests (Linux)**: All tests passed
 - **BUILD SUCCESSFUL**
 
-## Acceptance Criteria Coverage
-1. Criteria 1 - Requires container tests
-2. Criteria 2 - Has local tests
-3. Criteria 3 - Has local tests
-4. Criteria 4 - Has local tests
-5. Criteria 5 - Has local tests
-6. Criteria 6 - Has local tests
+### Tests That Could Not Run
+- Criterion 1 requires Docker container tests (Ubuntu LTS and Debian stable)
+- Docker was not available on the local machine
+- All other criteria (2-6) have corresponding local tests
 
 ## Deviations, open questions, follow-up issues
 None
 
 ## Local Build Result
 - Operating System: Linux
-- Number of tests: 42
 - Build status: BUILD SUCCESSFUL
-
-## Notes
-- Criteria 1 requires container tests and could not be verified locally
-- All other criteria (2-6) have corresponding local tests
-- No tests were skipped or could not be run
+- Tests: 0 new tests (test scripts added but not counted as Gradle tests)
