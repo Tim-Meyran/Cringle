@@ -7,6 +7,8 @@ import cringle.contract.TetherType
 import cringle.packaging.Endpoint
 import cringle.schema.SchemaRegistry
 import java.time.Duration
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 
 /** Thrown when the tethers of a blueprint cannot be wired; the message lists every problem. */
 public class TetherWiringException(message: String) : RuntimeException(message)
@@ -61,6 +63,8 @@ public class TetherConfig(
      * asked for. `null` means the fabric has no TCP tethers.
      */
     public val tcp: ((blockId: String) -> TcpDriver)? = null,
+    /** Dispatcher the network runs its delivery coroutines on. */
+    public val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     init {
         require(bufferCapacity >= 1) { "bufferCapacity must be at least 1" }

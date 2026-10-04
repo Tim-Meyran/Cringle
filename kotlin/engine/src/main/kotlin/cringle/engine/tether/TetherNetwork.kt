@@ -17,9 +17,11 @@ import cringle.contract.TetherStream
 import cringle.contract.TetherType
 import cringle.engine.fabric.FabricException
 import cringle.engine.fabric.PortWiring
+import cringle.packaging.Backoff
 import cringle.packaging.Blueprint
 import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
+import cringle.packaging.RetryConfig
 import cringle.schema.SchemaValidator
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -27,7 +29,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
@@ -93,11 +94,11 @@ public class TetherNetwork private constructor(
         stopping = null
         stopped = CompletableDeferred()
         this.deliverer = deliverer
-        val s = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val s = CoroutineScope(SupervisorJob() + config.dispatcher)
         scope = s
         for (c in connections.values.distinctBy { it.info.id }) {
             if (c.info.type == TetherType.TCP) continue
-            c.queue = Channel(config.bufferCapacity)
+            c.queue = Channel(c.bufferCapacity)
             s.launch { pump(c) }
         }
         try {
@@ -116,7 +117,7 @@ public class TetherNetwork private constructor(
         val port = checkNotNull(c.tcpPort)
         val receiver = provider(c.info.to.block).also { tcpDrivers += it }
         c.sender = provider(c.info.from.block).also { tcpDrivers += it }
-        val listener = receiver.listen(port, acceptCapacity = config.bufferCapacity)
+        val listener = receiver.listen(port, acceptCapacity = c.bufferCapacity)
         val target = PortRef(c.info.to.port, c.info.to.index)
         s.launch {
             listener.connections.collect { connection ->
@@ -196,7 +197,16 @@ public class TetherNetwork private constructor(
         return allClosed
     }
 
-    private class Connection(val info: TetherInfo, val fromPort: PortDefinition, val toPort: PortDefinition, val policy: DeliveryPolicy, val tcpPort: Int?) {
+    private class Connection(
+        val info: TetherInfo,
+        val fromPort: PortDefinition,
+        val toPort: PortDefinition,
+        val policy: DeliveryPolicy,
+        val tcpPort: Int?,
+        val bufferCapacity: Int,
+        val requestTimeout: Duration,
+        val retry: RetryConfig,
+    ) {
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
@@ -217,6 +227,7 @@ public class TetherNetwork private constructor(
             for (env in queue) {
                 if (env is Envelope.Request && env.response.isCancelled) continue
                 var first = true
+                var attempt = 0
                 while (true) {
                     try {
                         val target = deliverer ?: return
@@ -227,15 +238,18 @@ public class TetherNetwork private constructor(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {
+                        attempt++
                         if (c.policy == DeliveryPolicy.BUFFER && e is FabricException) {
-                            // the receiver is not running: keep the value, the queue behind it fills up
-                            delay(RETRY_DELAY_MS)
+                            val maxAttempts = c.retry.maxAttempts
+                            if (maxAttempts != null && attempt >= maxAttempts) {
+                                fail(c, env, to, e, "after $attempt attempts")
+                                break
+                            }
+                            delay(retryDelay(c.retry, attempt))
                             if (env is Envelope.Request && env.response.isCancelled) break
                             continue
                         }
-                        val failure = TetherDeliveryException("tether ${c.info.id}: delivery to '${to.block}' failed: ${e.message}", e)
-                        if (env is Envelope.Request) env.response.completeExceptionally(failure)
-                        onDeliveryFailure(c.info, failure)
+                        fail(c, env, to, e, null)
                         break
                     }
                 }
@@ -246,6 +260,20 @@ public class TetherNetwork private constructor(
             // close() closed the queue with the reason its senders get; nothing is left to pump
             if (e !== stopping) throw e
         }
+    }
+
+    private fun fail(c: Connection, env: Envelope, to: Endpoint, e: Throwable, suffix: String?) {
+        val detail = suffix?.let { " $it" }.orEmpty()
+        val failure = TetherDeliveryException("tether ${c.info.id}: delivery to '${to.block}' failed$detail: ${e.message}", e)
+        if (env is Envelope.Request) env.response.completeExceptionally(failure)
+        onDeliveryFailure(c.info, failure)
+    }
+
+    private fun retryDelay(retry: RetryConfig, failedAttempt: Int): Long {
+        if (retry.backoff == Backoff.FIXED) return retry.backoffMs
+        var d = retry.backoffMs
+        repeat(failedAttempt - 1) { d = minOf(d * 2, retry.maxBackoffMs) }
+        return minOf(d, retry.maxBackoffMs)
     }
 
     private suspend fun handle(c: Connection, env: Envelope, target: TetherDeliverer, port: PortRef, first: Boolean) {
@@ -356,17 +384,17 @@ public class TetherNetwork private constructor(
             response.invokeOnCompletion { pendingRequests.remove(response) }
             send(queue(), Envelope.Request(validate(c, request, "request"), response))
             try {
-                return withTimeout(config.requestTimeout.toMillis()) { response.await() }
+                return withTimeout(c.requestTimeout.toMillis()) { response.await() }
             } catch (e: TimeoutCancellationException) {
                 response.cancel()
-                throw TetherTimeoutException("tether ${c.info.id}: no response within ${config.requestTimeout}")
+                throw TetherTimeoutException("tether ${c.info.id}: no response within ${c.requestTimeout}")
             }
         }
 
         override suspend fun openStream(): TetherStream {
             require(TetherType.STREAM, "openStream")
-            val toReceiver = Channel<Any>(config.bufferCapacity)
-            val fromReceiver = Channel<Any>(config.bufferCapacity)
+            val toReceiver = Channel<Any>(c.bufferCapacity)
+            val fromReceiver = Channel<Any>(c.bufferCapacity)
             streamChannels += toReceiver
             streamChannels += fromReceiver
             send(queue(), Envelope.Stream(toReceiver, fromReceiver))
@@ -384,8 +412,8 @@ public class TetherNetwork private constructor(
                 }
                 return TcpByteStream(c, connection)
             }
-            val toReceiver = Channel<ByteArray>(config.bufferCapacity)
-            val fromReceiver = Channel<ByteArray>(config.bufferCapacity)
+            val toReceiver = Channel<ByteArray>(c.bufferCapacity)
+            val fromReceiver = Channel<ByteArray>(c.bufferCapacity)
             streamChannels += toReceiver
             streamChannels += fromReceiver
             send(queue(), Envelope.Bytes(toReceiver, fromReceiver))
@@ -431,8 +459,6 @@ public class TetherNetwork private constructor(
     }
 
     public companion object {
-        private const val RETRY_DELAY_MS = 50L
-
         private fun key(block: String, port: String, index: Int?) = "$block/$port/${index ?: "-"}"
 
         /**
@@ -487,7 +513,16 @@ public class TetherNetwork private constructor(
                     if (t.port == null) problems += "tether $id: a TCP tether needs a port"
                     if (config.tcp == null) problems += "tether $id: this fabric has no TCP driver"
                 }
-                val c = Connection(TetherInfo(id, t.type, t.from, t.to), from, to, t.delivery, t.port)
+                val c = Connection(
+                    TetherInfo(id, t.type, t.from, t.to),
+                    from,
+                    to,
+                    t.delivery,
+                    t.port,
+                    t.bufferCapacity ?: config.bufferCapacity,
+                    t.requestTimeout ?: config.requestTimeout,
+                    t.retry ?: RetryConfig(),
+                )
                 for (e in listOf(t.from, t.to)) {
                     val k = key(e.block, e.port, e.index)
                     if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"
