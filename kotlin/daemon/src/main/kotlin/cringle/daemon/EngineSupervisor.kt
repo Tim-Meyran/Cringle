@@ -68,6 +68,11 @@ public class EngineSupervisor(
      * (`PrepareEngine`). Called before the engine process starts; if it throws, the engine is not started.
      */
     private val announce: (engine: String, secretHash: ByteArray) -> Unit = { _, _ -> },
+    /**
+     * Writes the engine's trust file (`<engineDir>/trust.json`) before the process starts, so the engine can talk to
+     * the router over mTLS. Called before [announce]; if it throws, the engine is not started.
+     */
+    private val writeTrustFile: (engine: String) -> Unit = { _ -> },
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -132,6 +137,13 @@ public class EngineSupervisor(
             // One-time enrollment secret (docs/trust.md): the router learns its hash before the engine can register
             val enrollmentSecret = if (routerAddress() != null) ByteArray(32).also { secureRandom.nextBytes(it) } else null
             if (enrollmentSecret != null) {
+                try {
+                    writeTrustFile(m.id)
+                } catch (e: Exception) {
+                    m.state = ProcessState.STOPPED
+                    m.lastError = "the trust file of engine '$id' could not be written: ${e.message}"
+                    throw DaemonException(DaemonError.FAILED_PRECONDITION, m.lastError, e)
+                }
                 try {
                     announce(m.id, MessageDigest.getInstance("SHA-256").digest(enrollmentSecret))
                 } catch (e: Exception) {

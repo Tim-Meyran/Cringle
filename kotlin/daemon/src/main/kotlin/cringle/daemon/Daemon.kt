@@ -2,16 +2,22 @@
 
 package cringle.daemon
 
+import com.google.protobuf.ByteString
 import cringle.common.ComponentKind
 import cringle.common.Identity
+import cringle.common.TlsHelper
 import cringle.common.TrustEntry
 import cringle.common.TrustKind
 import cringle.common.TrustStore
+import cringle.common.v1.EngineId
 import cringle.engine.CringleHome
 import cringle.engine.EngineArgs
 import cringle.router.RouterServer
 import cringle.router.RouterTls
+import cringle.router.v1.PrepareEngineRequest
+import cringle.router.v1.RegistryServiceGrpcKt
 import io.grpc.Server
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -19,6 +25,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 
 /**
  * The daemon of one machine (Architecture 4.1): keeps the list of engines, starts and supervises their processes and
@@ -65,7 +72,9 @@ public class Daemon(
         // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
         onStopped = { id, _ -> router?.registry?.unregister(id) },
         // combined mode: the router of this process; a separate router is announced to by mTLS from the daemon (#114)
-        announce = { id, hash -> router?.enrollment?.prepare(id, hash) },
+        announce = ::announce,
+        // writes the engine's trust file before the process starts so it can talk to the router over mTLS
+        writeTrustFile = ::writeEngineTrustFile,
     )
 
     private val server: Server = NettyServerBuilder
@@ -115,6 +124,53 @@ public class Daemon(
             val candidate = "e-" + ByteArray(4).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
             if (candidate !in engines) return candidate
         }
+    }
+
+    /**
+     * Announces at the router that [engineId] will register with the secret whose SHA-256 is [secretHash]
+     * (`PrepareEngine`). In combined mode the in-process router is used directly; in separate router mode a TLS
+     * channel to [routerAddress] is opened with the daemon's identity and trust store.
+     */
+    private fun announce(engineId: String, secretHash: ByteArray) {
+        if (router != null) {
+            router.enrollment!!.prepare(engineId, secretHash)
+            return
+        }
+        val address = routerAddress ?: throw DaemonException(DaemonError.FAILED_PRECONDITION, "no router configured")
+        val (host, port) = address.substringBeforeLast(':') to address.substringAfterLast(':').toInt()
+        val channel = NettyChannelBuilder.forAddress(host, port)
+            .sslContext(TlsHelper.channelCredentials(daemonIdentity, daemonTrustStore))
+            .build()
+        try {
+            runBlocking {
+                RegistryServiceGrpcKt.RegistryServiceCoroutineStub(channel)
+                    .withDeadlineAfter(30, TimeUnit.SECONDS)
+                    .prepareEngine(
+                        PrepareEngineRequest.newBuilder()
+                            .setEngineId(EngineId.newBuilder().setValue(engineId))
+                            .setEnrollmentSecretHash(ByteString.copyFrom(secretHash))
+                            .build(),
+                    )
+            }
+        } finally {
+            channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+        }
+    }
+
+    /**
+     * Writes `<engineDir>/trust.json` with one entry: the router the engine will talk to. The router's fingerprint
+     * is looked up in the daemon's trust store by address; if the router is not trusted, the start fails.
+     */
+    private fun writeEngineTrustFile(engineId: String) {
+        val routerAddr = router?.let { "127.0.0.1:${it.port}" } ?: routerAddress
+            ?: throw DaemonException(DaemonError.FAILED_PRECONDITION, "no router configured")
+        val routerEntry = daemonTrustStore.list().firstOrNull { it.kind == TrustKind.ROUTER && it.address == routerAddr }
+            ?: throw DaemonException(
+                DaemonError.FAILED_PRECONDITION,
+                "router $routerAddr is not trusted; add it to the daemon trust store first",
+            )
+        TrustStore(CringleHome.engineDir(home, engineId).resolve("trust.json"))
+            .add(TrustEntry(routerEntry.fingerprint, routerEntry.name, TrustKind.ROUTER, address = routerAddr))
     }
 
     /** Stops an engine and removes it; also deletes its data directory if [deleteData]. */
