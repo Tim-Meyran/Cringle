@@ -2,10 +2,12 @@
 
 package cringle.gradle
 
+import cringle.contract.TetherType
 import cringle.packaging.FabricConfig
 import cringle.packaging.PackageProblem
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
+import kotlinx.serialization.json.JsonObject
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -48,10 +50,13 @@ class ProjectPackageFunctionalTest {
             listOf("acme-orders/orders", "acme-orders/orders"),
             pkg.blueprints.single().blocks.map { it.block },
         )
+        assertEquals("3", pkg.blueprints.single().blocks.single { it.id == "source" }.config["retries"]?.toString())
+        assertEquals("3", pkg.blueprints.single().blocks.single { it.id == "sink" }.config["retries"]?.toString())
         assertEquals("source", pkg.blueprints.single().tethers.single().from.block)
         assertEquals("out", pkg.blueprints.single().tethers.single().from.port)
         assertEquals("sink", pkg.blueprints.single().tethers.single().to.block)
         assertEquals("in", pkg.blueprints.single().tethers.single().to.port)
+        assertEquals(TetherType.REQUEST_RESPONSE, pkg.blueprints.single().tethers.single().type)
         assertTrue("acme.shop" in pkg.schemas.getValue("schemas/acme.shop.json"), "the schema of the project is missing")
         assertEquals(
             listOf("binaries/acme/shop/readme.txt"),
