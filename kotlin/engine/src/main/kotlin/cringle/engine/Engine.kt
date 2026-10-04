@@ -22,6 +22,7 @@ import cringle.engine.fabric.FabricStatus
 import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
 import cringle.common.v1.FabricStateSummary
+import cringle.common.EngineTls
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.ConfigureResponse
 import cringle.engine.v1.EngineManagementServiceGrpcKt
@@ -64,6 +65,8 @@ public class Engine private constructor(
     requestedPort: Int,
     home: Path,
     private val heartbeatInterval: Duration,
+    private val tls: EngineTls?,
+    private val enrollmentSecret: ByteArray?,
 ) {
     /** The fabrics of this engine. */
     /** The built-in drivers of this engine (logging, filesystem, TCP). */
@@ -166,7 +169,10 @@ public class Engine private constructor(
                 "127.0.0.1:$managementPort",
                 router,
                 heartbeatInterval,
-            ) { fabricStates() }.also { it.start() }
+                { fabricStates() },
+                tls,
+                enrollmentSecret,
+            ).also { it.start() }
         }
     }
 
@@ -368,7 +374,7 @@ public class Engine private constructor(
             Files.createDirectories(dir)
             val config = EngineConfig.loadOrCreate(dir, args.id, args.name)
             val identity = EngineIdentity.loadOrCreate(dir, args.id)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval)
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, null, null)
         }
 
         private fun timestamp(i: Instant): Timestamp = Timestamp.newBuilder().setSeconds(i.epochSecond).setNanos(i.nano).build()
