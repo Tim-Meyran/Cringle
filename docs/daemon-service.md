@@ -1,11 +1,11 @@
 # Running the Cringle daemon as a service
 
-One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with systemd and as a Windows service. The daemon is a plain JVM process (`cringle.daemon.MainKt`); until trust management exists (#13) it must be started with `--insecure-dev-mode` and listens on the loopback interface only.
+One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with systemd and as a Windows service. The daemon is a plain JVM process (`cringle.daemon.MainKt`).
 
 ## Command line
 
 ```
-java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined] --insecure-dev-mode
+java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined]
 ```
 
 - `--home`: Cringle home (default `~/.cringle`, or `CRINGLE_HOME`). The engine register is `<home>/daemon/engines.json`, engine process logs are `<home>/daemon/logs/<id>.out.log` and `.err.log`.
@@ -27,7 +27,7 @@ After=network.target
 [Service]
 User=cringle
 Environment=CRINGLE_HOME=/var/lib/cringle
-ExecStart=/usr/bin/java -cp "/opt/cringle/lib/*" cringle.daemon.MainKt --port 7400 --combined --insecure-dev-mode
+ExecStart=/usr/bin/java -cp "/opt/cringle/lib/*" cringle.daemon.MainKt --port 7400 --combined
 Restart=on-failure
 RestartSec=5
 # give engines time to stop gracefully
@@ -53,7 +53,7 @@ Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-
   <id>cringle-daemon</id>
   <name>Cringle daemon</name>
   <executable>java</executable>
-  <arguments>-cp "C:\cringle\lib\*" cringle.daemon.MainKt --port 7400 --combined --insecure-dev-mode</arguments>
+  <arguments>-cp "C:\cringle\lib\*" cringle.daemon.MainKt --port 7400 --combined</arguments>
   <env name="CRINGLE_HOME" value="C:\cringle\data"/>
   <onfailure action="restart" delay="5 sec"/>
   <stoptimeout>60 sec</stoptimeout>
@@ -67,28 +67,28 @@ cringle-daemon.exe start
 
 ### Automated installation
 
-For a simpler installation, use the provided PowerShell installer script. The script is attached to releases as `install.ps1` and can be downloaded from the GitHub releases page.
+For a simpler installation, use the provided PowerShell installer script. The script is available for download from the GitHub releases page at:
+https://github.com/Cringle/Cringle/releases/download/<version>/install.ps1
 
 ```powershell
-./install.ps1 -Version "1.0.0"
+./install.ps1 -Version "1.0.0" -WithManagement
 ```
 
 The installer:
 - Requires administrative privileges (run PowerShell as Administrator)
 - Installs the daemon as a Windows service named "Cringle Daemon"
 - Sets `CRINGLE_HOME` to `%ProgramData%\Cringle` by default
-- Uses `--insecure-dev-mode` for development
+- Exit code: 0 on success, non-zero on failure
 
 Available parameters:
-- `-Version`: Specify the daemon version to install (default: latest)
+- `-Version`: Specify the daemon version to install (required, default: latest)
 - `-WithManagement`: Include the ManagementServer for engine recovery
 - `-Uninstall`: Remove the service
 - `-Purge`: Remove service and configuration data (use with -Uninstall)
-- `-BaseUrl`: Base URL for testing (overrides default repository)
 
 ## mTLS and Enrollment
 
-When starting an engine with mTLS (not using `--insecure-dev-mode`), the daemon performs the following steps:
+When starting an engine with mTLS, the daemon performs the following steps:
 
 1. **Generate Enrollment Secret**: The daemon generates a random byte array as the enrollment secret.
 2. **Hash the Secret**: The secret is hashed using SHA-256 to create a secret hash.
@@ -102,4 +102,4 @@ The enrollment secret is single-use and expires after successful registration. I
 
 The `CRINGLE_ENROLLMENT_SECRET` environment variable contains the hex-encoded enrollment secret. For example, if the secret is the byte array `[0xAB, 0xCD, 0xEF]`, the environment variable will contain `abcdef`.
 
-This variable is only set when starting engines with mTLS. Engines using `--insecure-dev-mode` do not receive this variable.
+This variable is only set when starting engines with mTLS.

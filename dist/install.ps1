@@ -19,6 +19,15 @@ Examples:
   .\install.ps1 -Uninstall -Purge
 #>
 
+# Parameters
+param(
+    [string]$Version,
+    [switch]$Uninstall,
+    [switch]$Purge,
+    [string]$BaseUrl,
+    [switch]$WithManagement
+)
+
 # Check if running as administrator
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "ERROR: This script requires administrator privileges." -ForegroundColor Red
@@ -26,15 +35,6 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 $ErrorActionPreference = "Stop"
-
-# Parameters
-param(
-    [string]$Version = "latest",
-    [switch]$Uninstall,
-    [switch]$Purge,
-    [string]$BaseUrl,
-    [switch]$WithManagement
-)
 
 # Constants
 $PROGRAM_FILES = "$env:ProgramFiles"
@@ -232,7 +232,13 @@ function Add-ToPath {
     param([string]$PathToAdd)
     
     $systemPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    if ($systemPath -notlike "*$PathToAdd*") {
+    $pathEntries = $systemPath -split ";"
+    
+    # Filter out empty entries and check if PathToAdd already exists
+    $normalizedPathToAdd = $PathToAdd.Trim()
+    $exists = $pathEntries | Where-Object { $_.Trim() -eq $normalizedPathToAdd }
+    
+    if (-not $exists) {
         Write-Host "Adding $PathToAdd to system PATH..." -ForegroundColor Cyan
         $newPath = "$systemPath;$PathToAdd"
         [Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
@@ -255,7 +261,7 @@ function Install-Service {
   <id>$serviceName</id>
   <name>Cringle Daemon</name>
   <description>Cringle Engine Service with Management</description>
-  <executable>$serviceExe</executable>
+  <executable>$binPath\cringle-daemon.bat</executable>
   <arguments>-management</arguments>
   <environment>
     <variable name="CRINGLE_HOME">$PROGRAM_DATA\Cringle</variable>
@@ -270,7 +276,7 @@ function Install-Service {
   <id>$serviceName</id>
   <name>Cringle Daemon</name>
   <description>Cringle Engine Service</description>
-  <executable>$serviceExe</executable>
+  <executable>$binPath\cringle-daemon.bat</executable>
   <environment>
     <variable name="CRINGLE_HOME">$PROGRAM_DATA\Cringle</variable>
   </environment>
@@ -289,11 +295,78 @@ function Install-Service {
     # Start service
     Write-Host "Starting service..." -ForegroundColor Cyan
     Start-Service -Name $serviceName
+}
+
+# Uninstall service
+function Uninstall-Service {
+    param([switch]$Purge)
     
+    $serviceName = "Cringle Daemon"
+    
+    # Stop service
+    if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+        Write-Host "Stopping service $serviceName..." -ForegroundColor Cyan
+        Stop-Service -Name $serviceName -Force
+        
+        # Uninstall service
+        Write-Host "Uninstalling service..." -ForegroundColor Cyan
+        & "$SERVICE_DIR\cringle-daemon.exe" uninstall
+    }
+    
+    # Remove PATH entry
+    $systemPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $pathEntries = $systemPath -split ";"
+    $binPath = "$CRINGLE_BASE\bin"
+    $normalizedBinPath = $binPath.Trim()
+    
+    $filteredEntries = $pathEntries | Where-Object { $_.Trim() -ne $normalizedBinPath }
+    if ($filteredEntries -ne $pathEntries) {
+        Write-Host "Removing $binPath from system PATH..." -ForegroundColor Cyan
+        $newPath = $filteredEntries -join ";"
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
+        Write-Host "PATH updated successfully" -ForegroundColor Green
+    }
+    
+    # Remove program files
+    if (Test-Path $CRINGLE_BASE) {
+        Write-Host "Removing program files from $CRINGLE_BASE..." -ForegroundColor Cyan
+        Remove-Item $CRINGLE_BASE -Recurse -Force
+    }
+    
+    # Remove data directory if Purge is specified
+    if ($Purge -and (Test-Path "$PROGRAM_DATA\Cringle")) {
+        Write-Host "Purging data directory..." -ForegroundColor Cyan
+        Remove-Item "$PROGRAM_DATA\Cringle" -Recurse -Force
+    }
+}
+
 # Main script execution
 if ($Uninstall) {
     Uninstall-Service -Purge:$Purge
     Write-Host "Uninstallation completed" -ForegroundColor Green
 } else {
+    if ([string]::IsNullOrEmpty($Version)) {
+        Write-Host "ERROR: -Version parameter is required for installation." -ForegroundColor Red
+        exit 1
+    }
     Install-Cringle -Version $Version
+}
+
+# Install Cringle
+function Install-Cringle {
+    param([string]$Version)
+    
+    # Download and install WinSW
+    Install-WinSW
+    
+    # Download distribution
+    $distPath = Download-Distribution -Version $Version
+    
+    # Add to PATH
+    Add-ToPath -PathToAdd "$CRINGLE_BASE\bin"
+    
+    # Install service
+    Install-Service -Version $Version -WithManagement:$WithManagement
+    
+    Write-Host "Cringle version $Version installed successfully" -ForegroundColor Green
 }

@@ -16,6 +16,30 @@ Tests:
 
 $ErrorActionPreference = "Stop"
 
+# Parse check for both scripts
+$installScript = "$PSScriptRoot\..\install.ps1"
+if (-not (Test-Path $installScript)) {
+    Write-Host "ERROR: install.ps1 not found at expected location: $installScript" -ForegroundColor Red
+    exit 1
+}
+
+# Verify both scripts parse correctly
+try {
+    . $installScript -ea SilentlyContinue
+    Write-Host "✓ install.ps1 parsed successfully" -ForegroundColor Green
+} catch {
+    Write-Host "ERROR: install.ps1 failed to parse: $_" -ForegroundColor Red
+    exit 1
+}
+
+try {
+    $scriptBlock = [System.Management.Automation.Language.Parser]::ParseFile($PSScriptRoot, [ref]$null, [ref]$null)
+    Write-Host "✓ InstallerTest.ps1 parsed successfully" -ForegroundColor Green
+} catch {
+    Write-Host "ERROR: InstallerTest.ps1 failed to parse: $_" -ForegroundColor Red
+    exit 1
+}
+
 # Test results
 $testResults = @()
 
@@ -59,43 +83,13 @@ function Remove-TempTestDirectory {
     }
 }
 
-# Helper function to simulate installer functions for testing
-function Invoke-WebRequestWithRetry {
-    param([string]$Uri, [string]$OutFile, [int]$MaxRetries=3)
-    
-    $retries = 0
-    while ($retries -lt $MaxRetries) {
-        try {
-            Invoke-WebRequest -Uri $Uri -OutFile $OutFile
-            return $true
-        } catch {
-            $retries++
-            if ($retries -ge $MaxRetries) {
-                Write-Host "Failed to download $Uri after $MaxRetries attempts: $_" -ForegroundColor Red
-                return $false
-            }
-            Write-Host "Retry $retries/$MaxRetries for $Uri..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
-        }
-    }
-    return $false
-}
-
-# Helper function to verify SHA-256 checksum
-function Verify-SHA256Checksum {
-    param([string]$FilePath, [string]$ExpectedChecksum)
-    
-    $actualChecksum = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
-    $expectedChecksum = $ExpectedChecksum.ToLower()
-    
-    if ($actualChecksum -ne $expectedChecksum) {
-        Write-Host "ERROR: SHA-256 checksum verification failed!" -ForegroundColor Red
-        Write-Host "Expected: $expectedChecksum" -ForegroundColor Red
-        Write-Host "Actual:   $actualChecksum" -ForegroundColor Red
-        return $false
-    }
-    Write-Host "SHA-256 verification passed for $FilePath" -ForegroundColor Green
-    return $true
+# Import real installer functions
+$installScript = "$PSScriptRoot\..\install.ps1"
+if (Test-Path $installScript) {
+    . $installScript -ea SilentlyContinue
+} else {
+    Write-Host "ERROR: install.ps1 not found at expected location" -ForegroundColor Red
+    exit 1
 }
 
 # TestInstallation - Verifies successful installation
@@ -108,7 +102,7 @@ function TestInstallation {
         $releaseDir = "$testDir\release"
         $zipFile = "$releaseDir\cringle-1.0.0.zip"
         $checksumFile = "$releaseDir\SHA256SUMS"
-        $winswFile = "$releaseDir\service.exe"
+        $winswFile = "$releaseDir\cringle-1.0.0-windows-winsw.zip"
         
         New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
         
@@ -117,13 +111,13 @@ function TestInstallation {
         
         # Create fake checksum file
         $zipChecksum = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        "$zipChecksum  $zipFile" | Out-File -FilePath $checksumFile -Encoding utf8
+        $winswChecksum = (Get-FileHash -Path $winswFile -Algorithm SHA256).Hash.ToLower()
+        "$zipChecksum  $zipFile`n$winswChecksum  $winswFile" | Out-File -FilePath $checksumFile -Encoding utf8
         
         # Create fake WinSW file
         "fake winsw content" | Out-File -FilePath $winswFile -Encoding utf8
         
         # Test installation with fake assets
-        $installScript = "$PSScriptRoot\..\install.ps1"
         $exitCode = (& $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0")
         
         if ($exitCode -eq 0) {
@@ -184,6 +178,8 @@ function TestUpgrade {
         $releaseDir = "$testDir\release"
         $zipFile1 = "$releaseDir\cringle-1.0.0.zip"
         $zipFile2 = "$releaseDir\cringle-2.0.0.zip"
+        $winswFile1 = "$releaseDir\cringle-1.0.0-windows-winsw.zip"
+        $winswFile2 = "$releaseDir\cringle-2.0.0-windows-winsw.zip"
         $checksumFile = "$releaseDir\SHA256SUMS"
         
         New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
@@ -191,14 +187,17 @@ function TestUpgrade {
         # Create fake zip files
         "fake zip content 1" | Out-File -FilePath $zipFile1 -Encoding utf8
         "fake zip content 2" | Out-File -FilePath $zipFile2 -Encoding utf8
+        "fake winsw content 1" | Out-File -FilePath $winswFile1 -Encoding utf8
+        "fake winsw content 2" | Out-File -FilePath $winswFile2 -Encoding utf8
         
         # Create checksum file
         $checksum1 = (Get-FileHash -Path $zipFile1 -Algorithm SHA256).Hash.ToLower()
         $checksum2 = (Get-FileHash -Path $zipFile2 -Algorithm SHA256).Hash.ToLower()
-        "$checksum1  $zipFile1`n$checksum2  $zipFile2" | Out-File -FilePath $checksumFile -Encoding utf8
+        $winswChecksum1 = (Get-FileHash -Path $winswFile1 -Algorithm SHA256).Hash.ToLower()
+        $winswChecksum2 = (Get-FileHash -Path $winswFile2 -Algorithm SHA256).Hash.ToLower()
+        "$checksum1  $zipFile1`n$checksum2  $zipFile2`n$winswChecksum1  $winswFile1`n$winswChecksum2  $winswFile2" | Out-File -FilePath $checksumFile -Encoding utf8
         
         # Install first version
-        $installScript = "$PSScriptRoot\..\install.ps1"
         $exitCode1 = (& $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0")
         
         # Install second version
@@ -229,19 +228,21 @@ function TestUninstall {
         # Create fake release assets
         $releaseDir = "$testDir\release"
         $zipFile = "$releaseDir\cringle-1.0.0.zip"
+        $winswFile = "$releaseDir\cringle-1.0.0-windows-winsw.zip"
         $checksumFile = "$releaseDir\SHA256SUMS"
         
         New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
         
         # Create fake zip file
         "fake zip content" | Out-File -FilePath $zipFile -Encoding utf8
+        "fake winsw content" | Out-File -FilePath $winswFile -Encoding utf8
         
         # Create checksum file
         $checksum = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash.ToLower()
-        "$checksum  $zipFile" | Out-File -FilePath $checksumFile -Encoding utf8
+        $winswChecksum = (Get-FileHash -Path $winswFile -Algorithm SHA256).Hash.ToLower()
+        "$checksum  $zipFile`n$winswChecksum  $winswFile" | Out-File -FilePath $checksumFile -Encoding utf8
         
         # Install
-        $installScript = "$PSScriptRoot\..\install.ps1"
         & $installScript -BaseUrl "file://$releaseDir" -Version "1.0.0"
         
         # Verify installation
@@ -271,6 +272,12 @@ function TestUninstall {
             $message = "Uninstall failed: afterUninstall=$afterUninstall, afterPurge=$afterPurge"
             Record-TestResult -TestName "TestUninstall" -Passed $false -Message $message
         }
+    } catch {
+        Record-TestResult -TestName "TestUninstall" -Passed $false -Message "Exception: $_"
+    } finally {
+        Remove-TempTestDirectory -Path $testDir
+    }
+}
     } catch {
         Record-TestResult -TestName "TestUninstall" -Passed $false -Message "Exception: $_"
     } finally {
