@@ -15,6 +15,6 @@ SPEC:
 
 TESTS: add to `ManifestJsonTest`: (a) a blueprint with two tethers, one without and one with `"delivery":"BUFFER"`: parsed policies are `[DROP, BUFFER]`, the encoded text contains `"delivery"` exactly once, and parsing it again gives an equal blueprint; (b) an unknown policy `"RETRY"` is rejected with the message and path described above.
 
-CHECK: `./gradlew :packaging:test --warn --console=plain` must pass (all existing tests too).
+CHECK: `./gradlew :packaging:test --console=plain` must pass (all existing tests too).
 
 OUT OF SCOPE: the engine module, `spec/` documents, any behaviour of the delivery itself.

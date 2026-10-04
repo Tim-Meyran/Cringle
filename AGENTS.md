@@ -87,11 +87,11 @@ Implement exactly the issue's **Scope**. Anything under **Out of scope** belongs
 ### 5. Verify locally
 
 ```bash
-./gradlew spotlessApply --warn --console=plain --no-daemon
-./gradlew build --warn --console=plain --no-daemon
+./gradlew spotlessApply --console=plain --no-daemon
+./gradlew build --console=plain --no-daemon
 ```
 
-Run every Gradle command in this form: `./gradlew <task> --warn --console=plain --no-daemon`. Do not redirect or filter the output (no `> file`, no `| tail`, no `nohup`/background run); read the output of the command itself. Test and build output never goes into a file in the project. `--warn` shows only warnings and errors; a successful build still ends with the line `BUILD SUCCESSFUL in <n>s` (printed by `settings.gradle.kts`), so a build without that line and without an error did not finish.
+Run every Gradle command in this form: `./gradlew <task> --console=plain --no-daemon`. Do not redirect or filter the output (no `> file`, no `| tail`, no `nohup`/background run); read the output of the command itself. Test and build output never goes into a file in the project. A successful build ends with `BUILD SUCCESSFUL`, a failed one with `BUILD FAILED`.
 
 Every acceptance criterion needs a test or a documented manual check. Never disable or weaken tests, style checks or CI to get a green build.
 

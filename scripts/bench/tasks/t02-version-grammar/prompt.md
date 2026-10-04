@@ -15,6 +15,6 @@ SPEC:
 
 TESTS: extend `VersionTest` with: (a) the good and bad examples of the grammar above, in both directions (`versionProblem` and `Version.parse`; good ones round-trip through `toString`); (b) `2147483647.0.0` parses and `2147483648.0.0`, `1.0.0.2147483648`, `99999999999.0.0` are rejected; (c) for a list of valid versions, `x == y` iff `compareTo == 0`, and equal versions have equal hash codes; `Version(1, 0, 0, listOf("01"))` throws `IllegalArgumentException`.
 
-CHECK: `./gradlew :packaging:test --warn --console=plain` must pass (all existing tests too).
+CHECK: `./gradlew :packaging:test --console=plain` must pass (all existing tests too).
 
 OUT OF SCOPE: other modules, the specification files, the repository module.

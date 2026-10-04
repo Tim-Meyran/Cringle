@@ -14,6 +14,6 @@ SPEC:
 
 TESTS: add to `RepositoryTest`: (a) publishing a plugin or project with versions `99999999999.0.0`, `2147483648.0.0`, `1.0.0-01`, `1.0.0-1.02` fails with `RepositoryError.INVALID`, `list()` stays empty and nothing is written to disk; a valid `1.0.0-1` can be published once, a second publish of it gives `ALREADY_EXISTS`; (b) an index that was edited to contain `99999999999.0.0` for one of two packages loads with a single warning that contains that version, the other package is still listed, and the removed version can be published again; (c) an index with a renamed required key still throws `RepositoryIndexException` from the `PackageRepository` constructor.
 
-CHECK: `./gradlew :repository:test --warn --console=plain` must pass (all existing tests too).
+CHECK: `./gradlew :repository:test --console=plain` must pass (all existing tests too).
 
 OUT OF SCOPE: the `packaging` module, protocol files, anything outside the three files above.
