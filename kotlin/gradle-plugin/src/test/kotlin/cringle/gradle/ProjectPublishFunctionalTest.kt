@@ -169,13 +169,6 @@ class ProjectPublishFunctionalTest {
         server.stop()
     }
 
-    /**
-     * A copy of the sample project for the tests that publish it. The blueprint of the sample has a tether from the `out`
-     * port of a block of `acme-orders` to its `in` port, and the plugin sample declares `out` for MESSAGE and `in` for
-     * REQUEST_RESPONSE, so the repository would rightly refuse that pair; the copy has no tether, and its blocks get the
-     * retries their configuration schema requires.
-     */
-
     /** A runner for the copy in [project], without `--stacktrace`, so a failure shows the message a user sees. */
     private fun runner(project: Path, vararg arguments: String): GradleRunner = GradleRunner.create()
         .withProjectDir(project.toFile())
