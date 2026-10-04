@@ -58,7 +58,7 @@ subprojects {
 val localPublishVersion = versionCatalog.findVersion("localPublish").get().requiredVersion
 val localPublishRepo = layout.buildDirectory.dir("cringle-repo")
 val testMavenLocalRepo = layout.buildDirectory.dir("cringle-test-maven-local")
-val localPublishModules = listOf(":contract", ":schema", ":packaging")
+val localPublishModules = listOf(":contract", ":schema", ":packaging", ":testkit")
 
 localPublishModules.forEach { path ->
     val module = project(path)
@@ -100,7 +100,7 @@ pluginRuntimeModules.forEach { path ->
 
 tasks.register("publishToLocalRepo") {
     group = "build"
-    description = "Publishes contract, schema and packaging into build/cringle-repo for the Gradle plugin samples."
+    description = "Publishes contract, schema, packaging and testkit into build/cringle-repo for the Gradle plugin samples."
     dependsOn(localPublishModules.map { "$it:publishAllPublicationsToCringleLocalRepository" })
 }
 
