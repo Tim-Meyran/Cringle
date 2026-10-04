@@ -1,10 +1,8 @@
 {
   "name": "orders",
   "blocks": [
-    { "id": "source", "block": "acme-orders/orders" },
-    { "id": "sink", "block": "acme-orders/orders" }
+    { "id": "source", "block": "acme-orders/orders", "config": { "retries": 3 } },
+    { "id": "sink", "block": "acme-orders/orders", "config": { "retries": 3 } }
   ],
-  "tethers": [
-    { "type": "MESSAGE", "from": { "block": "source", "port": "out" }, "to": { "block": "sink", "port": "in" } }
-  ]
+  "tethers": []
 }

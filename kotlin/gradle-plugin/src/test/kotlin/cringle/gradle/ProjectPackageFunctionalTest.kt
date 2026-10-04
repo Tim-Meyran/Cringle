@@ -48,10 +48,9 @@ class ProjectPackageFunctionalTest {
             listOf("acme-orders/orders", "acme-orders/orders"),
             pkg.blueprints.single().blocks.map { it.block },
         )
-        assertEquals("source", pkg.blueprints.single().tethers.single().from.block)
-        assertEquals("out", pkg.blueprints.single().tethers.single().from.port)
-        assertEquals("sink", pkg.blueprints.single().tethers.single().to.block)
-        assertEquals("in", pkg.blueprints.single().tethers.single().to.port)
+        assertEquals("3", pkg.blueprints.single().blocks.single { it.id == "source" }.config["retries"]?.toString())
+        assertEquals("3", pkg.blueprints.single().blocks.single { it.id == "sink" }.config["retries"]?.toString())
+        assertTrue(pkg.blueprints.single().tethers.isEmpty())
         assertTrue("acme.shop" in pkg.schemas.getValue("schemas/acme.shop.json"), "the schema of the project is missing")
         assertEquals(
             listOf("binaries/acme/shop/readme.txt"),
