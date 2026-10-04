@@ -80,7 +80,7 @@ class ProjectPublishFunctionalTest {
      */
     @Test
     fun publishesTheProjectPackageAndRefusesTheSameVersionASecondTime() {
-        val project = copyProject("publish")
+        val project = SampleProject.copyTo(temp, "publish")
         val server = RepositoryServer(repository, tempDir = upload()).start()
         val address = "127.0.0.1:${server.port}"
         val arguments = arrayOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=$address")
@@ -117,7 +117,7 @@ class ProjectPublishFunctionalTest {
         val address = "127.0.0.1:${server.port}"
         home.createDirectories()
         profile.writeText("""{"server": "$address", "token": "$token"}""")
-        val project = copyProject("profile")
+        val project = SampleProject.copyTo(temp, "profile")
 
         val result = runner(project, "cringlePublish").build()
         assertEquals(TaskOutcome.SUCCESS, result.task(":cringlePublish")?.outcome, result.output)
@@ -130,7 +130,7 @@ class ProjectPublishFunctionalTest {
     /** AC 2: the block `cringle { publish { server = … } }` names the address, as in a plugin build. */
     @Test
     fun theBlockOfTheBuildScriptNamesTheRepository() {
-        val project = copyProject("block")
+        val project = SampleProject.copyTo(temp, "block")
         val address = "127.0.0.1:${closedPort()}"
         SampleProject.replaceInBuildScript(project, "    name = \"acme-shop\"", "    publish { server = \"$address\" }\n    name = \"acme-shop\"")
 
@@ -146,7 +146,7 @@ class ProjectPublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         users.bootstrap()
         val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
-        val project = copyProject("without-token")
+        val project = SampleProject.copyTo(temp, "without-token")
 
         val result = runner(project, "cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${server.port}").buildAndFail()
         assertTrue("CRINGLE_TOKEN" in result.output, "the message has to name the variable:\n${result.output}")
@@ -158,7 +158,7 @@ class ProjectPublishFunctionalTest {
     /** A project whose blueprint is wrong never reaches the repository: the validation stops the build first. */
     @Test
     fun anInvalidProjectIsNotPublished() {
-        val project = copyProject("invalid")
+        val project = SampleProject.copyTo(temp, "invalid")
         SampleProject.replaceInBuildScript(project, """fabric("orders")""", """fabric("nope")""")
         val server = RepositoryServer(repository, tempDir = upload()).start()
 
@@ -175,9 +175,6 @@ class ProjectPublishFunctionalTest {
      * REQUEST_RESPONSE, so the repository would rightly refuse that pair; the copy has no tether, and its blocks get the
      * retries their configuration schema requires.
      */
-    private fun copyProject(name: String): Path {
-        return SampleProject.copyTo(temp, name)
-    }
 
     /** A runner for the copy in [project], without `--stacktrace`, so a failure shows the message a user sees. */
     private fun runner(project: Path, vararg arguments: String): GradleRunner = GradleRunner.create()

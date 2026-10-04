@@ -38,7 +38,7 @@ class PackageValidatesFirstFunctionalTest {
     @Test
     fun aProjectPackageIsValidatedFirstAndNotWrittenWhenInvalid() {
         val project = SampleProject.copyTo(temp, "project-invalid")
-        SampleProject.replaceIn(project, "src/main/cringle/blueprints/orders.json", """"from": { "block": "source"""", """"from": { "block": "ghost"""")
+        SampleProject.replaceIn(project, "src/main/cringle/blueprints/orders.json", """tethers": []""", """tethers": [ { "type": "MESSAGE", "from": { "block": "ghost", "port": "out" }, "to": { "block": "sink", "port": "in" } } ]""")
 
         val result = SampleProject.runner(project, "cringlePackage").buildAndFail()
 

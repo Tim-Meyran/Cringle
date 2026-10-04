@@ -2,12 +2,10 @@
 
 package cringle.gradle
 
-
 import cringle.packaging.FabricConfig
 import cringle.packaging.PackageProblem
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
-import kotlinx.serialization.json.JsonObject
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
