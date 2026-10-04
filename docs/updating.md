@@ -2,6 +2,8 @@
 
 An installed Cringle updates itself with `cringle self-update`; the installers (`installer/install.sh`, `installer/install.ps1`) do not have to be run again. The command is part of the CLI (`docs/cli.md`) and works on Linux (systemd) and Windows (services).
 
+The updater writes below the installation root and restarts the services, so it needs the same rights as the installer: run it as root on Linux (`sudo cringle self-update`) and in an administrative shell on Windows.
+
 ## Checking for an update
 
     cringle self-update --check
