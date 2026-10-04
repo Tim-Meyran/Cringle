@@ -2,6 +2,7 @@
 
 package cringle.engine.tether
 
+import cringle.contract.SerialDriver
 import cringle.contract.TcpDriver
 import cringle.contract.TetherType
 import cringle.packaging.Endpoint
@@ -63,6 +64,11 @@ public class TetherConfig(
      * asked for. `null` means the fabric has no TCP tethers.
      */
     public val tcp: ((blockId: String) -> TcpDriver)? = null,
+    /**
+     * Supplies the serial driver of a block, used by tethers of type [TetherType.SERIAL]; the network closes the
+     * drivers it asked for. `null` means the fabric has no serial tethers.
+     */
+    public val serial: ((blockId: String) -> SerialDriver)? = null,
     /** Dispatcher the network runs its delivery coroutines on. */
     public val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
