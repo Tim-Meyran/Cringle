@@ -2,6 +2,11 @@
 
 package cringle.daemon
 
+import cringle.common.ComponentKind
+import cringle.common.Identity
+import cringle.common.TrustEntry
+import cringle.common.TrustKind
+import cringle.common.TrustStore
 import cringle.common.v1.EngineId
 import cringle.daemon.v1.CreateEngineRequest
 import cringle.daemon.v1.DaemonServiceGrpcKt
@@ -18,11 +23,13 @@ import io.grpc.Status
 import io.grpc.StatusException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import cringle.router.Registry
 import cringle.router.RouterServer
+import cringle.router.RouterTls
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -242,5 +249,95 @@ class DaemonTest {
             check(System.nanoTime() < end2) { "engine e1 was not unregistered" }
             Thread.sleep(50)
         }
+    }
+
+    @Test
+    fun separateRouterAnnouncesOverMtlsAndEngineRegisters(): Unit = runBlocking {
+        stopDaemon()
+
+        // Create a real TLS RouterServer with its own Identity and TrustStore
+        val routerDir = home.resolve("router")
+        val routerIdentity = Identity.loadOrCreate(routerDir, ComponentKind.ROUTER.commonName("router"))
+        val routerTrustStore = TrustStore(routerDir.resolve("trust.json"))
+        val router = RouterServer(
+            routerDir.resolve("registry.json"),
+            refreshInterval = Duration.ofHours(1),
+            tls = RouterTls(routerIdentity, routerTrustStore),
+        ).start()
+
+        try {
+            // The daemon's trust store is loaded once at construction; pre-populate it with the router
+            // so writeEngineTrustFile can find the router by address when the engine starts.
+            val daemonDir = home.resolve("daemon")
+            Files.createDirectories(daemonDir)
+            TrustStore(daemonDir.resolve("trust.json")).add(
+                TrustEntry(
+                    routerIdentity.publicKeyFingerprint,
+                    "router",
+                    TrustKind.ROUTER,
+                    address = "127.0.0.1:${router.port}",
+                ),
+            )
+
+            // Create a Daemon with routerAddress and combined = false
+            daemon = Daemon(home, routerAddress = "127.0.0.1:${router.port}", combined = false)
+
+            // Before starting the daemon, add the daemon's identity to the router's trust store as COMPONENT
+            // so the router trusts the daemon for PrepareEngine.
+            val daemonIdentity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
+            routerTrustStore.add(
+                TrustEntry(daemonIdentity.publicKeyFingerprint, "daemon", TrustKind.COMPONENT),
+            )
+
+            daemon.start()
+            channel = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+            api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
+
+            daemon.supervisor.add("e1", "E1")
+            daemon.supervisor.start("e1")
+
+            // Wait for the engine to register at the router
+            val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+            while (router.registry.engines().none { it.record.id == "e1" }) {
+                check(System.nanoTime() < end) { "engine e1 did not register at the router" }
+                Thread.sleep(50)
+            }
+
+            val view = router.registry.engines().single { it.record.id == "e1" }
+            assertEquals("E1", view.record.name)
+
+            // The fingerprint must match the engine's identity
+            val engineIdentity = Identity.loadOrCreate(
+                home.resolve("engines").resolve("e1"),
+                ComponentKind.ENGINE.commonName("e1"),
+            )
+            assertEquals(engineIdentity.publicKeyFingerprint, view.record.fingerprint)
+
+            daemon.supervisor.stop("e1")
+        } finally {
+            router.stop()
+        }
+    }
+
+    @Test
+    fun writeEngineTrustFileFailsWhenRouterIsNotTrusted(): Unit = runBlocking {
+        stopDaemon()
+
+        // Create a Daemon with routerAddress and combined = false; do NOT add any router entry to the trust store
+        daemon = Daemon(home, routerAddress = "127.0.0.1:1", combined = false).start()
+        channel = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+        api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
+
+        daemon.supervisor.add("e1", "E1")
+
+        val exception = assertThrows<DaemonException> {
+            daemon.supervisor.start("e1")
+        }
+        assertTrue(
+            exception.message?.contains("not trusted") == true || exception.message?.contains("trust store") == true,
+            "expected message to contain 'not trusted' or 'trust store', got: ${exception.message}",
+        )
+
+        assertEquals(ProcessState.STOPPED, daemon.supervisor.get("e1").state)
     }
 }
