@@ -2,9 +2,15 @@
 
 package cringle.daemon
 
+import cringle.common.ComponentKind
+import cringle.common.Identity
+import cringle.common.TrustEntry
+import cringle.common.TrustKind
+import cringle.common.TrustStore
 import cringle.engine.CringleHome
 import cringle.engine.EngineArgs
 import cringle.router.RouterServer
+import cringle.router.RouterTls
 import io.grpc.Server
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import java.net.InetAddress
@@ -30,10 +36,22 @@ public class Daemon(
     startTimeout: java.time.Duration = java.time.Duration.ofSeconds(90),
     stopTimeout: java.time.Duration = java.time.Duration.ofSeconds(30),
 ) : AutoCloseable {
-    /** The router that runs inside this process in combined mode, `null` otherwise. */
-    public val router: RouterServer? = if (combined) RouterServer(home.resolve("router").resolve("registry.json")) else null
+    private val daemonDir = home.resolve("daemon")
+    private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
+    private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
 
-    private val register = EngineRegister(home.resolve("daemon").resolve("engines.json"))
+    /** The router that runs inside this process in combined mode, `null` otherwise. */
+    public val router: RouterServer? = if (combined) {
+        val routerDir = home.resolve("router")
+        val routerIdentity = Identity.loadOrCreate(routerDir, ComponentKind.ROUTER.commonName("router"))
+        val routerTrustStore = TrustStore(routerDir.resolve("trust.json"))
+        RouterServer(
+            routerDir.resolve("registry.json"),
+            tls = RouterTls(routerIdentity, routerTrustStore),
+        )
+    } else null
+
+    private val register = EngineRegister(daemonDir.resolve("engines.json"))
     private val engines = LinkedHashMap<String, RegisteredEngine>()
     private val random = SecureRandom()
 
@@ -68,6 +86,11 @@ public class Daemon(
     /** Starts the router (combined mode) and the gRPC server. */
     public fun start(): Daemon {
         router?.start()
+        if (router != null) {
+            val routerAddr = "127.0.0.1:${router.port}"
+            daemonTrustStore.add(TrustEntry(router.identity!!.publicKeyFingerprint, "router", TrustKind.ROUTER, address = routerAddr))
+            router.tls!!.trustStore.add(TrustEntry(daemonIdentity.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
+        }
         server.start()
         return this
     }
