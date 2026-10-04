@@ -114,7 +114,7 @@ public class TetherNetwork private constructor(
             for (c in connections.values.distinctBy { it.info.id }) {
                 when (c.info.type) {
                     TetherType.TCP -> openTcp(c, s, deliverer)
-                    TetherType.SERIAL -> openSerial(c, s, deliverer)
+                    TetherType.SERIAL -> openSerial(c, deliverer)
                     else -> {}
                 }
             }
@@ -152,7 +152,7 @@ public class TetherNetwork private constructor(
         }
     }
 
-    private suspend fun openSerial(c: Connection, s: CoroutineScope, deliverer: TetherDeliverer) {
+    private suspend fun openSerial(c: Connection, deliverer: TetherDeliverer) {
         val provider = config.serial ?: throw TetherWiringException("tether ${c.info.id}: this fabric has no serial driver")
         val serial = checkNotNull(c.serialConfig)
         val driver = provider(c.info.to.block).also { serialDrivers += it }
