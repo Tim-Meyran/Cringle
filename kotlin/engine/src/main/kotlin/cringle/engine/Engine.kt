@@ -391,8 +391,8 @@ public class Engine private constructor(
          */
         private fun readEnrollmentSecret(env: Map<String, String>): ByteArray? {
             val hex = env["CRINGLE_ENROLLMENT_SECRET"] ?: return null
-            require(Regex("[0-9a-f]{64}").matches(hex)) {
-                "CRINGLE_ENROLLMENT_SECRET must be 64 lowercase hex characters"
+            if (!Regex("[0-9a-f]{64}").matches(hex)) {
+                throw EngineArgsException("CRINGLE_ENROLLMENT_SECRET must be 64 lowercase hex characters")
             }
             return ByteArray(32) { ((hex[it * 2].digitToInt(16) shl 4) or hex[it * 2 + 1].digitToInt(16)).toByte() }
         }

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -130,5 +131,23 @@ class EngineTest {
         engine.stop()
         assertFalse(Files.exists(portFile))
         engine.stop()
+    }
+
+    @Test
+    fun malformedEnrollmentSecretThrowsEngineArgsException() {
+        val malformed = listOf(
+            "abc",                              // wrong length
+            "A".repeat(64),                      // uppercase hex
+            "z".repeat(64),                      // non-hex characters
+        )
+        for (value in malformed) {
+            val ex = assertThrows<EngineArgsException> {
+                Engine.create(args("e1").copy(insecureDevMode = false), mapOf("CRINGLE_ENROLLMENT_SECRET" to value))
+            }
+            assertTrue(
+                ex.message!!.contains("CRINGLE_ENROLLMENT_SECRET") || ex.message!!.contains("64 lowercase hex"),
+                "message should mention the variable or the format, got: ${ex.message}",
+            )
+        }
     }
 }
