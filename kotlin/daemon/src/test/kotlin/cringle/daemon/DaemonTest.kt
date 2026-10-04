@@ -201,13 +201,46 @@ class DaemonTest {
         startDaemon(combined = true)
         api.createEngine(CreateEngineRequest.newBuilder().setEngineId("comb").setName("Combined").build())
         api.startEngine(req("comb"))
-        
+
         // Wait for router to be fully initialized
         awaitRouterInitialization()
-        
+
         // Verify that the engine was started via the daemon API
         assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_RUNNING, api.getEngine(req("comb")).state)
         api.stopEngine(req("comb"))
         assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_STOPPED, api.getEngine(req("comb")).state)
+    }
+
+    @Test
+    fun combinedModeRegistersStartedEnginesAtTheEmbeddedRouterOverMtls(): Unit = runBlocking {
+        stopDaemon()
+        startDaemon(combined = true)
+        daemon.supervisor.add("e1", "Combined")
+        daemon.supervisor.start("e1")
+
+        // Wait for the engine to register at the router
+        val router = daemon.router ?: error("router is null in combined mode")
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while (router.registry.engines().none { it.record.id == "e1" }) {
+            check(System.nanoTime() < end) { "engine e1 did not register at the router" }
+            Thread.sleep(50)
+        }
+
+        val view = router.registry.engines().single { it.record.id == "e1" }
+        assertEquals("Combined", view.record.name)
+
+        // The fingerprint must match the engine's identity
+        val engineIdentity = cringle.common.Identity.loadOrCreate(
+            home.resolve("engines").resolve("e1"),
+            cringle.common.ComponentKind.ENGINE.commonName("e1"),
+        )
+        assertEquals(engineIdentity.publicKeyFingerprint, view.record.fingerprint)
+
+        daemon.supervisor.stop("e1")
+        val end2 = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (router.registry.engines().any { it.record.id == "e1" }) {
+            check(System.nanoTime() < end2) { "engine e1 was not unregistered" }
+            Thread.sleep(50)
+        }
     }
 }

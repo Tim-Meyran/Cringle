@@ -153,10 +153,14 @@ public class EngineSupervisor(
                 }
             }
             
+            // --insecure-dev-mode forces plaintext; only use it when there is no router (plaintext dev mode).
+            // With a router the engine must use mTLS, so the flag is omitted and the engine reads
+            // CRINGLE_ENROLLMENT_SECRET from its environment and trusts the router via <engineDir>/trust.json.
+            val insecureDevMode = if (routerAddress() == null) listOf("--insecure-dev-mode") else emptyList()
             val cmd = listOf(command.java) + command.jvmArgs + listOf(
                 "-cp", command.classPath, command.mainClass,
-                "--id", m.id, "--name", m.name, "--home", home.toString(), "--insecure-dev-mode",
-            )
+                "--id", m.id, "--name", m.name, "--home", home.toString(),
+            ) + insecureDevMode
             val builder = ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()

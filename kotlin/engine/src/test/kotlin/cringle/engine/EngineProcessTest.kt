@@ -96,7 +96,7 @@ class EngineProcessTest {
     @Test
     fun invalidArgumentsExitWithCode2() {
         val java = File(System.getProperty("java.home"), "bin/java").path
-        val p = ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), "cringle.engine.MainKt", "--id", "x")
+        val p = ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), "cringle.engine.MainKt", "--id", "x", "--bogus-flag")
             .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
         assertTrue(p.waitFor(90, TimeUnit.SECONDS))
         assertEquals(2, p.exitValue())
