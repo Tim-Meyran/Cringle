@@ -3,6 +3,9 @@
 package cringle.cli
 
 import com.sun.net.httpserver.HttpServer
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.PrintStream
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
@@ -198,6 +201,42 @@ class SelfUpdateTest {
         assertEquals("1.1.0", currentTarget())
         assertEquals(listOf("stop cringle-daemon.service", "start cringle-daemon.service"), services.calls)
         assertTrue(lines.contains("updated to 1.1.0"))
+    }
+
+    @Test
+    fun theCommandChecksAgainstTheConfiguredBaseUrl() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0")
+        val out = ByteArrayOutputStream()
+        val err = ByteArrayOutputStream()
+        val environment = mapOf("CRINGLE_RELEASE_BASE_URL" to "http://127.0.0.1:${server.address.port}")
+        val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(ByteArray(0)), environment)
+            .run(listOf("self-update", "--check", "--install-root", installRoot.toString()))
+        assertEquals(0, code, err.toString())
+        assertTrue(out.toString().contains("update available"), out.toString())
+    }
+
+    @Test
+    fun theCommandRefusesADirectoryThatIsNotAnInstallation() {
+        val out = ByteArrayOutputStream()
+        val err = ByteArrayOutputStream()
+        val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(ByteArray(0)), emptyMap())
+            .run(listOf("self-update", "--check", "--install-root", temp.resolve("nope").toString()))
+        assertEquals(2, code)
+        assertTrue(err.toString().contains("not an installed distribution"), err.toString())
+    }
+
+    @Test
+    fun theCommandExitsWithOneWhenTheChecksumIsWrong() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0", manifestSha = "b".repeat(64))
+        val out = ByteArrayOutputStream()
+        val err = ByteArrayOutputStream()
+        val environment = mapOf("CRINGLE_RELEASE_BASE_URL" to "http://127.0.0.1:${server.address.port}")
+        val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(ByteArray(0)), environment)
+            .run(listOf("self-update", "--install-root", installRoot.toString()))
+        assertEquals(1, code, err.toString())
+        assertEquals("1.0.0", currentTarget())
     }
 
     // --- helpers ---
