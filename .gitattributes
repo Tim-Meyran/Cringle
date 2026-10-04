@@ -1,0 +1,3 @@
+# the installer scripts run on Linux and must not get CRLF line ends
+*.sh text eol=lf
+*.ps1 text eol=lf

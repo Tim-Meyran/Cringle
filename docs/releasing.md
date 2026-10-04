@@ -11,6 +11,8 @@ A release of Cringle is a GitHub release with one archive per platform, a file w
 | `cringle-<version>-linux.tar.gz` | The distribution with the start scripts for Linux (shell scripts, executable). |
 | `cringle-<version>-windows.zip` | The same distribution with the start scripts for Windows (`.bat`). |
 | `SHA256SUMS` | One line `<sha256>  <file>` per archive, the format `sha256sum -c SHA256SUMS` checks. |
+| `winsw.exe` | [WinSW](https://github.com/winsw/winsw) 2.12.0 (`WinSW.NET461.exe`), the service wrapper of `install.ps1`; it has a line in `SHA256SUMS`, but is not in `manifest.json`. |
+| `install.sh`, `install.ps1` | The installers for Linux and Windows (`installer/` in the repository), see `docs/daemon-service.md`. |
 | `manifest.json` | The version and, for every archive, name, size, SHA-256 and the minimum Java version, see below. |
 
 The archives run on any JVM, so their JARs are the same; they differ only in the start scripts and in the archive format. No JRE is shipped: **a JDK 21 or newer has to be installed**. Nothing is signed; the checksums are what a download is checked with.
@@ -69,6 +71,10 @@ The version of a release is the Git tag without the leading `v`: the tag `v1.2.3
 
    ```bash
    ./gradlew cringleDist -PreleaseVersion=0.6.0
+   curl -fsSL -o build/dist/winsw.exe https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe
+   echo "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f  build/dist/winsw.exe" | sha256sum -c -
+   (cd build/dist && sha256sum winsw.exe >> SHA256SUMS)
+   cp installer/install.sh installer/install.ps1 build/dist/
    ```
 
 3. Create and push the tag manually:
@@ -87,6 +93,9 @@ The version of a release is the Git tag without the leading `v`: the tag `v1.2.3
      build/dist/cringle-0.6.0-windows.zip \
      build/dist/SHA256SUMS \
      build/dist/manifest.json \
+     build/dist/winsw.exe \
+     build/dist/install.sh \
+     build/dist/install.ps1 \
      --generate-notes
    ```
 
@@ -110,4 +119,4 @@ A tag that is not a version (`vnext`) has to fail the first step of the run with
 
 ## What is not covered
 
-Installers for Linux (#58) and Windows (#59), the updater (#60), bundles with their own JRE, signing the artifacts and packages for package managers (apt, winget, Chocolatey). The licenses of the bundled libraries are not collected in one file yet; every JAR carries its own.
+The updater (#60), bundles with their own JRE, signing the artifacts and packages for package managers (apt, winget, Chocolatey). The licenses of the bundled libraries are not collected in one file yet; every JAR carries its own.

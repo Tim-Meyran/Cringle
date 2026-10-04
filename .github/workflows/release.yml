@@ -43,6 +43,15 @@ jobs:
       - name: Build the distribution
         run: ./gradlew cringleDist --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
 
+      # the installers (installer/) are attached to the release; install.ps1 registers the services with WinSW, which is
+      # attached as winsw.exe (pinned version and checksum) and listed in SHA256SUMS like the archives
+      - name: Add the installers and WinSW
+        run: |
+          curl -fsSL -o build/dist/winsw.exe https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe
+          echo "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f  build/dist/winsw.exe" | sha256sum -c -
+          (cd build/dist && sha256sum winsw.exe >> SHA256SUMS)
+          cp installer/install.sh installer/install.ps1 build/dist/
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
