@@ -22,6 +22,6 @@ TESTS: JUnit 5 with `@TempDir`, in `AtomicFileTest`:
 2. A failure thrown in `beforeMove` with an existing target: the exception propagates, the old content stays, the directory contains only the target (no `.tmp` file).
 3. A failure thrown in `beforeMove` without an existing target: the directory stays empty.
 
-CHECK: `./gradlew :management-server:test --tests 'cringle.management.AtomicFileTest' -q --console=plain` must pass.
+CHECK: `./gradlew :management-server:test --tests 'cringle.management.AtomicFileTest' --warn --console=plain` must pass.
 
 OUT OF SCOPE: using the helper anywhere, changing any other file, adding dependencies.

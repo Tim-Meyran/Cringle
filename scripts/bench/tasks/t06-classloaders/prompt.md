@@ -15,6 +15,6 @@ SPEC: public API of `ClassLoaders.kt`:
 
 TESTS: create `ClassLoadingTest` (JUnit 5). At least: (a) `ContractClassLoader` shows the contract, kotlin and JDK classes (identical `Class` objects as in the test) and hides `cringle.packaging.Version` and `org.junit.jupiter.api.Test` (`ClassNotFoundException`); (b) `FabricClassLoaders.loaderFor` returns the same loader for the same provider id and different loaders for different ids; (c) after `close()`, `loaderFor` throws `IllegalStateException` and a second `close()` is fine; (d) `openProviders` with a manifest naming a missing class fails with a `ProviderLoadException` whose message contains `class not found`; (e) two providers with different versions of the same library JAR (build them with `TestJar.fromJavaSources` and `TestPluginBuilder`) see different library versions.
 
-CHECK: `./gradlew :engine:test --tests 'cringle.engine.classloading.*' -q --console=plain` must pass.
+CHECK: `./gradlew :engine:test --tests 'cringle.engine.classloading.*' --warn --console=plain` must pass.
 
 OUT OF SCOPE: wiring the loaders into the engine or fabric start, other modules, documentation.
