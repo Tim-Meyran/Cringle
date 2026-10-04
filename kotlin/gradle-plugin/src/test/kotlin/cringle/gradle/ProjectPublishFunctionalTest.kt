@@ -172,24 +172,11 @@ class ProjectPublishFunctionalTest {
     /**
      * A copy of the sample project for the tests that publish it. The blueprint of the sample has a tether from the `out`
      * port of a block of `acme-orders` to its `in` port, and the plugin sample declares `out` for MESSAGE and `in` for
-     * REQUEST_RESPONSE, so the repository would rightly refuse that pair; the copy has no tether, and its blocks get the 
-etries their configuration schema requires.
+     * REQUEST_RESPONSE, so the repository would rightly refuse that pair; the copy has no tether, and its blocks get the
+     * retries their configuration schema requires.
      */
     private fun copyProject(name: String): Path {
-        val project = SampleProject.copyTo(temp, name)
-        project.resolve("src/main/cringle/blueprints/orders.json").writeText(
-            """
-            {
-              "name": "orders",
-              "blocks": [
-                { "id": "source", "block": "acme-orders/orders", "config": { "retries": 3 } },
-                { "id": "sink", "block": "acme-orders/orders", "config": { "retries": 3 } }
-              ],
-              "tethers": []
-            }
-            """.trimIndent(),
-        )
-        return project
+        return SampleProject.copyTo(temp, name)
     }
 
     /** A runner for the copy in [project], without `--stacktrace`, so a failure shows the message a user sees. */

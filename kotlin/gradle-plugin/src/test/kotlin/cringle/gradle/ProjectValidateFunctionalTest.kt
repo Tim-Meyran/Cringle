@@ -46,8 +46,8 @@ class ProjectValidateFunctionalTest {
         SampleProject.replaceIn(
             project,
             "src/main/cringle/blueprints/orders.json",
-            """"from": { "block": "source"""",
-            """"from": { "block": "ghost"""",
+            "\"tethers\": []",
+            "\"tethers\": [ { \"type\": \"MESSAGE\", \"from\": { \"block\": \"ghost\", \"port\": \"out\" }, \"to\": { \"block\": \"sink\", \"port\": \"in\" } } ]",
         )
 
         val output = validate(project)
