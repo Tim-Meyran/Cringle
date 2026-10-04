@@ -175,6 +175,30 @@ public object PackageValidator {
         } else if (t.port != null) {
             problem("$path.port", "only TCP tethers have a 'port'")
         }
+        if (t.bufferCapacity != null && t.bufferCapacity < 1) {
+            problem("$path.bufferCapacity", "bufferCapacity must be at least 1")
+        }
+        if (t.requestTimeout != null && (t.requestTimeout.isNegative || t.requestTimeout.isZero)) {
+            problem("$path.requestTimeout", "requestTimeout must be positive")
+        }
+        t.retry?.let { r ->
+            if (t.delivery != DeliveryPolicy.BUFFER) problem("$path.retry", "a 'retry' is only allowed with delivery BUFFER")
+            if (r.maxAttempts != null && r.maxAttempts < 1) problem("$path.retry.maxAttempts", "maxAttempts must be at least 1")
+            if (r.backoffMs <= 0) problem("$path.retry.backoffMs", "backoffMs must be positive")
+            if (r.maxBackoffMs <= 0) problem("$path.retry.maxBackoffMs", "maxBackoffMs must be positive")
+        }
+        if (t.type == TetherType.SERIAL) {
+            if (t.serial == null) problem("$path.serial", "a SERIAL tether needs a 'serial' object")
+            if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a SERIAL tether only supports delivery DROP")
+        }
+        if (t.type != TetherType.SERIAL && t.serial != null) {
+            problem("$path.serial", "only SERIAL tethers have a 'serial' object")
+        }
+        t.serial?.let { s ->
+            if (s.baudRate <= 0) problem("$path.serial.baudRate", "baudRate must be positive")
+            if (s.dataBits !in 5..8) problem("$path.serial.dataBits", "dataBits must be between 5 and 8")
+            if (s.stopBits !in 1..2) problem("$path.serial.stopBits", "stopBits must be 1 or 2")
+        }
     }
 
     private fun endpoint(

@@ -3,9 +3,14 @@
 package cringle.packaging
 
 import cringle.contract.IsolationLevel
+import cringle.contract.Parity
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
 import cringle.contract.TetherType
+import cringle.packaging.Backoff
+import cringle.packaging.RetryConfig
+import cringle.packaging.SerialTetherConfig
+import java.time.Duration
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -186,5 +191,30 @@ class ManifestJsonTest {
         val blueprint = ManifestJson.parseBlueprint(text, "f.json")
         assertEquals(9000, blueprint.tethers.single().port)
         assertEquals(blueprint, ManifestJson.parseBlueprint(ManifestJson.encode(blueprint), "f.json"))
+    }
+
+    @Test
+    fun perTetherOptionsRoundTrip() {
+        val text = """{"name":"m","blocks":[],"tethers":[
+            {"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"delivery":"BUFFER","bufferCapacity":8,"requestTimeout":250,"retry":{"maxAttempts":3,"backoffMs":10,"backoff":"EXPONENTIAL","maxBackoffMs":100}},
+            {"type":"SERIAL","from":{"block":"a","port":"p2"},"to":{"block":"b","port":"q2"},"serial":{"device":"/dev/ttyUSB0","baudRate":115200,"dataBits":7,"parity":"EVEN","stopBits":2}}]}"""
+        val blueprint = ManifestJson.parseBlueprint(text, "f.json")
+        val first = blueprint.tethers[0]
+        assertEquals(8, first.bufferCapacity)
+        assertEquals(Duration.ofMillis(250), first.requestTimeout)
+        assertEquals(RetryConfig(3, 10, Backoff.EXPONENTIAL, 100), first.retry)
+        val second = blueprint.tethers[1]
+        assertEquals(SerialTetherConfig("/dev/ttyUSB0", 115200, 7, Parity.EVEN, 2), second.serial)
+        assertEquals(blueprint, ManifestJson.parseBlueprint(ManifestJson.encode(blueprint), "f.json"))
+    }
+
+    @Test
+    fun rejectsBadPerTetherOptions() {
+        fun blueprint(body: String) = bad("""{"name":"m",$body}""") { ManifestJson.parseBlueprint(it, "f.json") }
+        assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"retry":{"backoff":"SIDEWAYS"}}]""").message!!.contains("unknown value 'SIDEWAYS'"))
+        assertTrue(blueprint(""""tethers":[{"type":"SERIAL","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"serial":{"baudRate":9600}}]""").message!!.contains("missing key 'device'"))
+        assertTrue(blueprint(""""tethers":[{"type":"SERIAL","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"serial":{"device":"x","parity":"MAYBE"}}]""").message!!.contains("unknown value 'MAYBE'"))
+        assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"bufferCapacity":"big"}]""").message!!.contains("must be an integer"))
+        assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"retry":{"nope":1}}]""").message!!.contains("unknown key 'nope'"))
     }
 }
