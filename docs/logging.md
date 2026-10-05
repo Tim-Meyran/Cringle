@@ -66,16 +66,33 @@ log.error("operation failed", exception)
 
 ## Initialization
 
-Call `CringleLogging.init(home, component, name)` at the very start of `main()`, before any other work:
+Call `CringleLogging.init(home, component, name)` after parsing the `--home` argument, so the log file lands in the same directory as the rest of the state. For example, in the daemon:
 
 ```kotlin
 import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
+import java.nio.file.Paths
 
 fun main(args: Array<String>) {
-    CringleLogging.init(CringleHome.resolve(null), "daemon", "main")
+    var home: java.nio.file.Path? = null
+    // ... parse --home into `home` ...
+    CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
     // ... rest of main
 }
+```
+
+The engine parses its arguments through `EngineArgs`, so the same pattern looks like:
+
+```kotlin
+val parsed = try {
+    EngineArgs.parse(args.toList())
+} catch (e: EngineArgsException) {
+    System.err.println("error: ${e.message}")
+    System.err.println(EngineArgs.USAGE)
+    exitProcess(2)
+}
+CringleLogging.init(CringleHome.resolve(parsed.home), "engine", "main")
+val engine = Engine.create(parsed)
 ```
 
 The `init` call is idempotent: calling it again with the same arguments replaces the configuration. Calling it with different arguments resets and reconfigures.

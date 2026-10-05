@@ -12,7 +12,6 @@ private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--route
 
 /** Entry point of the daemon process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
-    CringleLogging.init(CringleHome.resolve(null), "daemon", "main")
     var home: java.nio.file.Path? = null
     var port = 0
     var router: String? = null
@@ -42,6 +41,7 @@ public fun main(args: Array<String>) {
     }
     if (router != null && combined) fail("--router and --combined exclude each other")
     if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
+    CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
     System.err.println("WARNING: INSECURE DEV MODE - daemon API is unauthenticated (loopback only)")
     val daemon = Daemon(CringleHome.resolve(home), port, router, combined)
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))

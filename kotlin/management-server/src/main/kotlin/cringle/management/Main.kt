@@ -17,7 +17,6 @@ private const val USAGE =
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
-    CringleLogging.init(CringleHome.resolve(null), "management", "main")
     var home: Path? = null
     var port = 0
     var repository: String? = null
@@ -58,6 +57,7 @@ public fun main(args: Array<String>) {
         i += 1
     }
     if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
+    CringleLogging.init(CringleHome.resolve(home), "management", "main")
     System.err.println("WARNING: INSECURE DEV MODE - the connection is not encrypted (loopback only)")
     val base = CringleHome.resolve(home).resolve("management")
     val core = ManagementCore(ManagementStore(base.resolve("state.json")), repository, token, router)

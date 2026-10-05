@@ -8,9 +8,10 @@ import org.slf4j.LoggerFactory
 
 /** Entry point of an engine process. Exit code 2 signals invalid arguments, 0 a graceful shutdown. */
 public fun main(args: Array<String>) {
-    CringleLogging.init(CringleHome.resolve(null), "engine", "main")
     val engine = try {
-        Engine.create(EngineArgs.parse(args.toList()))
+        val parsed = EngineArgs.parse(args.toList())
+        CringleLogging.init(CringleHome.resolve(parsed.home), "engine", "main")
+        Engine.create(parsed)
     } catch (e: EngineArgsException) {
         System.err.println("error: ${e.message}")
         System.err.println(EngineArgs.USAGE)
