@@ -22,7 +22,7 @@ class WireCodecTest {
             Message(cid, ns, Json.parseToJsonElement("""{"hello":"world"}""")),
             Request(cid, ns, Json.parseToJsonElement("""{"q":42}""")),
             Response(cid, ns, Json.parseToJsonElement("""{"a":42}""")),
-            StreamOpen(cid, ns),
+            StreamOpen(cid),
             StreamItem(cid, ns, Json.parseToJsonElement("""{"i":1}""")),
             StreamClose(cid),
             Bytes(cid, byteArrayOf(1, 2, 3, 4, 5)),
@@ -76,7 +76,7 @@ class WireCodecTest {
     }
 
     @Test
-    fun truncatedFrameRaisesWireFormatException() {
+    fun partialFrameIsBufferedUntilComplete() {
         val frame = Message(0xAAUL, "cringle.demo", Json.parseToJsonElement("""{"x":1}"""))
         val encoded = typedCodec.encode(frame)
         val decoder = typedCodec.newDecoder()
@@ -87,6 +87,102 @@ class WireCodecTest {
         val rest = decoder.feed(encoded.copyOfRange(10, encoded.size))
         assertEquals(1, rest.size)
         assertEquals(frame.frameType, rest[0].frameType)
+    }
+
+    @Test
+    fun truncatedFrameRaisesWireFormatException() {
+        // Build a frame whose declared total length is less than 12 (the fixed header size).
+        // Layout: 4 bytes length prefix (= 5) + 5 bytes of header (version, frameType, partial correlationOrStreamId).
+        val buf = ByteArray(9)
+        writeUInt32BE(buf, 0, 5)
+        buf[4] = 1 // wireFormatVersion
+        buf[5] = 0x01 // frameType = MESSAGE
+        // correlationOrStreamId and schemaNamespaceByteLen are zero (not fully written).
+        val ex = assertThrows<WireFormatException> { typedCodec.newDecoder().feed(buf) }
+        val msg = ex.message ?: ""
+        assertTrue(
+            msg.contains("too short") || msg.contains("12"),
+            "message should mention 'too short' or '12': $msg",
+        )
+    }
+
+    @Test
+    fun streamOpenWithSchemaNamespaceRaisesWireFormatException() {
+        val cid = 0x0123456789ABCDEFUL
+        // Spec-conformant STREAM_OPEN: schemaNamespaceByteLen = 0, no payload.
+        val goodTotalLength = 1 + 1 + 8 + 2
+        val good = ByteArray(4 + goodTotalLength)
+        writeUInt32BE(good, 0, goodTotalLength)
+        good[4] = 1 // wireFormatVersion
+        good[5] = 0x04 // frameType = STREAM_OPEN
+        writeUInt64BE(good, 6, cid)
+        writeUInt16BE(good, 14, 0) // schemaNamespaceByteLen = 0
+        val decoded = typedCodec.newDecoder().feed(good).single()
+        assertEquals(FrameType.STREAM_OPEN, decoded.frameType)
+        assertEquals(cid, decoded.correlationOrStreamId)
+        assertTrue(decoded is StreamOpen, "decoded frame should be StreamOpen")
+
+        // STREAM_OPEN with a non-empty schema namespace must be rejected.
+        val ns = "abcde"
+        val nsBytes = ns.toByteArray(Charsets.UTF_8)
+        val badTotalLength = 1 + 1 + 8 + 2 + nsBytes.size
+        val bad = ByteArray(4 + badTotalLength)
+        writeUInt32BE(bad, 0, badTotalLength)
+        bad[4] = 1
+        bad[5] = 0x04
+        writeUInt64BE(bad, 6, cid)
+        writeUInt16BE(bad, 14, nsBytes.size)
+        nsBytes.copyInto(bad, 16)
+        assertThrows<WireFormatException> { typedCodec.newDecoder().feed(bad) }
+    }
+
+    @Test
+    fun streamCloseWithSchemaNamespaceRaisesWireFormatException() {
+        val cid = 0x0123456789ABCDEFUL
+        // Spec-conformant STREAM_CLOSE: schemaNamespaceByteLen = 0, no payload.
+        val goodTotalLength = 1 + 1 + 8 + 2
+        val good = ByteArray(4 + goodTotalLength)
+        writeUInt32BE(good, 0, goodTotalLength)
+        good[4] = 1
+        good[5] = 0x06 // frameType = STREAM_CLOSE
+        writeUInt64BE(good, 6, cid)
+        writeUInt16BE(good, 14, 0)
+        val decoded = typedCodec.newDecoder().feed(good).single()
+        assertEquals(FrameType.STREAM_CLOSE, decoded.frameType)
+        assertEquals(cid, decoded.correlationOrStreamId)
+        assertTrue(decoded is StreamClose, "decoded frame should be StreamClose")
+
+        // STREAM_CLOSE with a non-empty schema namespace must be rejected.
+        val ns = "abcde"
+        val nsBytes = ns.toByteArray(Charsets.UTF_8)
+        val badTotalLength = 1 + 1 + 8 + 2 + nsBytes.size
+        val bad = ByteArray(4 + badTotalLength)
+        writeUInt32BE(bad, 0, badTotalLength)
+        bad[4] = 1
+        bad[5] = 0x06
+        writeUInt64BE(bad, 6, cid)
+        writeUInt16BE(bad, 14, nsBytes.size)
+        nsBytes.copyInto(bad, 16)
+        assertThrows<WireFormatException> { typedCodec.newDecoder().feed(bad) }
+    }
+
+    @Test
+    fun errorFrameWithWrongNamespaceRaisesWireFormatException() {
+        val ns = "wrong.ns"
+        val nsBytes = ns.toByteArray(Charsets.UTF_8)
+        val payload = JsonPayloadCodec().encodeTyped(Json.parseToJsonElement("""{"code":"X","message":"y"}"""))
+        val totalLength = 1 + 1 + 8 + 2 + nsBytes.size + payload.size
+        val buf = ByteArray(4 + totalLength)
+        writeUInt32BE(buf, 0, totalLength)
+        buf[4] = 1 // wireFormatVersion
+        buf[5] = 0x08 // frameType = ERROR
+        writeUInt64BE(buf, 6, 0UL)
+        writeUInt16BE(buf, 14, nsBytes.size)
+        nsBytes.copyInto(buf, 16)
+        payload.copyInto(buf, 16 + nsBytes.size)
+        val ex = assertThrows<WireFormatException> { typedCodec.newDecoder().feed(buf) }
+        val msg = ex.message ?: ""
+        assertTrue(msg.contains(ns), "message should contain the wrong namespace '$ns': $msg")
     }
 
     @Test
@@ -161,5 +257,23 @@ class WireCodecTest {
         // TYPED decoder rejects BYTES frame
         val bytesEncoded = bytesCodec.encode(Bytes(0UL, byteArrayOf(1, 2, 3)))
         assertThrows<WireFormatException> { typedCodec.newDecoder().feed(bytesEncoded) }
+    }
+}
+
+private fun writeUInt32BE(buffer: ByteArray, offset: Int, value: Int) {
+    buffer[offset] = ((value shr 24) and 0xFF).toByte()
+    buffer[offset + 1] = ((value shr 16) and 0xFF).toByte()
+    buffer[offset + 2] = ((value shr 8) and 0xFF).toByte()
+    buffer[offset + 3] = (value and 0xFF).toByte()
+}
+
+private fun writeUInt16BE(buffer: ByteArray, offset: Int, value: Int) {
+    buffer[offset] = ((value shr 8) and 0xFF).toByte()
+    buffer[offset + 1] = (value and 0xFF).toByte()
+}
+
+private fun writeUInt64BE(buffer: ByteArray, offset: Int, value: ULong) {
+    for (i in 0 until 8) {
+        buffer[offset + i] = ((value shr ((7 - i) * 8)) and 0xFFu).toByte()
     }
 }

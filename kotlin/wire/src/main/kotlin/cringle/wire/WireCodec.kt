@@ -110,6 +110,23 @@ public class WireCodec(
             }
         }
 
+        // Schema namespace presence checks per spec §4/§5: STREAM_OPEN and STREAM_CLOSE carry no schema namespace.
+        if ((frameType == FrameType.STREAM_OPEN || frameType == FrameType.STREAM_CLOSE) && schemaNamespaceByteLen != 0) {
+            throw WireFormatException(
+                "STREAM_OPEN/STREAM_CLOSE must have absent schema namespace, got '$schemaNamespace'",
+            )
+        }
+
+        // Schema namespace check per spec §7: ERROR frame's schema namespace is always "cringle.std".
+        if (frameType == FrameType.ERROR) {
+            val expected = "cringle.std"
+            if (schemaNamespaceByteLen != expected.length || schemaNamespace != expected) {
+                throw WireFormatException(
+                    "ERROR frame schema namespace must be '$expected', got '$schemaNamespace'",
+                )
+            }
+        }
+
         val payloadStart = start + 12 + schemaNamespaceByteLen
         val payload = buffer.copyOfRange(payloadStart, end)
 
@@ -117,7 +134,7 @@ public class WireCodec(
             FrameType.MESSAGE -> Message(correlationOrStreamId, schemaNamespace!!, payloadCodec.decodeTyped(payload))
             FrameType.REQUEST -> Request(correlationOrStreamId, schemaNamespace!!, payloadCodec.decodeTyped(payload))
             FrameType.RESPONSE -> Response(correlationOrStreamId, schemaNamespace!!, payloadCodec.decodeTyped(payload))
-            FrameType.STREAM_OPEN -> StreamOpen(correlationOrStreamId, schemaNamespace!!)
+            FrameType.STREAM_OPEN -> StreamOpen(correlationOrStreamId)
             FrameType.STREAM_ITEM -> StreamItem(correlationOrStreamId, schemaNamespace!!, payloadCodec.decodeTyped(payload))
             FrameType.STREAM_CLOSE -> StreamClose(correlationOrStreamId)
             FrameType.BYTES -> Bytes(correlationOrStreamId, payload)

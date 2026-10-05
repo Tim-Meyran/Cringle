@@ -52,10 +52,9 @@ public class Response(
 /** Opens a stream. */
 public class StreamOpen(
     override val correlationOrStreamId: ULong,
-    override val schemaNamespace: String,
 ) : WireFrame {
-    init { require(schemaNamespace.isNotEmpty()) { "StreamOpen schemaNamespace must not be empty" } }
     override val frameType: FrameType get() = FrameType.STREAM_OPEN
+    override val schemaNamespace: String? get() = null
 }
 
 /** A stream item. */
