@@ -46,6 +46,7 @@ An issue is ready when all of this is true:
 | Language-independent specs | `spec/` |
 | Kotlin implementation | `kotlin/` |
 | Documentation index | `docs/README.md` |
+| How to run Gradle and read its result (read it before every `./gradlew` call) | `.claude/skills/gradle/SKILL.md` |
 
 The architecture and decision documents are in German, issues and code are in English.
 
