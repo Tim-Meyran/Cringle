@@ -30,7 +30,7 @@ That writes the group `cringle` at the version `0.0.0-SNAPSHOT` (the one definit
 | `cringle:router:0.0.0-SNAPSHOT` | The router module, which `repository` needs at runtime for `AuthInterceptor`. |
 | `cringle:testkit:0.0.0-SNAPSHOT` | The testkit module, which provides `BlockTestHarness` for testing blocks without an engine. |
 
-The last three are there because the plugin publishes with `RepositoryClient` (see “Publishing a plugin” below). The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
+The three before the last (`common`, `router`, `repository`) are there because the plugin publishes with `RepositoryClient` (see “Publishing a plugin” below); `testkit` is there because the sample plugin’s test depends on it. The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
 
 ```bash
 ./gradlew publishToMavenLocal -Dmaven.repo.local=/tmp/cringle-maven-local
