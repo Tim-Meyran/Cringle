@@ -286,7 +286,6 @@ class PackageCacheTest {
     }
 
     @Test
-    @Disabled("#92: between ensure and recordUsage the cleanup can still remove the version; enable when #92 is done")
     fun aVersionIsNotRemovedBetweenEnsureAndRecordUsage(): Unit = runBlocking {
         Files.createDirectories(CringleHome.engineDir(home, "e1"))
         val a = artifact("busy")
@@ -311,12 +310,10 @@ class PackageCacheTest {
             val cache = PackageCache(home, onWarning = {})
             // ensure throws if it meets a directory without marker (a half-deleted version): it must never happen
             repeat(150) { i ->
-                cache.ensure(a, f)
-                cache.recordUsage("e1", "fab$i", listOf(a))
+                cache.ensureForDeploy("e1", "fab$i", listOf(a), f)
                 cache.clearUsage("e1", "fab$i")
             }
-            cache.ensure(a, f)
-            cache.recordUsage("e1", "last", listOf(a))
+            cache.ensureForDeploy("e1", "last", listOf(a), f)
         } finally {
             done.set(true)
             cleaner.join()
@@ -328,6 +325,20 @@ class PackageCacheTest {
         assertTrue(Files.exists(versionDir("busy").resolve(PackageCache.MARKER)))
         // what the cleanup removed while it ran left nothing that is older work in progress
         assertEquals(emptyList<String>(), leftovers().filter { it.contains(".part") })
+    }
+
+    @Test
+    fun aFailedDeployLeavesNoUsageRecordBehind(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val corrupt = CountingFetcher({ zip("acme-core", "1.0.0") + byteArrayOf(0) })
+        val e = assertThrows<PackageCacheException> {
+            PackageCache(home).ensureForDeploy("e1", "shop", listOf(artifact("acme-core")), corrupt)
+        }
+        assertTrue(e.hashMismatch)
+        // the failed deploy cleared the usage record it had just written
+        assertFalse(Files.exists(home.resolve("cache/usage/e1/shop")))
+        // the install failed, so nothing was installed
+        assertFalse(Files.exists(home.resolve("plugins/acme-core/1.0.0")))
     }
     @Test
     fun oldDownloadsAndUnfinishedInstallsAreRemovedAndNewOnesStay(): Unit = runBlocking {

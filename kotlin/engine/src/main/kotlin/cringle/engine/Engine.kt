@@ -208,16 +208,16 @@ public class Engine private constructor(
                 val source = request.source
                 val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() })
                 try {
-                    for (artifact in source.artifactsList.map(::artifactOf)) cache.ensure(artifact, fetcher)
+                    cache.ensureForDeploy(config.id, request.fabricId.value, artifacts, fetcher)
                 } catch (e: PackageCacheException) {
                     throw StatusException((if (e.hashMismatch) Status.DATA_LOSS else Status.FAILED_PRECONDITION).withDescription(e.message))
                 } finally {
                     fetcher.close()
                 }
+            } else {
+                cache.recordUsage(config.id, request.fabricId.value, artifacts)
             }
-            val info = deployLocal(request)
-            cache.recordUsage(config.id, request.fabricId.value, artifacts)
-            return info
+            return deployLocal(request)
         }
 
         private fun artifactOf(a: cringle.engine.v1.PackageArtifact) = Artifact(
