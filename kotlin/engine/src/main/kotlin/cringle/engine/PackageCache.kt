@@ -219,6 +219,33 @@ public class PackageCache internal constructor(
         artifacts.forEach { touch(target(it)) }
     }
 
+    /**
+     * Records that [fabric] of [engine] uses [artifacts] and makes sure each one is installed. The usage is recorded
+     * before the installation, so a concurrent cleanup cannot remove a freshly installed version between the install
+     * and the record: without this ordering, a version that was just installed would not yet be "in use" and could be
+     * swept away by another Engine's [cleanupReport] before this deploy records its usage. If any install fails, the
+     * usage record is cleared so the deploy leaves nothing behind.
+     */
+    public suspend fun ensureForDeploy(
+        engine: String,
+        fabric: String,
+        artifacts: List<Artifact>,
+        fetcher: PackageFetcher,
+    ) {
+        recordUsage(engine, fabric, artifacts)
+        try {
+            for (artifact in artifacts) {
+                ensure(artifact, fetcher)
+            }
+        } catch (e: PackageCacheException) {
+            clearUsage(engine, fabric)
+            throw e
+        } catch (e: Throwable) {
+            clearUsage(engine, fabric)
+            throw e
+        }
+    }
+
     /** Remembers that [fabric] of [engine] is gone. The versions it used count as unused from now on. */
     public fun clearUsage(engine: String, fabric: String) {
         val file = usageFile(engine, fabric)
