@@ -40,7 +40,7 @@ Rules for `--tests`: it comes **after** the test task of **one** module (`:engin
 
 - `-x test`, `-x spotlessCheck`, `-x <anything>`: a skipped check is not a green build.
 - Deleting, `@Disabled` or loosening a test or a style rule (AGENTS.md: never).
-- `--offline` unless you know that everything is in the cache; `--rerun-tasks` (it reruns everything including the publishing tasks, slow; use `--rerun` on the one task); `-Dtest.single` (gone); `gradle` instead of `./gradlew`.
+- `--offline` to get past a `Could not resolve` error (see the table: it is only for a missing network when this machine built the project before); `--rerun-tasks` (it reruns everything including the publishing tasks, slow; use `--rerun` on the one task); `-Dtest.single` (gone); `gradle` instead of `./gradlew`.
 
 ## Reading the result
 
@@ -64,7 +64,7 @@ Rules for `--tests`: it comes **after** the test task of **one** module (`:engin
 | `Task 'x' not found in project ':engine'` | the task or the module name is wrong; `./gradlew :engine:tasks --all --console=plain --no-daemon` lists the tasks |
 | `Execution failed for task ':spotlessKotlinCheck'` ... `format violations` | run `./gradlew spotlessApply` and commit the changes. If whole files change, the line endings differ (spotless uses the native ones of the OS you build on): stop, do not commit that, and report it |
 | `Unsupported class file major version` or `Toolchain ... cannot be found` | the JDK is not 21; use `JAVA_HOME` of a JDK 21 (`java -version`) |
-| `Could not resolve ...` | no network or a wrong version in `libs.versions.toml`; do not add repositories to get around it |
+| `Could not resolve ...` | a wrong version in `libs.versions.toml`, or no network. With no network, and only if this machine built the project before (the dependencies are in the Gradle cache), `--offline` works; with a network it is a real error, so do not hide it with `--offline` and do not add repositories to get around it |
 | `WARNING: Unsupported Kotlin plugin version ... embedded-kotlin` | known, comes from the Gradle plugin module; ignore it, do not "fix" it in an unrelated pull request |
 | `AccessDeniedException` on a temp file in a test (Windows) | a known flake of the cache tests on Windows; run the class once more with `--rerun`; if it passes, say so in the pull request, if it fails again, it is a real problem |
 | the call hangs or ends without `BUILD ...` | it was cut off by the time limit: run it again with a limit of 10 minutes |
