@@ -69,6 +69,7 @@ internal class Env(
     val insecure: Boolean = true,
     val insecureOption: Boolean = false,
     val warn: (String) -> Unit = {},
+    val environment: Map<String, String> = emptyMap(),
 ) {
     val m get() = connection().management
     val users get() = connection().users
@@ -524,5 +525,32 @@ internal val COMMANDS: List<Command> = listOf(
     Command(listOf("token", "revoke"), "<token-id>", "Revoke a token", minArgs = 1) { env, a ->
         env.users.revokeToken(RevokeTokenRequest.newBuilder().setTokenId(a.positional[0]).build())
         Output.Message("revoked token ${a.positional[0]}")
+    },
+
+    // --- installation ---
+    Command(
+        listOf("self-update"), "[--version <v>]", "Update this installation to a newer release (or --check for the available version)",
+        listOf(
+            flag("check", "only show the current and the latest version"),
+            opt("version", "update to this version instead of the latest", "VERSION"),
+            flag("allow-major", "allow an update to a different major version"),
+            opt("timeout", "seconds to wait for the services after the switch (default 30)", "SECONDS"),
+            opt("install-root", "the installation root (default: the parent of cringle.home)", "DIR"),
+        ),
+        needsServer = false,
+    ) { env, a ->
+        val root = a.option("install-root")?.let { Paths.get(it).toAbsolutePath().normalize() }
+            ?: System.getProperty(Distribution.HOME_PROPERTY)?.takeIf { it.isNotBlank() }?.let { Paths.get(it).toRealPath().parent }
+            ?: throw UsageException("not an installed distribution: cringle.home is not set; use --install-root <dir>")
+        if (!Files.exists(root.resolve("current"))) throw UsageException("$root is not an installed distribution (no 'current' link)")
+        val platform = Platform.current()
+        val base = env.environment["CRINGLE_RELEASE_BASE_URL"]?.takeIf { it.isNotBlank() }
+        val source = HttpReleaseSource(base ?: "https://github.com/Tim-Meyran/Cringle/releases/download", base == null)
+        val services = if (platform == Platform.WINDOWS) WindowsServiceController() else SystemdServiceController()
+        val links = if (platform == Platform.WINDOWS) JunctionLinkSwitcher() else SymlinkLinkSwitcher()
+        val timeout = Duration.ofSeconds(a.long("timeout") ?: 30)
+        val update = SelfUpdate(root, Distribution.version(), platform, source, services, links, timeout, a.flag("allow-major"), Duration.ofSeconds(3))
+        val lines = if (a.flag("check")) update.check() else update.update(a.option("version"))
+        Output.Lines(lines, lines.map { mapOf("line" to it) })
     },
 )
