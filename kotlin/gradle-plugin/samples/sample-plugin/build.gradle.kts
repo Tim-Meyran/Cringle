@@ -46,3 +46,7 @@ cringle {
         port("out", PortDirection.OUT, "acme.orders/Order", TetherType.MESSAGE)
     }
 }
+
+tasks.withType<Test> {
+    useJUnitPlatform()
+}

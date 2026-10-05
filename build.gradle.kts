@@ -58,7 +58,7 @@ subprojects {
 val localPublishVersion = versionCatalog.findVersion("localPublish").get().requiredVersion
 val localPublishRepo = layout.buildDirectory.dir("cringle-repo")
 val testMavenLocalRepo = layout.buildDirectory.dir("cringle-test-maven-local")
-val localPublishModules = listOf(":contract", ":schema", ":packaging", ":testkit")
+val localPublishModules = listOf(":contract", ":schema", ":packaging", ":common", ":testkit")
 
 localPublishModules.forEach { path ->
     val module = project(path)
@@ -75,11 +75,12 @@ localPublishModules.forEach { path ->
 }
 
 // The task `cringlePublish` uploads with `RepositoryClient` (#51), so a project outside this build that applies the
-// plugin needs the repository module and the two modules it needs at runtime (`:common` for the gRPC types, `:router`
-// for `AuthInterceptor`). They are no sample dependency, so they go into the test folder and into Maven Local (the
-// standard `publishToMavenLocal` of every module that applies `maven-publish`) and not into `build/cringle-repo`, which
-// stays the way it is: contract, schema and packaging, and nothing else.
-val pluginRuntimeModules = listOf(":common", ":router", ":repository")
+// plugin needs the repository module and the module it needs at runtime (`:router` for `AuthInterceptor`). They are
+// no sample dependency, so they go into the test folder and into Maven Local (the standard `publishToMavenLocal` of
+// every module that applies `maven-publish`) and not into `build/cringle-repo`, which stays the way it is: contract,
+// schema and packaging, and nothing else. `:common` is in `localPublishModules` because the samples need its gRPC
+// types, so it goes into both repos.
+val pluginRuntimeModules = listOf(":router", ":repository")
 
 pluginRuntimeModules.forEach { path ->
     val module = project(path)
@@ -100,7 +101,7 @@ pluginRuntimeModules.forEach { path ->
 
 tasks.register("publishToLocalRepo") {
     group = "build"
-    description = "Publishes contract, schema, packaging and testkit into build/cringle-repo for the Gradle plugin samples."
+    description = "Publishes contract, schema, packaging, common and testkit into build/cringle-repo for the Gradle plugin samples."
     dependsOn(localPublishModules.map { "$it:publishAllPublicationsToCringleLocalRepository" })
 }
 
