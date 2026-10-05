@@ -19,9 +19,11 @@ dependencies {
     api(libs.grpc.kotlin.stub)
     api(libs.kotlinx.coroutines.core)
     api(libs.grpc.netty.shaded)
+    api(libs.slf4j.api)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle.prov)
     implementation(libs.bouncycastle.pkix)
+    implementation(libs.logback.classic)
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
