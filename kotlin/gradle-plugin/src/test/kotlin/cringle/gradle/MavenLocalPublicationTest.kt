@@ -14,10 +14,10 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 
 /**
- * AC 1: `publishToTestMavenLocal` writes the plugin, the markers of `cringle.plugin` and `cringle.project` and the six
+ * AC 1: `publishToTestMavenLocal` writes the plugin, the markers of `cringle.plugin` and `cringle.project` and the seven
  * libraries the plugin needs — contract, schema and packaging for a package, common, router and repository for
- * `cringlePublish` — and nothing else into `build/cringle-test-maven-local`, a folder with the layout of Maven Local.
- * The test reads that folder; it never looks at `~/.m2`, which no test of this build touches.
+ * `cringlePublish`, and testkit — and nothing else into `build/cringle-test-maven-local`, a folder with the layout of
+ * Maven Local. The test reads that folder; it never looks at `~/.m2`, which no test of this build touches.
  *
  * The publications of a snapshot repository carry a timestamp in the name of the files, so the tests look for
  * `<artifactId>-*<extension>` instead of the plain name that `./gradlew publishToMavenLocal` writes. The version
@@ -89,9 +89,9 @@ class MavenLocalPublicationTest {
     @Test
     fun theFolderHoldsNothingButThePublicationsOfThisBuild() {
         assertEquals(
-            listOf("common", "contract", "gradle-plugin", "packaging", "plugin", "project", "repository", "router", "schema"),
+            listOf("common", "contract", "gradle-plugin", "packaging", "plugin", "project", "repository", "router", "schema", "testkit"),
             childDirectories(mavenLocal.resolve("cringle")),
-            "build/cringle-test-maven-local must hold the plugin, the two markers and the six libraries only",
+            "build/cringle-test-maven-local must hold the plugin, the two markers and the seven libraries only",
         )
     }
 

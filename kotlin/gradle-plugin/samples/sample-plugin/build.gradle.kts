@@ -30,6 +30,7 @@ dependencies {
     // The parent classloader provides the contract module at runtime, so it is compiled against but never packaged.
     compileOnly("cringle:contract:" + providers.gradleProperty("cringleVersion").get())
     implementation(files(supportJar))
+    testImplementation("cringle:testkit:" + providers.gradleProperty("cringleVersion").get())
 }
 
 cringle {
@@ -44,4 +45,8 @@ cringle {
         port("in", PortDirection.IN, "acme.orders/Order", TetherType.REQUEST_RESPONSE)
         port("out", PortDirection.OUT, "acme.orders/Order", TetherType.MESSAGE)
     }
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }

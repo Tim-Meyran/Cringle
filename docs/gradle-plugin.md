@@ -28,8 +28,9 @@ That writes the group `cringle` at the version `0.0.0-SNAPSHOT` (the one definit
 | `cringle:repository:0.0.0-SNAPSHOT` | The repository module, which the plugin uses to publish a package (`cringlePublish`). |
 | `cringle:common:0.0.0-SNAPSHOT` | The gRPC types, a dependency of `repository`. |
 | `cringle:router:0.0.0-SNAPSHOT` | The router module, which `repository` needs at runtime for `AuthInterceptor`. |
+| `cringle:testkit:0.0.0-SNAPSHOT` | The testkit module, which provides `BlockTestHarness` for testing blocks without an engine. |
 
-The last three are there because the plugin publishes with `RepositoryClient` (see “Publishing a plugin” below). The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
+The three before the last (`common`, `router`, `repository`) are there because the plugin publishes with `RepositoryClient` (see “Publishing a plugin” below); `testkit` is there because the sample plugin’s test depends on it. The version is a snapshot on purpose: a local publication is overwritten by the next one, and a project that pins it gets whatever the last build of this repository wrote. To look at the result without touching `~/.m2`, point the publication at a folder of your own:
 
 ```bash
 ./gradlew publishToMavenLocal -Dmaven.repo.local=/tmp/cringle-maven-local
@@ -83,6 +84,7 @@ repositories {
 dependencies {
     // The runtime provides the contract module, so a plugin only compiles against it.
     compileOnly("cringle:contract:0.0.0-SNAPSHOT")
+    testImplementation("cringle:testkit:0.0.0-SNAPSHOT")
 }
 
 cringle {
@@ -99,6 +101,8 @@ cringle {
     }
 }
 ```
+
+The testkit lets a plugin author test blocks with `BlockTestHarness` without running an engine. The sample at `samples/sample-plugin` shows this with `OrdersBlockTest`, which exercises the `orders` block above against the harness and asserts on its inputs and outputs.
 
 `./gradlew cringlePackage` writes `build/distributions/acme-orders-1.2.0.cringle`; `cringleValidate` checks the same package against the contract without writing it. The package is checked against the plugins it depends on, as the repository does when it is published: a block that uses a schema of a dependency passes, a schema that the dependency does not have fails the build. The build asks the repository for those plugins, with the address and the token of `cringlePublish` (see "Publishing a plugin"); it only reads them and locks or resolves nothing, that is the deploy's job. Without a repository, because none is configured or because it is not reachable or does not answer, `cringleValidate` goes on with a warning and checks what it can: a reference to a schema outside the namespaces of the plugin itself is then taken as coming from its dependencies and checked when the package is published, while a reference into the plugin's own namespace that does not resolve still fails, and so does any reference outside the plugin in a plugin that declares no dependency (the message names the namespace and how to declare the dependency). `cringlePackage` runs `cringleValidate` first. Everything the `cringle { }` block contributes has to exist in the project: the provider and driver classes, a schema document per schema, and whatever goes into `lib/` and `binaries/`. The example project has all of it and is the shortest path from nothing to a working package.
 
