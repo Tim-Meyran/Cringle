@@ -96,6 +96,7 @@ public class Cli(
                 insecure = insecure,
                 insecureOption = insecureOption,
                 warn = { err.println("warning: $it") },
+                environment = environment,
             )
             try {
                 val output = runBlocking { command.run(env, parsed) }
