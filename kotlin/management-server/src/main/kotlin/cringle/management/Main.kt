@@ -2,12 +2,14 @@
 
 package cringle.management
 
+import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.system.exitProcess
+import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
@@ -15,6 +17,7 @@ private const val USAGE =
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
+    CringleLogging.init(CringleHome.resolve(null), "management", "main")
     var home: Path? = null
     var port = 0
     var repository: String? = null
@@ -76,6 +79,7 @@ public fun main(args: Array<String>) {
     val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) })
     Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
     server.start()
+    LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")
     System.out.flush()
     Thread.currentThread().join()

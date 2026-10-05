@@ -2,14 +2,17 @@
 
 package cringle.daemon
 
+import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import java.nio.file.Paths
 import kotlin.system.exitProcess
+import org.slf4j.LoggerFactory
 
 private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined] --insecure-dev-mode"
 
 /** Entry point of the daemon process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
+    CringleLogging.init(CringleHome.resolve(null), "daemon", "main")
     var home: java.nio.file.Path? = null
     var port = 0
     var router: String? = null
@@ -43,6 +46,7 @@ public fun main(args: Array<String>) {
     val daemon = Daemon(CringleHome.resolve(home), port, router, combined)
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))
     daemon.start()
+    LoggerFactory.getLogger("cringle.daemon").info("daemon started on port {}", daemon.port)
     println("daemon-port=${daemon.port}")
     System.out.flush()
     Thread.currentThread().join()
