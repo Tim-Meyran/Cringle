@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+
 package cringle.wire
 
 import kotlinx.serialization.json.Json
