@@ -9,6 +9,8 @@ protobuf-plugin = "0.9.4"
 grpc = "1.70.0"
 grpc-kotlin = "1.4.1"
 bouncycastle = "1.80"
+slf4j = "2.0.16"
+logback = "1.5.12"
 
 # Version under which contract, schema, packaging and the Cringle Gradle plugin itself are published locally: into
 # build/cringle-repo, which the samples of the Gradle plugin use, and into Maven Local, which projects outside this
@@ -33,6 +35,10 @@ grpc-kotlin-stub = { module = "io.grpc:grpc-kotlin-stub", version.ref = "grpc-ko
 # Cryptography (X.509 generation)
 bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
+
+# Logging (SLF4J API + Logback Classic)
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
