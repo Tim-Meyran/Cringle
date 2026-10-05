@@ -4,6 +4,7 @@
 |---|---|
 | [Architecture.md](Architecture.md) | Maßgebliche Architektur von Cringle: Plattform-Spezifikation (Teil A), Kotlin-Engine (Teil B), Roadmap mit Meilensteinen M0–M9 (Teil C). Deutsch. |
 | [decisions.md](decisions.md) | Verbindliche Entscheidungen, die während der Entwicklung getroffen wurden. Sie haben bei Widersprüchen Vorrang vor den Vorschlägen (`[Zu bestätigen]`) in der Architektur. |
+| [logging.md](logging.md) | Einheitliches Logging der Kotlin-Prozesse (Daemon, Engine, Management-Server). |
 
 Nicht in `docs/`:
 

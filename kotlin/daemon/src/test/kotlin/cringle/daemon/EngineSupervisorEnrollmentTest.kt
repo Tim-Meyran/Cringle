@@ -63,6 +63,36 @@ class EngineSupervisorEnrollmentTest {
     }
 
     @Test
+    fun theSecretIsNotInLogsOrStateFile() {
+        supervisor().use {
+            it.add("e1", "E1")
+            it.start("e1")
+            val secret = probe("e1", "secret")
+            assertTrue(Regex("[0-9a-f]{64}").matches(secret), secret)
+
+            val logs = home.resolve("daemon").resolve("logs")
+            val outLog = logs.resolve("e1.out.log")
+            val errLog = logs.resolve("e1.err.log")
+            if (Files.exists(outLog)) {
+                val content = Files.readString(outLog)
+                assertFalse(content.contains(secret), "secret found in e1.out.log")
+            }
+            if (Files.exists(errLog)) {
+                val content = Files.readString(errLog)
+                assertFalse(content.contains(secret), "secret found in e1.err.log")
+            }
+
+            val stateFile = home.resolve("daemon").resolve("engines.json")
+            if (Files.exists(stateFile)) {
+                val content = Files.readString(stateFile)
+                assertFalse(content.contains(secret), "secret found in engines.json")
+            }
+
+            assertFalse(probe("e1", "args").contains(secret), "secret found in args")
+        }
+    }
+
+    @Test
     fun everyStartUsesANewSecret() {
         supervisor().use {
             it.add("e1", "E1")

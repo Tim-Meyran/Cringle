@@ -36,10 +36,18 @@ class EngineTest {
     }
 
     @Test
-    fun refusesToStartWithoutInsecureDevMode() {
-        val e = assertThrows<EngineArgsException> { Engine.create(args("e1").copy(insecureDevMode = false)) }
-        assertTrue(e.message!!.contains("--insecure-dev-mode"))
-        assertFalse(Files.exists(home.resolve("engines")))
+    fun engineStartsWithoutInsecureDevModeAndUsesMtlsForTheRouterChannel() {
+        // Without --insecure-dev-mode the engine starts and the management server is still reachable (plaintext, loopback only).
+        // The router channel uses mTLS; that is verified by the mTLS-specific tests.
+        val engine = Engine.create(args("e1", "Edge").copy(insecureDevMode = false), emptyMap()).start()
+        try {
+            val status = withClient(engine) { it.getStatus(GetStatusRequest.getDefaultInstance()) }
+            assertEquals("e1", status.engineId.value)
+            assertEquals("Edge", status.name)
+            assertEquals(EngineState.ENGINE_STATE_RUNNING, status.state)
+        } finally {
+            engine.stop()
+        }
     }
 
     @Test
@@ -123,5 +131,23 @@ class EngineTest {
         engine.stop()
         assertFalse(Files.exists(portFile))
         engine.stop()
+    }
+
+    @Test
+    fun malformedEnrollmentSecretThrowsEngineArgsException() {
+        val malformed = listOf(
+            "abc",                              // wrong length
+            "A".repeat(64),                      // uppercase hex
+            "z".repeat(64),                      // non-hex characters
+        )
+        for (value in malformed) {
+            val ex = assertThrows<EngineArgsException> {
+                Engine.create(args("e1").copy(insecureDevMode = false), mapOf("CRINGLE_ENROLLMENT_SECRET" to value))
+            }
+            assertTrue(
+                ex.message!!.contains("CRINGLE_ENROLLMENT_SECRET") || ex.message!!.contains("64 lowercase hex"),
+                "message should mention the variable or the format, got: ${ex.message}",
+            )
+        }
     }
 }

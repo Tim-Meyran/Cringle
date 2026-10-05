@@ -60,8 +60,18 @@ All three run on a router with TLS (`RouterServer(tls = RouterTls(identity, trus
 3. On success the fingerprint is stored as `ENGINE` (direct, named like the id) and the secret is used up. A wrong, missing or used secret is `PERMISSION_DENIED` with one message for all three.
 4. Later registrations of the same id need the same key and no secret; another key for a bound id is refused. Announcements are kept in memory: after a restart of the router the daemon announces again.
 
+## Engine and daemon on mTLS
+
+The engine-router and daemon-router channels use mTLS. The engine and the daemon each own an `Identity` and a `TrustStore`; the router does the same in combined mode.
+
+- The engine opens `TrustStore(<engineDir>/trust.json)` and builds `EngineTls(identity, trustStore)`. The engine trusts nobody except what is in that store.
+- The daemon owns its own `Identity` (under `<home>/daemon`) and `TrustStore` (under `<home>/daemon/trust.json`).
+- In combined mode, the embedded router runs with mTLS using its own `Identity` (under `<home>/router`) and `TrustStore` (under `<home>/router/trust.json`). At start, the router trusts the daemon (`COMPONENT`) and the daemon trusts the router (`ROUTER`) automatically.
+- In separate router mode, the daemon announces engines via `PrepareEngine` over mTLS using its identity and trust store. The router must already trust the daemon (manual trust, #82).
+- Before starting an engine, the daemon writes `<engineDir>/trust.json` with the router's fingerprint (looked up in the daemon's trust store by address). If the router is not in the trust store, the start fails with a clear message.
+
 ## What is missing
 
-- The servers and channels still use plaintext; they are switched to these contexts in #83 (router routes), #84 (the other components); the CLI and the ManagementServer use pinned TLS since #85. `--insecure-dev-mode` is removed in #86.
+- The CLI and the ManagementServer use pinned TLS since #85. `--insecure-dev-mode` is removed in #86.
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.

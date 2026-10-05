@@ -2,12 +2,14 @@
 
 package cringle.management
 
+import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.system.exitProcess
+import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
@@ -55,6 +57,7 @@ public fun main(args: Array<String>) {
         i += 1
     }
     if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
+    CringleLogging.init(CringleHome.resolve(home), "management", "main")
     System.err.println("WARNING: INSECURE DEV MODE - the connection is not encrypted (loopback only)")
     val base = CringleHome.resolve(home).resolve("management")
     val core = ManagementCore(ManagementStore(base.resolve("state.json")), repository, token, router)
@@ -76,6 +79,7 @@ public fun main(args: Array<String>) {
     val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) })
     Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
     server.start()
+    LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")
     System.out.flush()
     Thread.currentThread().join()

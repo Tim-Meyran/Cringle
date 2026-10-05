@@ -2,9 +2,11 @@
 
 package cringle.daemon
 
+import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import java.nio.file.Paths
 import kotlin.system.exitProcess
+import org.slf4j.LoggerFactory
 
 private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined] --insecure-dev-mode"
 
@@ -39,10 +41,12 @@ public fun main(args: Array<String>) {
     }
     if (router != null && combined) fail("--router and --combined exclude each other")
     if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
+    CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
     System.err.println("WARNING: INSECURE DEV MODE - daemon API is unauthenticated (loopback only)")
     val daemon = Daemon(CringleHome.resolve(home), port, router, combined)
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))
     daemon.start()
+    LoggerFactory.getLogger("cringle.daemon").info("daemon started on port {}", daemon.port)
     println("daemon-port=${daemon.port}")
     System.out.flush()
     Thread.currentThread().join()

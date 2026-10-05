@@ -3,6 +3,7 @@
 package cringle.router
 
 import com.google.protobuf.Timestamp
+import cringle.common.Identity
 import cringle.common.PublicKeyFingerprint
 import cringle.common.TlsHelper
 import cringle.common.TrustEntry
@@ -166,9 +167,12 @@ public class RouterServer(
     private val clock: Clock = Clock.systemUTC(),
     heartbeatTimeout: Duration = Duration.ofSeconds(15),
     private val refreshInterval: Duration = Duration.ofSeconds(30),
-    private val tls: RouterTls? = null,
+    public val tls: RouterTls? = null,
     users: UserManager? = null,
 ) {
+    /** The identity of this router, `null` without TLS. */
+    public val identity: Identity? get() = tls?.identity
+
     /** The registry of this router. */
     public val registry: Registry = Registry(FileRegistryStore(registryFile), clock, heartbeatTimeout)
 
