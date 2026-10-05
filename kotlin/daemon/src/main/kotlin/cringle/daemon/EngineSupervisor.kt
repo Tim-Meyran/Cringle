@@ -68,6 +68,11 @@ public class EngineSupervisor(
      * (`PrepareEngine`). Called before the engine process starts; if it throws, the engine is not started.
      */
     private val announce: (engine: String, secretHash: ByteArray) -> Unit = { _, _ -> },
+    /**
+     * Writes the engine's trust file (`<engineDir>/trust.json`) before the process starts, so the engine can talk to
+     * the router over mTLS. Called before [announce]; if it throws, the engine is not started.
+     */
+    private val writeTrustFile: (engine: String) -> Unit = { _ -> },
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -133,6 +138,13 @@ public class EngineSupervisor(
             val enrollmentSecret = if (routerAddress() != null) ByteArray(32).also { secureRandom.nextBytes(it) } else null
             if (enrollmentSecret != null) {
                 try {
+                    writeTrustFile(m.id)
+                } catch (e: Exception) {
+                    m.state = ProcessState.STOPPED
+                    m.lastError = "the trust file of engine '$id' could not be written: ${e.message}"
+                    throw DaemonException(DaemonError.FAILED_PRECONDITION, m.lastError, e)
+                }
+                try {
                     announce(m.id, MessageDigest.getInstance("SHA-256").digest(enrollmentSecret))
                 } catch (e: Exception) {
                     m.state = ProcessState.STOPPED
@@ -141,10 +153,14 @@ public class EngineSupervisor(
                 }
             }
             
+            // --insecure-dev-mode forces plaintext; only use it when there is no router (plaintext dev mode).
+            // With a router the engine must use mTLS, so the flag is omitted and the engine reads
+            // CRINGLE_ENROLLMENT_SECRET from its environment and trusts the router via <engineDir>/trust.json.
+            val insecureDevMode = if (routerAddress() == null) listOf("--insecure-dev-mode") else emptyList()
             val cmd = listOf(command.java) + command.jvmArgs + listOf(
                 "-cp", command.classPath, command.mainClass,
-                "--id", m.id, "--name", m.name, "--home", home.toString(), "--insecure-dev-mode",
-            )
+                "--id", m.id, "--name", m.name, "--home", home.toString(),
+            ) + insecureDevMode
             val builder = ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()
