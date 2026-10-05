@@ -103,6 +103,15 @@ version of its own and no engine, role or label fields, so it always runs entire
   for VarArg ports. The type is fixed here and never changes at runtime. Optional `delivery` (`DROP` default, or
   `BUFFER`) says what happens when the receiving block is not running: `DROP` drops and logs, `BUFFER` keeps the
   value in the tether's bounded buffer until the receiver runs again (see `tether.md`). A `TCP` tether needs `"port"` (1 to 65535) and supports only `DROP`; no other type may set `port`.
+- Per-tether options, all optional and falling back to the engine defaults: `bufferCapacity` (integer >= 1, the
+  bounded buffer of this tether), `requestTimeout` (milliseconds > 0, how long a `REQUEST_RESPONSE` request waits),
+  and `retry` (object, only with `delivery` `BUFFER`): `maxAttempts` (integer >= 1, default unlimited),
+  `backoffMs` (integer > 0, default 50), `backoff` (`FIXED` default, or `EXPONENTIAL`) and `maxBackoffMs`
+  (integer > 0, default 5000, the cap of `EXPONENTIAL`). A `retry` object on a `DROP` tether is rejected.
+- A `SERIAL` tether is a raw byte transport to a serial device and needs a `serial` object: `device` (string,
+  required), `baudRate` (integer > 0, default 9600), `dataBits` (5 to 8, default 8), `parity` (`NONE` default,
+  `EVEN` or `ODD`) and `stopBits` (1 or 2, default 1). It supports only `DROP` and carries no schema. Only a
+  `SERIAL` tether may set `serial`.
 
 ## 6. Semantic validation
 
@@ -122,7 +131,11 @@ blueprint:
 6. the `schema` of the OUT port is assignable to the `schema` of the IN port (`schema.md`, section 7);
 7. `index` is present and below the `varArgCounts` size for a VarArg port, and absent for any other port;
 8. every fabric config names an existing blueprint;
-9. every block id, port name and blueprint reference follows the identifier grammar of section 3.
+9. every block id, port name and blueprint reference follows the identifier grammar of section 3;
+10. `bufferCapacity` is at least 1 and `requestTimeout` is positive;
+11. `retry` is only set with `BUFFER`, `maxAttempts` is at least 1, and `backoffMs` and `maxBackoffMs` are positive;
+12. `serial` is only set on a `SERIAL` tether, which needs one, and its `baudRate`, `dataBits`, `parity` and
+    `stopBits` are in range; a `SERIAL` tether supports only `DROP`.
 
 Validation reports all of these together; reading a package reports the first violation it meets, because parsing
 stops there.

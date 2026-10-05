@@ -237,8 +237,8 @@ class BuiltinDriversTest {
     @Test
     fun unknownAndUndeclaredDriversAreRejected() {
         drivers().use { d ->
-            val e = assertThrows<IllegalArgumentException> { set(d, "f", "a", "serial") }
-            assertTrue(e.message!!.contains("unknown driver 'serial'"), e.message)
+            val e = assertThrows<IllegalArgumentException> { set(d, "f", "a", "nope") }
+            assertTrue(e.message!!.contains("unknown driver 'nope'"), e.message)
             val onlyLog = set(d, "f", "a", "logging")
             assertThrows<IllegalArgumentException> { onlyLog[TcpDriver::class] }
         }

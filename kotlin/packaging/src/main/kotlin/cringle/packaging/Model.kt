@@ -4,6 +4,7 @@ package cringle.packaging
 
 import cringle.contract.BlockDefinition
 import cringle.contract.IsolationLevel
+import cringle.contract.Parity
 import cringle.contract.TetherType
 import kotlinx.serialization.json.JsonObject
 
@@ -71,6 +72,44 @@ public enum class DeliveryPolicy {
     BUFFER,
 }
 
+/** How the delay between retry attempts grows. */
+public enum class Backoff {
+    /** The same delay before every attempt. */
+    FIXED,
+
+    /** The delay doubles with every attempt, capped by [RetryConfig.maxBackoffMs]. */
+    EXPONENTIAL,
+}
+
+/**
+ * Retry configuration of a tether for a receiver that is not running. Only used with delivery `BUFFER`; a `retry`
+ * object on a `DROP` tether is a validation error.
+ */
+public data class RetryConfig(
+    /** Maximum number of delivery attempts; `null` means unlimited (retry until the receiver runs). */
+    public val maxAttempts: Int? = null,
+    /** Base delay between attempts in milliseconds. */
+    public val backoffMs: Long = 50,
+    /** How the delay grows between attempts. */
+    public val backoff: Backoff = Backoff.FIXED,
+    /** Upper bound of the delay in milliseconds (used by [Backoff.EXPONENTIAL]). */
+    public val maxBackoffMs: Long = 5000,
+)
+
+/** The serial line of a [TetherType.SERIAL] tether: the device and its line settings. */
+public data class SerialTetherConfig(
+    /** The serial device name (e.g. `/dev/ttyUSB0` or `COM1`). */
+    public val device: String,
+    /** Baud rate in bits per second. */
+    public val baudRate: Int = 9600,
+    /** Number of data bits (5 to 8). */
+    public val dataBits: Int = 8,
+    /** Parity. */
+    public val parity: Parity = Parity.NONE,
+    /** Number of stop bits (1 or 2). */
+    public val stopBits: Int = 1,
+)
+
 /** A tether of fixed [type] from an OUT port to an IN port, with a [delivery] policy for a receiver that is not running. */
 public data class TetherDef(
     public val type: TetherType,
@@ -79,6 +118,14 @@ public data class TetherDef(
     public val delivery: DeliveryPolicy = DeliveryPolicy.DROP,
     /** The TCP port of a [TetherType.TCP] tether; `null` for every other type. */
     public val port: Int? = null,
+    /** Buffer capacity of this tether; `null` uses the global [cringle.engine.tether.TetherConfig] value. */
+    public val bufferCapacity: Int? = null,
+    /** How long a request waits for its response; `null` uses the global value. */
+    public val requestTimeout: java.time.Duration? = null,
+    /** Retry configuration; `null` uses the default (unlimited, fixed 50 ms). */
+    public val retry: RetryConfig? = null,
+    /** The serial line of a [TetherType.SERIAL] tether; `null` for every other type. */
+    public val serial: SerialTetherConfig? = null,
 )
 
 /**

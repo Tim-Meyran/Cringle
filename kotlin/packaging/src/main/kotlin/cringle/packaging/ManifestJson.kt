@@ -4,6 +4,7 @@ package cringle.packaging
 
 import cringle.contract.BlockDefinition
 import cringle.contract.IsolationLevel
+import cringle.contract.Parity
 import cringle.contract.TetherType
 import cringle.packaging.JsonReading.enumValue
 import kotlinx.serialization.json.Json
@@ -89,7 +90,7 @@ public object ManifestJson {
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
     private val blueprintKeys = setOf("name", "blocks", "tethers")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
-    private val tetherKeys = setOf("type", "from", "to", "delivery", "port")
+    private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial")
     private val endpointKeys = setOf("block", "port", "index")
 
     /** Parses `cringle-project.json`. */
@@ -214,7 +215,30 @@ public object ManifestJson {
         val to = endpoint(o["to"] ?: throw PackageFormatException(path, "missing key 'to'"), "$path.to")
         val delivery = o["delivery"]?.let { enumValue<DeliveryPolicy>(JsonReading.string(o, "delivery", path), "$path.delivery") } ?: DeliveryPolicy.DROP
         val port = JsonReading.optInt(o, "port", path)
-        return TetherDef(type, from, to, delivery, port)
+        val bufferCapacity = JsonReading.optInt(o, "bufferCapacity", path)
+        val requestTimeout = JsonReading.optInt(o, "requestTimeout", path)?.let { java.time.Duration.ofMillis(it.toLong()) }
+        val retry = o["retry"]?.let { element ->
+            val r = JsonReading.obj(element, "$path.retry")
+            JsonReading.keys(r, "$path.retry", setOf("maxAttempts", "backoffMs", "backoff", "maxBackoffMs"))
+            RetryConfig(
+                maxAttempts = JsonReading.optInt(r, "maxAttempts", "$path.retry"),
+                backoffMs = JsonReading.optInt(r, "backoffMs", "$path.retry")?.toLong() ?: 50L,
+                backoff = JsonReading.optString(r, "backoff", "$path.retry")?.let { enumValue<Backoff>(it, "$path.retry.backoff") } ?: Backoff.FIXED,
+                maxBackoffMs = JsonReading.optInt(r, "maxBackoffMs", "$path.retry")?.toLong() ?: 5000L,
+            )
+        }
+        val serial = o["serial"]?.let { element ->
+            val s = JsonReading.obj(element, "$path.serial")
+            JsonReading.keys(s, "$path.serial", setOf("device", "baudRate", "dataBits", "parity", "stopBits"))
+            SerialTetherConfig(
+                device = JsonReading.string(s, "device", "$path.serial"),
+                baudRate = JsonReading.optInt(s, "baudRate", "$path.serial") ?: 9600,
+                dataBits = JsonReading.optInt(s, "dataBits", "$path.serial") ?: 8,
+                parity = JsonReading.optString(s, "parity", "$path.serial")?.let { enumValue<Parity>(it, "$path.serial.parity") } ?: Parity.NONE,
+                stopBits = JsonReading.optInt(s, "stopBits", "$path.serial") ?: 1,
+            )
+        }
+        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial)
     }
 
     private fun endpoint(e: JsonElement, path: String): Endpoint {
@@ -311,6 +335,25 @@ public object ManifestJson {
                             put("to", endpoint(t.to))
                             if (t.delivery != DeliveryPolicy.DROP) put("delivery", t.delivery.name)
                             t.port?.let { put("port", it) }
+                            t.bufferCapacity?.let { put("bufferCapacity", it) }
+                            t.requestTimeout?.let { put("requestTimeout", it.toMillis()) }
+                            t.retry?.let { r ->
+                                put("retry", buildJsonObject {
+                                    r.maxAttempts?.let { put("maxAttempts", it) }
+                                    put("backoffMs", r.backoffMs)
+                                    put("backoff", r.backoff.name)
+                                    put("maxBackoffMs", r.maxBackoffMs)
+                                })
+                            }
+                            t.serial?.let { s ->
+                                put("serial", buildJsonObject {
+                                    put("device", s.device)
+                                    put("baudRate", s.baudRate)
+                                    put("dataBits", s.dataBits)
+                                    put("parity", s.parity.name)
+                                    put("stopBits", s.stopBits)
+                                })
+                            }
                         }
                     },
                 ),

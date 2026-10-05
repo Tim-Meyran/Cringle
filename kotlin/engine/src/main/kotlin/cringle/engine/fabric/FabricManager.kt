@@ -191,6 +191,7 @@ public class LocalFabricDeployer(
                         TetherConfig(
                             registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor,
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
+                            it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
                         )
                     },
                     defaultRestart = defaultRestart,

@@ -3,6 +3,7 @@
 package cringle.packaging
 
 import cringle.contract.TetherType
+import java.time.Duration
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -224,6 +225,73 @@ class PackageValidatorTest {
         assertTrue(buffered.any { it.path.endsWith("$.tethers[0].delivery") && it.message.contains("only supports delivery DROP") }, buffered.toString())
         val outOfRange = problems(Fixtures.main.copy(tethers = listOf(tcp.copy(port = 70000))))
         assertTrue(outOfRange.any { it.path.endsWith("$.tethers[0].port") }, outOfRange.toString())
+    }
+
+    @Test
+    fun perTetherOptionsAreValidated() {
+        val base = Fixtures.main.tethers[0]
+        fun assertProblem(bp: Blueprint, field: String, message: String) {
+            val p = problems(bp)
+            assertTrue(p.any { it.path.endsWith("$.tethers[0].$field") && it.message == message }, p.toString())
+        }
+
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(bufferCapacity = 0))),
+            "bufferCapacity",
+            "bufferCapacity must be at least 1",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(requestTimeout = Duration.ZERO))),
+            "requestTimeout",
+            "requestTimeout must be positive",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(retry = RetryConfig()))),
+            "retry",
+            "a 'retry' is only allowed with delivery BUFFER",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(delivery = DeliveryPolicy.BUFFER, retry = RetryConfig(maxAttempts = 0)))),
+            "retry.maxAttempts",
+            "maxAttempts must be at least 1",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(delivery = DeliveryPolicy.BUFFER, retry = RetryConfig(backoffMs = 0)))),
+            "retry.backoffMs",
+            "backoffMs must be positive",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(serial = SerialTetherConfig("x")))),
+            "serial",
+            "only SERIAL tethers have a 'serial' object",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(type = TetherType.SERIAL))),
+            "serial",
+            "a SERIAL tether needs a 'serial' object",
+        )
+        assertProblem(
+            Fixtures.main.copy(
+                tethers = listOf(base.copy(type = TetherType.SERIAL, delivery = DeliveryPolicy.BUFFER, serial = SerialTetherConfig("x"))),
+            ),
+            "delivery",
+            "a SERIAL tether only supports delivery DROP",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(type = TetherType.SERIAL, serial = SerialTetherConfig("x", dataBits = 9)))),
+            "serial.dataBits",
+            "dataBits must be between 5 and 8",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(type = TetherType.SERIAL, serial = SerialTetherConfig("x", stopBits = 3)))),
+            "serial.stopBits",
+            "stopBits must be 1 or 2",
+        )
+        assertProblem(
+            Fixtures.main.copy(tethers = listOf(base.copy(type = TetherType.SERIAL, serial = SerialTetherConfig("x", baudRate = 0)))),
+            "serial.baudRate",
+            "baudRate must be positive",
+        )
     }
 
     @Test
