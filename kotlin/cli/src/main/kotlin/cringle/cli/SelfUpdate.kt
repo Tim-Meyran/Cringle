@@ -22,6 +22,7 @@ internal class SelfUpdate(
     private val links: LinkSwitcher,
     private val timeout: Duration = Duration.ofSeconds(30),
     private val allowMajor: Boolean = false,
+    private val stablePeriod: Duration = Duration.ofSeconds(3),
 ) {
     /** `self-update --check`: the current and the latest version and whether an update is available. */
     fun check(): List<String> {
@@ -88,16 +89,25 @@ internal class SelfUpdate(
             if (platform == Platform.WINDOWS) activeServices.forEach { services.stop(it) }
             val previous = links.switchTo(root, target)
             lines += "switched current to $target"
-            if (platform == Platform.WINDOWS) activeServices.forEach { services.start(it) } else activeServices.forEach { services.restart(it) }
-            lines += "restarted ${activeServices.size} service(s)"
-
-            if (!healthy(activeServices)) {
-                lines += "the new version did not come up; rolling back to ${previous ?: current}"
-                links.switchTo(root, previous ?: current)
-                if (platform == Platform.WINDOWS) activeServices.forEach { services.stop(it) }
+            try {
                 if (platform == Platform.WINDOWS) activeServices.forEach { services.start(it) } else activeServices.forEach { services.restart(it) }
-                deleteTree(targetDir)
-                throw IllegalStateException("the new version $target did not start; rolled back to ${previous ?: current}")
+                lines += "restarted ${activeServices.size} service(s)"
+
+                if (!healthy(activeServices)) {
+                    throw IllegalStateException("the new version $target did not come up")
+                }
+            } catch (e: Exception) {
+                lines += "the new version did not come up; rolling back to ${previous ?: current}"
+                val rollbackTo = previous ?: current
+                links.switchTo(root, rollbackTo)
+                try {
+                    if (platform == Platform.WINDOWS) activeServices.forEach { services.stop(it) }
+                    if (platform == Platform.WINDOWS) activeServices.forEach { services.start(it) } else activeServices.forEach { services.restart(it) }
+                } catch (rollbackEx: Exception) {
+                    lines += "rollback service restart failed: ${rollbackEx.message}"
+                }
+                if (targetDir != root.resolve(rollbackTo)) deleteTree(targetDir)
+                throw IllegalStateException("the new version $target did not start; rolled back to $rollbackTo", e)
             }
 
             cleanup(target, runningVersion)
@@ -122,11 +132,18 @@ internal class SelfUpdate(
     private fun healthy(names: List<String>): Boolean {
         if (names.isEmpty()) return true
         val deadline = System.nanoTime() + timeout.toNanos()
-        while (true) {
-            if (names.all { services.isActive(it) }) return true
-            if (System.nanoTime() >= deadline) return false
-            Thread.sleep(200)
-        }
+        do {
+            if (names.all { services.isActive(it) }) {
+                val stableEnd = System.nanoTime() + stablePeriod.toNanos()
+                while (System.nanoTime() < stableEnd) {
+                    if (!names.all { services.isActive(it) }) break
+                    Thread.sleep(50)
+                }
+                if (names.all { services.isActive(it) }) return true
+            }
+            Thread.sleep(50)
+        } while (System.nanoTime() < deadline)
+        return false
     }
 
     /** Keeps the two newest versions and never deletes the active or the running one. */

@@ -549,7 +549,7 @@ internal val COMMANDS: List<Command> = listOf(
         val services = if (platform == Platform.WINDOWS) WindowsServiceController() else SystemdServiceController()
         val links = if (platform == Platform.WINDOWS) JunctionLinkSwitcher() else SymlinkLinkSwitcher()
         val timeout = Duration.ofSeconds(a.long("timeout") ?: 30)
-        val update = SelfUpdate(root, Distribution.version(), platform, source, services, links, timeout, a.flag("allow-major"))
+        val update = SelfUpdate(root, Distribution.version(), platform, source, services, links, timeout, a.flag("allow-major"), Duration.ofSeconds(3))
         val lines = if (a.flag("check")) update.check() else update.update(a.option("version"))
         Output.Lines(lines, lines.map { mapOf("line" to it) })
     },

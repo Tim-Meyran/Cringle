@@ -163,6 +163,39 @@ class SelfUpdateTest {
     }
 
     @Test
+    fun rollbackWhenServiceRestartFails() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0")
+        val services = ThrowingServices()
+        assertThrows(IllegalStateException::class.java) { update("1.0.0", services = services) }
+        assertEquals("1.0.0", currentTarget())
+        assertFalse(Files.exists(installRoot.resolve("1.1.0")))
+        assertNoStaging()
+    }
+
+    @Test
+    fun rollbackDoesNotDeleteTheActiveVersionWhenReinstalling() {
+        install("1.0.0", "1.0.0")
+        release("1.0.0")
+        val services = FakeServices(healthy = false)
+        assertThrows(IllegalStateException::class.java) { update("1.0.0", requested = "1.0.0", services = services) }
+        assertEquals("1.0.0", currentTarget())
+        assertTrue(Files.exists(installRoot.resolve("1.0.0")))
+        assertNoStaging()
+    }
+
+    @Test
+    fun healthyRequiresAStablePeriod() {
+        install("1.0.0", "1.0.0")
+        release("1.1.0")
+        val services = FlakyServices()
+        assertThrows(IllegalStateException::class.java) { update("1.0.0", services = services, stablePeriod = Duration.ofMillis(200), timeout = Duration.ofSeconds(2)) }
+        assertEquals("1.0.0", currentTarget())
+        assertFalse(Files.exists(installRoot.resolve("1.1.0")))
+        assertNoStaging()
+    }
+
+    @Test
     fun cleanupKeepsOnlyTheTwoNewestVersions() {
         install("1.0.0", "1.0.0")
         release("1.1.0")
@@ -197,7 +230,7 @@ class SelfUpdateTest {
         install("1.0.0", "1.0.0")
         releaseWindows("1.1.0")
         val services = FakeServices()
-        val lines = SelfUpdate(installRoot, "1.0.0", Platform.WINDOWS, source, services, SymlinkLinkSwitcher(), Duration.ZERO).update(null)
+        val lines = SelfUpdate(installRoot, "1.0.0", Platform.WINDOWS, source, services, SymlinkLinkSwitcher(), Duration.ZERO, false, Duration.ZERO).update(null)
         assertEquals("1.1.0", currentTarget())
         assertEquals(listOf("stop cringle-daemon.service", "start cringle-daemon.service"), services.calls)
         assertTrue(lines.contains("updated to 1.1.0"))
@@ -315,8 +348,8 @@ class SelfUpdateTest {
         SymlinkLinkSwitcher().switchTo(installRoot, current)
     }
 
-    private fun update(running: String, requested: String? = null, allowMajor: Boolean = false, services: ServiceController = FakeServices()): List<String> =
-        SelfUpdate(installRoot, running, Platform.LINUX, source, services, SymlinkLinkSwitcher(), Duration.ZERO, allowMajor).update(requested)
+    private fun update(running: String, requested: String? = null, allowMajor: Boolean = false, services: ServiceController = FakeServices(), stablePeriod: Duration = Duration.ZERO, timeout: Duration = Duration.ofSeconds(30)): List<String> =
+        SelfUpdate(installRoot, running, Platform.LINUX, source, services, SymlinkLinkSwitcher(), timeout, allowMajor, stablePeriod).update(requested)
 
     private fun check(running: String): List<String> =
         SelfUpdate(installRoot, running, Platform.LINUX, source, FakeServices(), SymlinkLinkSwitcher(), Duration.ZERO).check()
@@ -348,5 +381,27 @@ class SelfUpdateTest {
         override fun start(name: String) { calls += "start $name" }
         override fun restart(name: String) { calls += "restart $name" }
         override fun isActive(name: String) = healthy
+    }
+
+    private class FlakyServices : ServiceController {
+        val calls = mutableListOf<String>()
+        private var isActiveCount = 0
+        override fun activeServices() = listOf("cringle-daemon.service")
+        override fun stop(name: String) { calls += "stop $name" }
+        override fun start(name: String) { calls += "start $name" }
+        override fun restart(name: String) { calls += "restart $name" }
+        override fun isActive(name: String): Boolean {
+            isActiveCount++
+            return isActiveCount == 1
+        }
+    }
+
+    private class ThrowingServices : ServiceController {
+        val calls = mutableListOf<String>()
+        override fun activeServices() = listOf("cringle-daemon.service")
+        override fun stop(name: String) { calls += "stop $name" }
+        override fun start(name: String) { calls += "start $name" }
+        override fun restart(name: String) { throw IllegalStateException("restart failed") }
+        override fun isActive(name: String) = true
     }
 }
