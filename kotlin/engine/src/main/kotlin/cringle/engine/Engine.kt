@@ -206,7 +206,7 @@ public class Engine private constructor(
             if (request.hasSource()) {
                 val source = request.source
                 val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() })
-                try {
+                val created = try {
                     cache.ensureForDeploy(config.id, request.fabricId.value, source.artifactsList.map(::artifactOf), fetcher)
                 } catch (e: PackageCacheException) {
                     throw StatusException((if (e.hashMismatch) Status.DATA_LOSS else Status.FAILED_PRECONDITION).withDescription(e.message))
@@ -216,7 +216,7 @@ public class Engine private constructor(
                 try {
                     return deployLocal(request)
                 } catch (e: Throwable) {
-                    cache.clearUsage(config.id, request.fabricId.value)
+                    if (created) cache.clearUsage(config.id, request.fabricId.value)
                     throw e
                 }
             } else {

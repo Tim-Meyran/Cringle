@@ -19,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -340,6 +339,26 @@ class PackageCacheTest {
         // the install failed, so nothing was installed
         assertFalse(Files.exists(home.resolve("plugins/acme-core/1.0.0")))
     }
+
+    @Test
+    fun aFailedRedeployLeavesTheOriginalRecordIntact(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val cache = PackageCache(home)
+        cache.ensure(artifact("acme-core"), fetcher())
+        cache.recordUsage("e1", "shop", listOf(artifact("acme-core")))
+        val recordFile = home.resolve("cache/usage/e1/shop")
+        val original = Files.readString(recordFile)
+        // a second deploy of the same fabric id with a different, corrupt artifact fails
+        val corrupt = CountingFetcher({ zip("acme-other", "1.0.0") + byteArrayOf(0) })
+        val e = assertThrows<PackageCacheException> {
+            cache.ensureForDeploy("e1", "shop", listOf(artifact("acme-other")), corrupt)
+        }
+        assertTrue(e.hashMismatch)
+        // the failed redeploy did not touch the original record of the live fabric
+        assertTrue(Files.exists(recordFile))
+        assertEquals(original, Files.readString(recordFile))
+    }
+
     @Test
     fun oldDownloadsAndUnfinishedInstallsAreRemovedAndNewOnesStay(): Unit = runBlocking {
         val clock = Clocks()
