@@ -18,6 +18,7 @@ rootProject.name = "cringle"
 val modules = listOf(
     "contract",
     "schema",
+    "wire",
     "packaging",
     "engine",
     "router",
