@@ -210,21 +210,29 @@ public class Engine private constructor(
         }
 
         override suspend fun deployFabric(request: DeployFabricRequest): FabricInfo {
-            val artifacts = artifactsOf(request)
             if (request.hasSource()) {
                 val source = request.source
                 val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() })
-                try {
-                    for (artifact in source.artifactsList.map(::artifactOf)) cache.ensure(artifact, fetcher)
+                val created = try {
+                    cache.ensureForDeploy(config.id, request.fabricId.value, source.artifactsList.map(::artifactOf), fetcher)
                 } catch (e: PackageCacheException) {
                     throw StatusException((if (e.hashMismatch) Status.DATA_LOSS else Status.FAILED_PRECONDITION).withDescription(e.message))
                 } finally {
                     fetcher.close()
                 }
+                try {
+                    val info = deployLocal(request)
+                    if (!created) cache.recordUsage(config.id, request.fabricId.value, source.artifactsList.map(::artifactOf))
+                    return info
+                } catch (e: Throwable) {
+                    if (created) cache.clearUsage(config.id, request.fabricId.value)
+                    throw e
+                }
+            } else {
+                val info = deployLocal(request)
+                cache.recordUsage(config.id, request.fabricId.value, artifactsOf(request))
+                return info
             }
-            val info = deployLocal(request)
-            cache.recordUsage(config.id, request.fabricId.value, artifacts)
-            return info
         }
 
         private fun artifactOf(a: cringle.engine.v1.PackageArtifact) = Artifact(

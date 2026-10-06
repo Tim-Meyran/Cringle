@@ -19,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -286,7 +285,6 @@ class PackageCacheTest {
     }
 
     @Test
-    @Disabled("#92: between ensure and recordUsage the cleanup can still remove the version; enable when #92 is done")
     fun aVersionIsNotRemovedBetweenEnsureAndRecordUsage(): Unit = runBlocking {
         Files.createDirectories(CringleHome.engineDir(home, "e1"))
         val a = artifact("busy")
@@ -311,12 +309,10 @@ class PackageCacheTest {
             val cache = PackageCache(home, onWarning = {})
             // ensure throws if it meets a directory without marker (a half-deleted version): it must never happen
             repeat(150) { i ->
-                cache.ensure(a, f)
-                cache.recordUsage("e1", "fab$i", listOf(a))
+                cache.ensureForDeploy("e1", "fab$i", listOf(a), f)
                 cache.clearUsage("e1", "fab$i")
             }
-            cache.ensure(a, f)
-            cache.recordUsage("e1", "last", listOf(a))
+            cache.ensureForDeploy("e1", "last", listOf(a), f)
         } finally {
             done.set(true)
             cleaner.join()
@@ -329,6 +325,54 @@ class PackageCacheTest {
         // what the cleanup removed while it ran left nothing that is older work in progress
         assertEquals(emptyList<String>(), leftovers().filter { it.contains(".part") })
     }
+
+    @Test
+    fun aFailedDeployLeavesNoUsageRecordBehind(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val corrupt = CountingFetcher({ zip("acme-core", "1.0.0") + byteArrayOf(0) })
+        val e = assertThrows<PackageCacheException> {
+            PackageCache(home).ensureForDeploy("e1", "shop", listOf(artifact("acme-core")), corrupt)
+        }
+        assertTrue(e.hashMismatch)
+        // the failed deploy cleared the usage record it had just written
+        assertFalse(Files.exists(home.resolve("cache/usage/e1/shop")))
+        // the install failed, so nothing was installed
+        assertFalse(Files.exists(home.resolve("plugins/acme-core/1.0.0")))
+    }
+
+    @Test
+    fun aFailedRedeployLeavesTheOriginalRecordIntact(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val cache = PackageCache(home)
+        cache.ensure(artifact("acme-core"), fetcher())
+        cache.recordUsage("e1", "shop", listOf(artifact("acme-core")))
+        val recordFile = home.resolve("cache/usage/e1/shop")
+        val original = Files.readString(recordFile)
+        // a second deploy of the same fabric id with a different, corrupt artifact fails
+        val corrupt = CountingFetcher({ zip("acme-other", "1.0.0") + byteArrayOf(0) })
+        val e = assertThrows<PackageCacheException> {
+            cache.ensureForDeploy("e1", "shop", listOf(artifact("acme-other")), corrupt)
+        }
+        assertTrue(e.hashMismatch)
+        // the failed redeploy did not touch the original record of the live fabric
+        assertTrue(Files.exists(recordFile))
+        assertEquals(original, Files.readString(recordFile))
+    }
+
+    @Test
+    fun aSuccessfulRedeployWithStaleRecordRecordsNewArtifacts(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val cache = PackageCache(home)
+        // stale record for fabric "shop" with old artifact
+        cache.recordUsage("e1", "shop", listOf(artifact("old")))
+        // simulate ensureForDeploy on existing record
+        assertFalse(cache.ensureForDeploy("e1", "shop", listOf(artifact("new")), fetcher()))
+        // simulate Engine.deployFabric success recording new artifacts
+        cache.recordUsage("e1", "shop", listOf(artifact("new")))
+        val lines = Files.readAllLines(home.resolve("cache/usage/e1/shop")).filter { it.isNotBlank() }
+        assertEquals(listOf("PLUGIN new 1.0.0"), lines)
+    }
+
     @Test
     fun oldDownloadsAndUnfinishedInstallsAreRemovedAndNewOnesStay(): Unit = runBlocking {
         val clock = Clocks()
