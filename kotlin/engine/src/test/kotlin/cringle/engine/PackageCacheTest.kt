@@ -360,6 +360,20 @@ class PackageCacheTest {
     }
 
     @Test
+    fun aSuccessfulRedeployWithStaleRecordRecordsNewArtifacts(): Unit = runBlocking {
+        Files.createDirectories(CringleHome.engineDir(home, "e1"))
+        val cache = PackageCache(home)
+        // stale record for fabric "shop" with old artifact
+        cache.recordUsage("e1", "shop", listOf(artifact("old")))
+        // simulate ensureForDeploy on existing record
+        assertFalse(cache.ensureForDeploy("e1", "shop", listOf(artifact("new")), fetcher()))
+        // simulate Engine.deployFabric success recording new artifacts
+        cache.recordUsage("e1", "shop", listOf(artifact("new")))
+        val lines = Files.readAllLines(home.resolve("cache/usage/e1/shop")).filter { it.isNotBlank() }
+        assertEquals(listOf("PLUGIN new 1.0.0"), lines)
+    }
+
+    @Test
     fun oldDownloadsAndUnfinishedInstallsAreRemovedAndNewOnesStay(): Unit = runBlocking {
         val clock = Clocks()
         val cache = PackageCache(home, clock)

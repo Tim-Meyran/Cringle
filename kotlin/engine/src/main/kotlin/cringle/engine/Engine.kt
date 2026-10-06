@@ -214,7 +214,9 @@ public class Engine private constructor(
                     fetcher.close()
                 }
                 try {
-                    return deployLocal(request)
+                    val info = deployLocal(request)
+                    if (!created) cache.recordUsage(config.id, request.fabricId.value, source.artifactsList.map(::artifactOf))
+                    return info
                 } catch (e: Throwable) {
                     if (created) cache.clearUsage(config.id, request.fabricId.value)
                     throw e
