@@ -32,6 +32,10 @@ import cringle.packaging.Endpoint
 import cringle.packaging.RemoteEndpoint
 import cringle.packaging.TetherDef
 import cringle.schema.SchemaRegistry
+import cringle.wire.Message
+import cringle.wire.TetherMode
+import cringle.wire.WireFrame
+import kotlinx.serialization.json.JsonPrimitive
 import cringle.testkit.TestDriverSet
 import java.nio.file.Files
 import java.nio.file.Path
@@ -56,89 +60,7 @@ import org.junit.jupiter.api.io.TempDir
  * Tethers between engines (#146): two engines with their own generated identity, one fabric on each, and a `MESSAGE`
  * tether between them over mutual TLS. Both fabrics name each other, as the blueprints of a real deployment do.
  */
-class RemoteTetherTest {
-    @TempDir
-    lateinit var dir: Path
-
-    private val string = SchemaRef("cringle.std", "String")
-    private val int = SchemaRef("cringle.std", "Int")
-    private val engines = CopyOnWriteArrayList<Engine>()
-    private val fabrics = CopyOnWriteArrayList<FabricRuntime>()
-
-    @AfterEach
-    fun stopAll() {
-        fabrics.forEach { runCatching { it.close() } }
-        engines.forEach { runCatching { it.stop() } }
-    }
-
-    private fun engine(id: String): Engine {
-        val home = Files.createDirectories(dir.resolve("home-$id"))
-        return Engine.create(EngineArgs(id, null, home, 0), mapOf("CRINGLE_HOME" to home.toString())).start().also { engines += it }
-    }
-
-    private fun senderDef(schema: SchemaRef = string) =
-        BlockDefinition("src", emptyList(), listOf(PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), schema)), emptyList())
-
-    private fun receiverDef(schema: SchemaRef = string) =
-        BlockDefinition("dst", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), schema)), emptyList())
-
-    private class TestBlock(private val handler: suspend (TetherEvent) -> Unit) : Block {
-        lateinit var context: BlockContext
-
-        override suspend fun init(context: BlockContext) {
-            this.context = context
-        }
-
-        override suspend fun onTetherEvent(event: TetherEvent) = handler(event)
-    }
-
-    /** A fabric with one block on [engine]. */
-    private inner class Node(
-        val engine: Engine,
-        val fabricId: String,
-        definition: BlockDefinition,
-        tether: TetherDef,
-        capacity: Int = 64,
-        handler: suspend (TetherEvent) -> Unit = {},
-    ) {
-        val blockId: String = if (definition.name == "src") "s" else "d"
-        val block = TestBlock(handler)
-        val log = CopyOnWriteArrayList<String>()
-        val failures = CopyOnWriteArrayList<Throwable>()
-        private val provider = object : BlockProvider {
-            override val definitions = listOf(definition)
-            override fun createBlock(definitionName: String, drivers: DriverSet): Block = block
-        }
-        val fabric = FabricRuntime(
-            FabricSpec(
-                id = fabricId,
-                blueprint = Blueprint(fabricId, listOf(BlueprintBlock(blockId, "p/${definition.name}")), listOf(tether)),
-                resolver = BlockResolver { ref -> ResolvedBlock(provider, definition, PluginTrust.TRUSTED).takeIf { ref == "p/${definition.name}" } },
-                drivers = DriverFactory { _, _ -> TestDriverSet() },
-                paths = FabricPaths(dir.resolve("fabric-${engine.config.id}"), fabricId),
-                tethers = TetherConfig(SchemaRegistry(), capacity, remote = engine.remoteTethers.portsFor(fabricId)),
-                schemas = SchemaRegistry(),
-                logger = FabricLogger { _, message -> log += message },
-                watchdog = WatchdogConfig(enabled = false),
-            ),
-        ).also { fabrics += it }
-
-        fun out(): Tether = block.context.ports.port("out")
-
-        fun start() = runBlocking { fabric.start() }
-    }
-
-    /** The tether of the sending fabric `fa` on [a]: its local `from` is `s.out`, the receiving end is `d.in` of `fb` on [b]. */
-    private fun senderTether(b: Engine, fabric: String = "fb", block: String = "d", port: String = "in", fingerprint: String = b.identity.publicKeyFingerprint) =
-        TetherDef(TetherType.MESSAGE, Endpoint("s", "out"), null, remote = RemoteEndpoint("127.0.0.1:${b.tetherPort}", fingerprint, fabric, block, port))
-
-    /** The tether of the receiving fabric `fb` on [b]: its local `to` is `d.in`, the sender is `s.out` of `fa` on [a]. */
-    private fun receiverTether(a: Engine, delivery: DeliveryPolicy = DeliveryPolicy.DROP, fingerprint: String = a.identity.publicKeyFingerprint) =
-        TetherDef(
-            TetherType.MESSAGE, null, Endpoint("d", "in"), delivery = delivery,
-            remote = RemoteEndpoint("127.0.0.1:${a.tetherPort}", fingerprint, "fa", "s", "out"),
-        )
-
+class RemoteTetherTest : RemoteTetherTestBase() {
     @Test
     fun hundredMessagesArriveInOrderAndEqual(): Unit = runBlocking {
         val a = engine("a")
@@ -209,34 +131,42 @@ class RemoteTetherTest {
         val a = engine("a")
         val b = engine("b")
         val errors = CopyOnWriteArrayList<Throwable>()
-        val receivers = ArrayList<AutoCloseable>()
         val ports = b.remoteTethers.portsFor("fb")
-        receivers += ports.register(
+        val registration = ports.register(
             listOf(
-                RemoteReceiver("t", "d", "in", null, a.identity.publicKeyFingerprint) { value ->
-                    when ((value as kotlinx.serialization.json.JsonPrimitive).content) {
-                        "invalid" -> throw TetherValidationException("bad value", listOf("$: wrong"))
-                        "stopped" -> throw TetherDeliveryException("the fabric is stopping")
-                        else -> Unit
+                RemoteReceiver("t", "d", "in", null, a.identity.publicKeyFingerprint, TetherMode.TYPED) {
+                    object : RemoteInbound {
+                        override suspend fun onFrame(frame: WireFrame) {
+                            when (((frame as Message).value as JsonPrimitive).content) {
+                                "invalid" -> throw TetherValidationException("bad value", listOf("$: wrong"))
+                                "stopped" -> throw TetherDeliveryException("the fabric is stopping")
+                            }
+                        }
+
+                        override fun onEnded(cause: Throwable?) {}
                     }
                 },
             ),
         )
         try {
             runBlocking {
-                val call = a.remoteTethers.portsFor("fa").connect(
-                    RemoteSender("t", RemoteEndpoint("127.0.0.1:${b.tetherPort}", b.identity.publicKeyFingerprint, "fb", "d", "in"), "cringle.std", { errors += it }, { }),
-                )
-                call.send(kotlinx.serialization.json.JsonPrimitive("invalid"))
-                call.send(kotlinx.serialization.json.JsonPrimitive("stopped"))
-                call.send(kotlinx.serialization.json.JsonPrimitive("fine"))
+                val inbound = object : RemoteInbound {
+                    override suspend fun onFrame(frame: WireFrame) {
+                        errors += RemoteErrors.exception((frame as cringle.wire.Error).value)
+                    }
+
+                    override fun onEnded(cause: Throwable?) {}
+                }
+                val remote = RemoteEndpoint("127.0.0.1:${b.tetherPort}", b.identity.publicKeyFingerprint, "fb", "d", "in")
+                val call = a.remoteTethers.portsFor("fa").connect(RemoteSender("t", remote, "cringle.std", TetherMode.TYPED, inbound))
+                for (text in listOf("invalid", "stopped", "fine")) call.send(Message(0u, "cringle.std", JsonPrimitive(text)))
                 withTimeout(30.seconds) { while (errors.size < 2) kotlinx.coroutines.yield() }
                 call.close()
             }
             assertTrue(errors[0] is TetherValidationException && errors[0].message == "bad value" && (errors[0] as TetherValidationException).problems == listOf("$: wrong"), errors[0].toString())
             assertTrue(errors[1] is TetherDeliveryException && errors[1].message == "the fabric is stopping", errors[1].toString())
         } finally {
-            receivers.forEach { it.close() }
+            registration.close()
         }
     }
 

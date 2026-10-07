@@ -37,7 +37,7 @@ public class WireCodec(
             TetherMode.TYPED -> if (frame.frameType == FrameType.BYTES) {
                 throw WireFormatException("typed tether cannot carry BYTES frame")
             }
-            TetherMode.BYTES -> if (frame.frameType != FrameType.BYTES) {
+            TetherMode.BYTES -> if (!allowedInBytesMode(frame.frameType)) {
                 throw WireFormatException("bytes tether cannot carry typed frame ${frame.frameType}")
             }
         }
@@ -72,6 +72,13 @@ public class WireCodec(
         return result
     }
 
+    /**
+     * A `bytes`-mode tether carries `BYTES` frames and the control frames that carry no value of a schema: `STREAM_OPEN`
+     * and `STREAM_CLOSE` (a bytes tether can carry several byte streams, told apart by the stream ID) and `ERROR`.
+     */
+    private fun allowedInBytesMode(type: FrameType): Boolean =
+        type == FrameType.BYTES || type == FrameType.STREAM_OPEN || type == FrameType.STREAM_CLOSE || type == FrameType.ERROR
+
     /** Creates a new streaming decoder. The decoder is stateful and not thread-safe. */
     public fun newDecoder(): WireDecoder = WireDecoder(this)
 
@@ -105,7 +112,7 @@ public class WireCodec(
             TetherMode.TYPED -> if (frameType == FrameType.BYTES) {
                 throw WireFormatException("typed tether cannot carry BYTES frame")
             }
-            TetherMode.BYTES -> if (frameType != FrameType.BYTES) {
+            TetherMode.BYTES -> if (!allowedInBytesMode(frameType)) {
                 throw WireFormatException("bytes tether cannot carry typed frame $frameType")
             }
         }

@@ -22,7 +22,7 @@ Each tether in the blueprint carries a `mode` field with one of two values:
 | Mode | Meaning |
 |---|---|
 | `typed` | the tether carries schema-checked values; the codec uses the typed frame types (`MESSAGE`, `REQUEST`, `RESPONSE`, `STREAM_OPEN`, `STREAM_ITEM`, `STREAM_CLOSE`, `ERROR`) |
-| `bytes` | the tether carries raw bytes; the codec uses only the `BYTES` frame type |
+| `bytes` | the tether carries raw bytes; the codec uses the `BYTES` frame type and the control frames that carry no value of a schema: `STREAM_OPEN`, `STREAM_CLOSE` and `ERROR` |
 
 The default mode depends on the tether type:
 
@@ -34,7 +34,7 @@ The default mode depends on the tether type:
 | `BYTE_STREAM` | `bytes` |
 | `TCP` | `bytes` |
 
-A tether has exactly one mode; the mode is fixed in the blueprint and never changes at runtime. The codec rejects a frame the tether was not declared to carry: a typed frame on a `bytes`-mode tether, or a `BYTES` frame on a typed tether, raises `WireFormatException`.
+A tether has exactly one mode; the mode is fixed in the blueprint and never changes at runtime. The codec rejects a frame the tether was not declared to carry: a frame with a value (`MESSAGE`, `REQUEST`, `RESPONSE`, `STREAM_ITEM`) on a `bytes`-mode tether, or a `BYTES` frame on a typed tether, raises `WireFormatException`. A `bytes`-mode tether can carry several byte streams over one connection: `STREAM_OPEN` and `STREAM_CLOSE` open and close one, and the stream ID of its `BYTES` frames tells them apart.
 
 ## 3. Frame layout
 
@@ -77,7 +77,7 @@ The codec understands eight frame types:
 | `0x07` | `BYTES` | raw bytes; payload: literal bytes (not base64) |
 | `0x08` | `ERROR` | an error; payload: canonical JSON of `cringle.std/Error` |
 
-`MESSAGE`, `REQUEST`, `RESPONSE`, `STREAM_ITEM` and `ERROR` are typed frames: they carry a value of a schema, the schema namespace is present in the header, and the payload is encoded by the `PayloadCodec` of the tether. `STREAM_OPEN` and `STREAM_CLOSE` are typed control frames: they carry no value, the schema namespace is absent, and the payload is empty. `BYTES` is the only frame type allowed on a `bytes`-mode tether: the schema namespace is absent and the payload is the literal bytes of the stream.
+`MESSAGE`, `REQUEST`, `RESPONSE`, `STREAM_ITEM` and `ERROR` are typed frames: they carry a value of a schema, the schema namespace is present in the header, and the payload is encoded by the `PayloadCodec` of the tether. `STREAM_OPEN` and `STREAM_CLOSE` are typed control frames: they carry no value, the schema namespace is absent, and the payload is empty. `BYTES` is the frame type of a `bytes`-mode tether: the schema namespace is absent, the payload is the literal bytes of the stream, and the `correlationOrStreamId` is the ID of the stream (see §6). `STREAM_OPEN`, `STREAM_CLOSE` and `ERROR` are allowed on a `bytes`-mode tether too, because they carry no value of a schema.
 
 ## 5. Schema reference encoding
 
@@ -98,9 +98,10 @@ The schema namespace is encoded as UTF-8 bytes in the frame header, preceded by 
 The `correlationOrStreamId` field carries one of two things, depending on the frame type:
 
 - For `REQUEST` and `RESPONSE`, it is the **correlation ID**. The responder echoes the same ID in the `RESPONSE` frame so the requester can match the response to the request.
-- For `STREAM_OPEN`, `STREAM_ITEM` and `STREAM_CLOSE`, it is the **stream ID**. Opening a stream allocates the ID; both ends use the same ID for every `STREAM_ITEM` until `STREAM_CLOSE`.
+- For `STREAM_OPEN`, `STREAM_ITEM`, `STREAM_CLOSE` and `BYTES`, it is the **stream ID**. Opening a stream allocates the ID; both ends use the same ID for every `STREAM_ITEM` (or `BYTES` frame) until `STREAM_CLOSE`.
+- For `ERROR`, it is the correlation ID or the stream ID of the request or stream that the error concerns, or `0` if it concerns neither (for example a `MESSAGE` that could not be taken, or a call that is refused).
 
-For `MESSAGE`, `BYTES` and `ERROR`, the field is reserved and set to `0` by the sender; the receiver ignores it.
+For `MESSAGE`, the field is reserved and set to `0` by the sender; the receiver ignores it.
 
 The codec is **stateless**: it does not allocate, remember or match correlation or stream IDs. The driver owns the ID map and is responsible for allocating IDs, matching responses to requests, and matching stream items to their stream.
 

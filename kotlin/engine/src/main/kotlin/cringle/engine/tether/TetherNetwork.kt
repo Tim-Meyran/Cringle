@@ -29,12 +29,23 @@ import cringle.packaging.RemoteEndpoint
 import cringle.packaging.RetryConfig
 import cringle.packaging.SerialTetherConfig
 import cringle.schema.SchemaValidator
+import cringle.wire.Bytes
+import cringle.wire.Message
+import cringle.wire.Request
+import cringle.wire.Response
+import cringle.wire.StreamClose
+import cringle.wire.StreamItem
+import cringle.wire.StreamOpen
+import cringle.wire.TetherMode
+import cringle.wire.WireFrame
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
@@ -75,6 +86,9 @@ public class TetherNetwork private constructor(
     private val validator = config.schemas?.let { SchemaValidator(it) }
 
     @Volatile private var deliverer: TetherDeliverer? = null
+
+    /** Runs the short jobs that must outlive [close]: telling the senders that the fabric stops. */
+    private val notifier = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** What the receiving ends of this network registered at the remote driver; see [release]. */
     @Volatile private var registration: AutoCloseable? = null
@@ -136,41 +150,220 @@ public class TetherNetwork private constructor(
         }
     }
 
+    // ---- tethers that end on another engine (spec/tether.md, "Tethers between engines") ----
+
     /** Opens the call of a tether that sends to another engine; the call is accepted by the other engine before this returns. */
     private suspend fun openRemote(c: Connection) {
         val ports = config.remote ?: throw TetherWiringException("tether ${c.info.id}: this engine cannot run tethers to other engines")
         val remote = checkNotNull(c.remote)
         c.lost = null
+        c.remoteReason = null
         c.lostSignal = CompletableDeferred()
-        c.call = ports.connect(
-            RemoteSender(
-                c.info.id,
-                remote,
-                c.fromPort.schema.namespace,
-                onError = { e -> onDeliveryFailure(c.info, e) },
-                onClosed = { e -> connectionLost(c, e) },
-            ),
-        )
+        c.call = ports.connect(RemoteSender(c.info.id, remote, c.fromPort.schema.namespace, c.wireMode, SenderInbound(c)))
     }
 
-    /** The other engine ended the call: waiting and later senders fail at once, as when the fabric stops. */
+    /** The other engine ended the call: everything that waits for it fails at once, as when the fabric stops. */
     private fun connectionLost(c: Connection, cause: Throwable?) {
         if (stopping != null) return
-        val reason = (cause as? TetherDeliveryException) ?: TetherDeliveryException("tether ${c.info.id}: the connection to ${c.remote?.address} was lost", cause)
+        val why = c.remoteReason
+        val reason = when {
+            why != null -> TetherDeliveryException(why, cause)
+            cause is TetherDeliveryException -> cause
+            else -> TetherDeliveryException("tether ${c.info.id}: the connection to ${c.remote?.address} was lost", cause)
+        }
         c.lost = reason
         c.lostSignal.complete(Unit)
         c.queue?.close(reason)
+        for (r in c.remoteRequests.values) r.completeExceptionally(reason)
+        c.remoteRequests.clear()
+        for (st in c.remoteStreams.values) st.fail(reason)
+        c.remoteStreams.clear()
         onDeliveryFailure(c.info, reason)
     }
 
+    /** What the other engine sends to the sending end of [c]: responses, stream items and errors. */
+    private inner class SenderInbound(private val c: Connection) : RemoteInbound {
+        override suspend fun onFrame(frame: WireFrame) {
+            val id = frame.correlationOrStreamId.toLong()
+            when (frame) {
+                is Response -> c.remoteRequests.remove(id)?.let { pending ->
+                    try {
+                        validate(c, frame.value, "response")
+                        val value = fromJson(frame.value) ?: JsonNull
+                        hook(c, TrafficKind.RESPONSE, value)
+                        pending.complete(value)
+                    } catch (e: TetherValidationException) {
+                        pending.completeExceptionally(e)
+                    }
+                }
+                is StreamItem -> c.remoteStreams[id]?.let { receiveItem(c, it, frame.value) }
+                is Bytes -> c.remoteStreams[id]?.let { send(it.fromWire, frame.payload) }
+                is StreamClose -> c.remoteStreams.remove(id)?.closedByTheOtherEngine()
+                is cringle.wire.Error -> {
+                    val failure = RemoteErrors.exception(frame.value)
+                    when {
+                        c.remoteRequests.remove(id)?.completeExceptionally(failure) != null -> {}
+                        c.remoteStreams.remove(id)?.fail(failure) != null -> {}
+                        else -> {
+                            if (id == 0L && RemoteErrors.code(frame.value) == RemoteErrors.STOPPING) c.remoteReason = failure.message
+                            onDeliveryFailure(c.info, failure)
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+
+        override fun onEnded(cause: Throwable?) = connectionLost(c, cause)
+    }
+
+    /** A sender is allowed for [c]: what it sends is queued like the traffic of a local tether. */
+    private inner class ReceiverInbound(private val c: Connection, private val session: RemoteSession) : RemoteInbound {
+        private val streams = ConcurrentHashMap<Long, RemoteStream>()
+        private val ns get() = c.toPort.schema.namespace
+
+        override suspend fun onFrame(frame: WireFrame) {
+            val id = frame.correlationOrStreamId.toLong()
+            val type = c.info.type
+            when {
+                frame is Message && type == TetherType.MESSAGE -> {
+                    val queue = running(c)
+                    validate(c, frame.value, "message")
+                    send(queue, Envelope.Message(fromJson(frame.value) ?: JsonNull))
+                }
+                frame is Request && type == TetherType.REQUEST_RESPONSE -> {
+                    val queue = running(c)
+                    validate(c, frame.value, "request")
+                    val response = CompletableDeferred<Any>()
+                    send(queue, Envelope.Request(fromJson(frame.value) ?: JsonNull, response))
+                    // the answer goes back whenever the block gives it, the call goes on meanwhile
+                    scope?.launch {
+                        try {
+                            session.reply(Response(id.toULong(), ns, toJson(response.await())))
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            runCatching { session.reply(cringle.wire.Error(id.toULong(), RemoteErrors.value(e))) }
+                        }
+                    }
+                }
+                frame is StreamOpen && (type == TetherType.STREAM || type == TetherType.BYTE_STREAM) -> {
+                    val queue = running(c)
+                    val st = RemoteStream(Channel(c.bufferCapacity), Channel(c.bufferCapacity))
+                    streamChannels += st.toWire
+                    streamChannels += st.fromWire
+                    streams[id] = st
+                    pumpToWire(c, id, st, { session.reply(it) }) { streams.remove(id) }
+                    // the block gets the stream like one of a local tether: what comes from the wire is `toReceiver`
+                    send(queue, if (type == TetherType.STREAM) Envelope.Stream(st.fromWire, st.toWire) else Envelope.Bytes(st.fromWire.cast(), st.toWire.cast()))
+                }
+                frame is StreamItem && type == TetherType.STREAM -> streams[id]?.let { receiveItem(c, it, frame.value) }
+                frame is Bytes && type == TetherType.BYTE_STREAM -> streams[id]?.let { send(it.fromWire, frame.payload) }
+                frame is StreamClose && (type == TetherType.STREAM || type == TetherType.BYTE_STREAM) -> streams.remove(id)?.closedByTheOtherEngine()
+                else -> throw TetherDeliveryException("tether ${c.info.id}: a ${frame.frameType} frame is not valid on a $type tether")
+            }
+        }
+
+        override fun onEnded(cause: Throwable?) {
+            c.sessions -= this
+            val reason = TetherDeliveryException("tether ${c.info.id}: the connection to the sender ended", cause)
+            for (st in streams.values) st.fail(reason)
+            streams.clear()
+        }
+
+        /** The fabric stops: the sender is told, then the call ends. */
+        fun stop(reason: String) {
+            notifier.launch {
+                runCatching { session.reply(cringle.wire.Error(0u, RemoteErrors.value(RemoteErrors.STOPPING, reason))) }
+                session.end()
+            }
+        }
+    }
+
+    private fun running(c: Connection): Channel<Envelope> = c.queue ?: throw TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
+
+    /** Validates a stream item from the wire against the schema of the local port and hands it to the reader of the stream. */
+    private suspend fun receiveItem(c: Connection, st: RemoteStream, value: JsonElement) {
+        validate(c, value, "stream item")
+        send(st.fromWire, fromJson(value) ?: JsonNull)
+    }
+
     /**
-     * Takes a value from the wire for the receiving end of [c] (called by the remote driver): validates it against the
-     * schema of the local port and queues it like a value of a local tether. Suspends while the buffer is full.
+     * Forwards what the local side writes to a remote stream as frames: items (or bytes, in frames of at most
+     * [MAX_BYTES_FRAME]), and a `STREAM_CLOSE` when the local side closes its end. Closing is for both directions: the
+     * reading end is closed with it. [forget] drops the stream when it is over.
      */
-    private suspend fun receiveRemote(c: Connection, value: JsonElement) {
-        val queue = c.queue ?: throw TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
-        validate(c, value, "message")
-        send(queue, Envelope.Message(fromJson(value) ?: JsonNull))
+    private fun pumpToWire(c: Connection, id: Long, st: RemoteStream, write: suspend (WireFrame) -> Unit, forget: () -> Unit) {
+        val s = scope ?: return
+        s.launch {
+            try {
+                for (item in st.toWire) {
+                    if (item is ByteArray) {
+                        var offset = 0
+                        while (offset < item.size) {
+                            val end = minOf(item.size, offset + MAX_BYTES_FRAME)
+                            write(Bytes(id.toULong(), item.copyOfRange(offset, end)))
+                            offset = end
+                        }
+                    } else {
+                        write(StreamItem(id.toULong(), c.fromPort.schema.namespace, toJson(item)))
+                    }
+                }
+                if (!st.closedByWire) write(StreamClose(id.toULong()))
+                st.fromWire.close()
+                forget()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                st.fail(e as? TetherDeliveryException ?: TetherDeliveryException("tether ${c.info.id}: ${e.message}", e))
+                forget()
+            }
+        }
+    }
+
+    /** The sending end of a request over the wire. */
+    private suspend fun remoteRequest(c: Connection, request: Any): Any {
+        val call = c.call ?: throw c.lost ?: TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
+        val value = validate(c, request, "request")
+        hook(c, TrafficKind.REQUEST, value)
+        val id = c.nextId.getAndIncrement()
+        val response = CompletableDeferred<Any>()
+        c.remoteRequests[id] = response
+        pendingRequests += response
+        response.invokeOnCompletion {
+            c.remoteRequests.remove(id)
+            pendingRequests.remove(response)
+        }
+        try {
+            call.send(Request(id.toULong(), c.fromPort.schema.namespace, toJson(value)))
+            return withTimeout(c.requestTimeout.toMillis()) { response.await() }
+        } catch (e: TimeoutCancellationException) {
+            response.cancel()
+            throw TetherTimeoutException("tether ${c.info.id}: no response within ${c.requestTimeout}")
+        } catch (e: Throwable) {
+            response.cancel()
+            throw e
+        }
+    }
+
+    /** The sending end of a stream (or byte stream) over the wire: the stream is opened on the other engine before this returns. */
+    private suspend fun <T> openRemoteStream(c: Connection, wrap: (Channel<Any>, Channel<Any>) -> T): T {
+        val call = c.call ?: throw c.lost ?: TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
+        val st = RemoteStream(Channel(c.bufferCapacity), Channel(c.bufferCapacity))
+        val id = c.nextId.getAndIncrement()
+        streamChannels += st.toWire
+        streamChannels += st.fromWire
+        c.remoteStreams[id] = st
+        try {
+            hook(c, TrafficKind.STREAM_OPENED, null)
+            call.send(StreamOpen(id.toULong()))
+        } catch (e: Throwable) {
+            c.remoteStreams.remove(id)
+            st.fail(e as? TetherDeliveryException ?: TetherDeliveryException("tether ${c.info.id}: ${e.message}", e))
+            throw e
+        }
+        pumpToWire(c, id, st, { call.send(it) }) { c.remoteStreams.remove(id) }
+        return wrap(st.toWire, st.fromWire)
     }
 
     private suspend fun openTcp(c: Connection, s: CoroutineScope, deliverer: TetherDeliverer) {
@@ -247,6 +440,10 @@ public class TetherNetwork private constructor(
             c.queue?.close(reason)
             c.call?.close()
             c.call = null
+            for (session in c.sessions) session.stop("tether ${c.info.id}: the fabric is stopping")
+            c.sessions.clear()
+            c.remoteRequests.clear()
+            c.remoteStreams.clear()
         }
         for (ch in streamChannels) ch.close(reason)
         streamChannels.clear()
@@ -327,12 +524,50 @@ public class TetherNetwork private constructor(
         /** Completed with [lost]: a sender that waits for room in the queue waits for this as well (closing the queue does not wake it). */
         @Volatile var lostSignal: CompletableDeferred<Unit> = CompletableDeferred()
 
+        /** What the other engine said when it ended the call (it is stopping), or `null`. */
+        @Volatile var remoteReason: String? = null
+
+        /** The wire mode of the tether. */
+        val wireMode: TetherMode = if (info.type == TetherType.BYTE_STREAM) TetherMode.BYTES else TetherMode.TYPED
+
+        /** Ids of the requests and streams that the sending end starts. */
+        val nextId = AtomicLong(1)
+
+        /** The requests and streams of the sending end that wait for the other engine. */
+        val remoteRequests = ConcurrentHashMap<Long, CompletableDeferred<Any>>()
+        val remoteStreams = ConcurrentHashMap<Long, RemoteStream>()
+
+        /** The accepted calls of the receiving end. */
+        val sessions = CopyOnWriteArrayList<ReceiverInbound>()
+
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
 
         @Volatile var serialConnection: SerialConnection? = null
     }
+
+    /** One stream (or byte stream) of a tether that ends on another engine: [toWire] is what the local side writes, [fromWire] what it reads. */
+    private class RemoteStream(val toWire: Channel<Any>, val fromWire: Channel<Any>) {
+        /** The other engine closed the stream, so it needs no `STREAM_CLOSE` back. */
+        @Volatile var closedByWire = false
+
+        /** Ends the stream for the local side with [reason]: readers and writers fail with it. */
+        fun fail(reason: Throwable) {
+            toWire.close(reason)
+            fromWire.close(reason)
+        }
+
+        /** `STREAM_CLOSE` from the other engine: closing is for both directions. */
+        fun closedByTheOtherEngine() {
+            closedByWire = true
+            fromWire.close()
+            toWire.close()
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> Channel<Any>.cast(): Channel<T> = this as Channel<T>
 
     private sealed interface Envelope {
         class Message(val value: Any) : Envelope
@@ -405,7 +640,7 @@ public class TetherNetwork private constructor(
                 if (first) hook(c, TrafficKind.MESSAGE, env.value)
                 if (c.remoteSends) {
                     val call = c.call ?: throw c.lost ?: TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
-                    call.send(toJson(env.value))
+                    call.send(Message(0u, c.fromPort.schema.namespace, toJson(env.value)))
                 } else {
                     target.deliver(to.block, TetherEvent.Message(port, env.value))
                 }
@@ -506,6 +741,7 @@ public class TetherNetwork private constructor(
 
         override suspend fun request(request: Any): Any {
             require(TetherType.REQUEST_RESPONSE, "request")
+            if (c.remoteSends) return remoteRequest(c, request)
             val response = CompletableDeferred<Any>()
             pendingRequests += response
             response.invokeOnCompletion { pendingRequests.remove(response) }
@@ -520,6 +756,7 @@ public class TetherNetwork private constructor(
 
         override suspend fun openStream(): TetherStream {
             require(TetherType.STREAM, "openStream")
+            if (c.remoteSends) return openRemoteStream(c) { toWire, fromWire -> ValueStream(c, toWire, fromWire) }
             val toReceiver = Channel<Any>(c.bufferCapacity)
             val fromReceiver = Channel<Any>(c.bufferCapacity)
             streamChannels += toReceiver
@@ -540,6 +777,7 @@ public class TetherNetwork private constructor(
                 }
                 return TcpByteStream(c, connection)
             }
+            if (c.remoteSends) return openRemoteStream(c) { toWire, fromWire -> ByteStream(c, toWire.cast(), fromWire.cast()) }
             val toReceiver = Channel<ByteArray>(c.bufferCapacity)
             val fromReceiver = Channel<ByteArray>(c.bufferCapacity)
             streamChannels += toReceiver
@@ -559,7 +797,7 @@ public class TetherNetwork private constructor(
         override suspend fun send(item: Any) {
             val checked = validate(c, item, "stream item")
             hook(c, TrafficKind.STREAM_ITEM, checked)
-            send(outbound, checked)
+            send(outbound, checked, c)
         }
 
         override suspend fun close() {
@@ -577,7 +815,7 @@ public class TetherNetwork private constructor(
 
         override suspend fun write(bytes: ByteArray) {
             hook(c, TrafficKind.BYTES, bytes)
-            send(outbound, bytes)
+            send(outbound, bytes, c)
         }
 
         override suspend fun close() {
@@ -587,8 +825,8 @@ public class TetherNetwork private constructor(
     }
 
     public companion object {
-        /** Why a remote tether of another type than `MESSAGE` is rejected until it is implemented (#147). */
-        public const val REMOTE_TYPE_NOT_SUPPORTED: String = "is not supported across engines yet (only MESSAGE is, the other types follow)"
+        /** The largest payload of one `BYTES` frame; a bigger write is split (the wire format allows 4 MiB per frame). */
+        private const val MAX_BYTES_FRAME = 256 * 1024
 
         private fun key(block: String, port: String, index: Int?) = "$block/$port/${index ?: "-"}"
 
@@ -645,7 +883,7 @@ public class TetherNetwork private constructor(
                     val id = if (sends) "${label(local)} -> ${remote.address}/${remote.fabric}/${label(far)}" else "${remote.address}/${remote.fabric}/${label(far)} -> ${label(local)}"
                     val port = endpoint(local, if (sends) PortDirection.OUT else PortDirection.IN, "tether $id") ?: continue
                     if (t.type !in port.tetherTypes) problems += "tether $id: port '${local.port}' does not support ${t.type}"
-                    if (t.type != TetherType.MESSAGE) problems += "tether $id: a remote ${t.type} tether $REMOTE_TYPE_NOT_SUPPORTED"
+                    if (t.type == TetherType.TCP || t.type == TetherType.SERIAL) problems += "tether $id: a ${t.type} tether is a local resource and cannot end on another engine"
                     if (config.remote == null) problems += "tether $id: this engine cannot run tethers to other engines"
                     val c = Connection(
                         TetherInfo(id, t.type, if (sends) local else far, if (sends) far else local, remote),
@@ -710,7 +948,9 @@ public class TetherNetwork private constructor(
                 network.registration = config.remote!!.register(
                     receivers.map { (c, remote) ->
                         val local = c.info.to
-                        RemoteReceiver(c.info.id, local.block, local.port, local.index, remote.fingerprint) { value -> network.receiveRemote(c, value) }
+                        RemoteReceiver(c.info.id, local.block, local.port, local.index, remote.fingerprint, c.wireMode) { session ->
+                            network.ReceiverInbound(c, session).also { c.sessions += it }
+                        }
                     },
                 )
             }
