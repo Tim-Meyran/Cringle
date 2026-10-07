@@ -4,6 +4,7 @@ import com.google.protobuf.gradle.id
 
 plugins {
     alias(libs.plugins.protobuf)
+    `java-test-fixtures`
 }
 
 val versionCatalog = extensions.getByType<VersionCatalogsExtension>().named("libs")

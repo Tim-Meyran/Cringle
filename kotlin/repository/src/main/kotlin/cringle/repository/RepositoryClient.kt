@@ -3,6 +3,7 @@
 package cringle.repository
 
 import com.google.protobuf.ByteString
+import cringle.common.TlsHelper
 import cringle.packaging.PackageHash
 import cringle.packaging.PackageInfo
 import cringle.packaging.PackageKind
@@ -37,10 +38,14 @@ public class RepositoryClientException(public val status: Status.Code, message: 
 /**
  * A client of a repository. It is a [PackageSource] for the resolver (the `versions` and `info` calls block) and
  * downloads packages with hash verification: a file whose SHA-256 differs from the published hash is never kept.
- * [token] is sent as `Bearer` credentials when the repository requires authentication.
+ * [token] is sent as `Bearer` credentials when the repository requires authentication. With [tls] the channel is mutual TLS and
+ * only a server whose key is in the trust store is accepted; without it the channel is plaintext (a transition, #39).
  */
-public class RepositoryClient(address: String, private val token: String? = null) : PackageSource, AutoCloseable {
-    private val channel: ManagedChannel = NettyChannelBuilder.forTarget(address).usePlaintext().maxInboundMessageSize(CHUNK_BYTES * 4).build()
+public class RepositoryClient(address: String, private val token: String? = null, tls: RepositoryTls? = null) : PackageSource, AutoCloseable {
+    private val channel: ManagedChannel = NettyChannelBuilder.forTarget(address)
+        .also { if (tls == null) it.usePlaintext() else it.sslContext(TlsHelper.channelCredentials(tls.identity, tls.trustStore)) }
+        .maxInboundMessageSize(CHUNK_BYTES * 4)
+        .build()
     private val stub = RepositoryServiceGrpcKt.RepositoryServiceCoroutineStub(channel).let { s ->
         if (token == null) s else s.withCallCredentials(object : CallCredentials() {
             override fun applyRequestMetadata(info: RequestInfo, executor: Executor, applier: MetadataApplier) {
