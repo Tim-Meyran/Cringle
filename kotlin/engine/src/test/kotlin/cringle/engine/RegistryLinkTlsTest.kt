@@ -33,9 +33,7 @@ class RegistryLinkTlsTest {
         closeables.reversed().forEach { runCatching { it() } }
     }
 
-    private fun args(id: String, insecureDevMode: Boolean = false) = EngineArgs(
-        id = id, name = "Engine $id", home = dir.resolve("home"), managementPort = 0, insecureDevMode = insecureDevMode,
-    )
+    private fun args(id: String) = EngineArgs(id = id, name = "Engine $id", home = dir.resolve("home"), managementPort = 0)
 
     private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 

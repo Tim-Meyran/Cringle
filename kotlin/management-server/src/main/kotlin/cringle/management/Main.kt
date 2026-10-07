@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] --insecure-dev-mode"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth]"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -28,7 +28,6 @@ public fun main(args: Array<String>) {
     val machines = ArrayList<Pair<String, String>>()
     var cacheDays: Long? = null
     var auth = false
-    var insecure = false
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -54,14 +53,11 @@ public fun main(args: Array<String>) {
             }
             "--cache-max-unused-days" -> cacheDays = value(option).toLongOrNull()?.takeIf { it >= 0 } ?: fail("--cache-max-unused-days must be a number >= 0")
             "--auth" -> auth = true
-            "--insecure-dev-mode" -> insecure = true
             else -> fail("unknown argument '$option'")
         }
         i += 1
     }
-    if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
     CringleLogging.init(CringleHome.resolve(home), "management", "main")
-    System.err.println("WARNING: INSECURE DEV MODE - the connection to the management server is not encrypted (loopback only); its channels to daemons, engines and repositories are mTLS")
     val base = CringleHome.resolve(home).resolve("management")
     // the identity and the peers of the management server: every channel to a daemon, engine, repository or router is mTLS
     val identity = Identity.loadOrCreate(base, ComponentKind.MANAGEMENT.commonName("management"))
@@ -87,6 +83,8 @@ public fun main(args: Array<String>) {
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")
+    // the fingerprint that CLI and WebUI pin the server to ('cringle login --fingerprint'); it does not change while the key stays
+    println("fingerprint=${identity.publicKeyFingerprint}")
     System.out.flush()
     Thread.currentThread().join()
 }

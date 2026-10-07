@@ -37,9 +37,9 @@ $DaemonPort = 7400
 $ManagementPort = 7500
 $Services = @(
     @{ Id = 'cringle-daemon'; Name = 'Cringle Daemon'; Script = 'cringle-daemon.bat'
-       Arguments = "--port $DaemonPort --combined --insecure-dev-mode"; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
+       Arguments = "--port $DaemonPort --combined"; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
     @{ Id = 'cringle-management'; Name = 'Cringle Management Server'; Script = 'cringle-management-server.bat'
-       Arguments = "--port $ManagementPort --insecure-dev-mode"; Description = 'Cringle management server' }
+       Arguments = "--port $ManagementPort"; Description = 'Cringle management server' }
 )
 
 function Write-Info([string]$Message) {

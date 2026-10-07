@@ -4,12 +4,14 @@ package cringle.management.test
 
 import cringle.common.ComponentKind
 import cringle.common.Identity
+import cringle.common.TlsHelper
 import cringle.common.TrustEntry
 import cringle.common.TrustKind
 import cringle.common.TrustStore
 import cringle.common.test.TestTls
 import cringle.daemon.Daemon
 import cringle.management.ManagementCore
+import cringle.management.ManagementServer
 import cringle.management.ManagementStore
 import cringle.repository.PackageRepository
 import cringle.repository.RepositoryServer
@@ -17,6 +19,9 @@ import cringle.repository.RepositoryTls
 import cringle.router.RouterServer
 import cringle.router.RouterTls
 import cringle.router.users.UserManager
+import io.grpc.ManagedChannel
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -95,7 +100,17 @@ public class ManagementTls(private val root: Path) {
         return RouterServer(registryFile, tls = RouterTls(identity, store)).also { it.start() }
     }
 
-    private companion object {
-        const val NAME = "management"
+    public companion object {
+        private const val NAME = "management"
+
+        /**
+         * A channel to [server] the way the CLI opens it: TLS 1.3, no client certificate, pinned to the fingerprint of the key
+         * of the server. The caller shuts it down.
+         */
+        public fun channelTo(server: ManagementServer): ManagedChannel {
+            val pinned = TrustStore(Files.createTempDirectory("cringle-mgmt-client").resolve("trust.json"))
+            pinned.add(TrustEntry(server.core.identity.publicKeyFingerprint, "management-server", TrustKind.SERVER))
+            return NettyChannelBuilder.forAddress("127.0.0.1", server.port).sslContext(TlsHelper.channelCredentials(null, pinned)).build()
+        }
     }
 }

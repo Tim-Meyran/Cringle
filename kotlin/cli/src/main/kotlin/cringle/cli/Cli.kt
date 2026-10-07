@@ -29,14 +29,12 @@ public class Cli(
             var json = false
             var server: String? = null
             var home: String? = null
-            var insecureOption = false
             val rest = ArrayList<String>()
             var i = 0
             while (i < args.size) {
                 val a = args[i]
                 when {
                     a == "--json" -> json = true
-                    a == "--insecure-dev-mode" -> insecureOption = true
                     a == "--server" -> server = args.getOrNull(++i) ?: throw UsageException("--server needs a value")
                     a.startsWith("--server=") -> server = a.removePrefix("--server=")
                     a == "--home" -> home = args.getOrNull(++i) ?: throw UsageException("--home needs a value")
@@ -73,10 +71,8 @@ public class Cli(
             val effective = Profile(
                 server ?: environment["CRINGLE_SERVER"]?.takeIf { it.isNotBlank() } ?: stored.server,
                 environment["CRINGLE_TOKEN"]?.takeIf { it.isNotBlank() } ?: stored.token,
-                stored.insecure,
+                environment["CRINGLE_FINGERPRINT"]?.takeIf { it.isNotBlank() } ?: stored.fingerprint,
             )
-            // the connection is not encrypted until mTLS exists (issue #13), which has to be accepted explicitly
-            val insecure = insecureOption || environment["CRINGLE_INSECURE_DEV_MODE"] == "1" || stored.insecure
             if (command.needsServer && effective.server == null) {
                 throw UsageException("no server address: use --server host:port, CRINGLE_SERVER, or 'cringle login --server host:port'")
             }
@@ -85,16 +81,14 @@ public class Cli(
             env = Env(
                 connection = {
                     connection ?: run {
-                        env.requireInsecure()
-                        Connection(effective.server!!, effective.token).also { connection = it }
+                        val pinned = effective.fingerprint ?: throw UsageException(NO_FINGERPRINT)
+                        Connection(effective.server!!, effective.token, pinned).also { connection = it }
                     }
                 },
                 profile = effective,
                 profileFile = profileFile,
                 readSecret = { stdin.bufferedReader().readLine() },
                 save = { it.save(profileFile) },
-                insecure = insecure,
-                insecureOption = insecureOption,
                 warn = { err.println("warning: $it") },
                 environment = environment,
             )
@@ -131,7 +125,7 @@ public class Cli(
     private fun generalHelp(): String = buildString {
         appendLine("cringle - command line of the Cringle ManagementServer")
         appendLine()
-        appendLine("usage: cringle [--server host:port] [--json] [--home dir] [--insecure-dev-mode] <command> [options]")
+        appendLine("usage: cringle [--server host:port] [--json] [--home dir] <command> [options]")
         appendLine()
         appendLine("commands:")
         val width = COMMANDS.maxOf { "${it.name} ${it.args}".trim().length }
@@ -141,15 +135,13 @@ public class Cli(
         appendLine("  --server host:port  address of the ManagementServer (default: CRINGLE_SERVER or the profile)")
         appendLine("  --json              print JSON instead of text")
         appendLine("  --home dir          Cringle home with the profile cli.json (default: CRINGLE_HOME or ~/.cringle)")
-        appendLine("  --insecure-dev-mode accept the unencrypted connection (also CRINGLE_INSECURE_DEV_MODE=1, or stored by")
-        appendLine("                      'cringle login --insecure-dev-mode'); without it the CLI does not connect")
         appendLine("  --version           print the version of this installation")
         appendLine("  --help              show this help; 'cringle <command> --help' shows the options of a command")
         appendLine()
-        appendLine("The profile <home>/cli.json holds the server address and the token that 'cringle login' stored; the token can be")
-        appendLine("overridden with CRINGLE_TOKEN. Exit codes: 0 success, 1 the command failed, 2 the command line is wrong.")
-        appendLine("The connection is not encrypted yet (client certificates follow with mTLS, issue #13), so every command that connects")
-        appendLine("needs --insecure-dev-mode, CRINGLE_INSECURE_DEV_MODE=1 or a profile written with 'cringle login --insecure-dev-mode'.")
+        appendLine("The profile <home>/cli.json holds the server address, the token and the fingerprint of the server key that 'cringle login'")
+        appendLine("stored; the token can be overridden with CRINGLE_TOKEN and the fingerprint with CRINGLE_FINGERPRINT. The connection is TLS 1.3")
+        appendLine("and pinned to that fingerprint; a command that connects without one stops with exit code 2.")
+        appendLine("Exit codes: 0 success, 1 the command failed, 2 the command line is wrong.")
     }.trimEnd()
 
     private fun helpFor(words: List<String>): String {

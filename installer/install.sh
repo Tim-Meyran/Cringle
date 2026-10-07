@@ -210,10 +210,10 @@ EOF
 
 install_units() {
     write_unit cringle-daemon.service "Cringle daemon" network.target \
-        "$RUN_CURRENT/bin/cringle-daemon --port $DAEMON_PORT --combined --insecure-dev-mode"
+        "$RUN_CURRENT/bin/cringle-daemon --port $DAEMON_PORT --combined"
     if [ "$WITH_MANAGEMENT" -eq 1 ]; then
         write_unit cringle-management.service "Cringle management server" "network.target cringle-daemon.service" \
-            "$RUN_CURRENT/bin/cringle-management-server --port $MANAGEMENT_PORT --insecure-dev-mode"
+            "$RUN_CURRENT/bin/cringle-management-server --port $MANAGEMENT_PORT"
     fi
 }
 

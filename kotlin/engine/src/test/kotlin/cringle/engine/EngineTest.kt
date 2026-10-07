@@ -24,7 +24,7 @@ class EngineTest {
     @TempDir
     lateinit var home: Path
 
-    private fun args(id: String, name: String? = null) = EngineArgs(id, name, home, 0, true)
+    private fun args(id: String, name: String? = null) = EngineArgs(id, name, home, 0)
 
     private fun <T> withClient(engine: Engine, body: suspend (EngineManagementServiceCoroutineStub) -> T): T {
         val channel: ManagedChannel = TestClient(home.resolve("client-tls")).channel(engine)
@@ -36,10 +36,9 @@ class EngineTest {
     }
 
     @Test
-    fun engineStartsWithoutInsecureDevModeAndUsesMtlsForTheRouterChannel() {
-        // Without --insecure-dev-mode the engine starts and the management server is still reachable (plaintext, loopback only).
-        // The router channel uses mTLS; that is verified by the mTLS-specific tests.
-        val engine = Engine.create(args("e1", "Edge").copy(insecureDevMode = false), emptyMap()).start()
+    fun engineStartsWithoutAnyFlagAndItsManagementApiIsMtls() {
+        // there is no unencrypted mode: the management API is mTLS and the router channel is mTLS (RegistryLinkTest)
+        val engine = Engine.create(args("e1", "Edge"), emptyMap()).start()
         try {
             val status = withClient(engine) { it.getStatus(GetStatusRequest.getDefaultInstance()) }
             assertEquals("e1", status.engineId.value)
@@ -181,7 +180,7 @@ class EngineTest {
         )
         for (value in malformed) {
             val ex = assertThrows<EngineArgsException> {
-                Engine.create(args("e1").copy(insecureDevMode = false), mapOf("CRINGLE_ENROLLMENT_SECRET" to value))
+                Engine.create(args("e1"), mapOf("CRINGLE_ENROLLMENT_SECRET" to value))
             }
             assertTrue(
                 ex.message!!.contains("CRINGLE_ENROLLMENT_SECRET") || ex.message!!.contains("64 lowercase hex"),

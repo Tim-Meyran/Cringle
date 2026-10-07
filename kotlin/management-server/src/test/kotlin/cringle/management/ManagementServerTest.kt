@@ -116,7 +116,7 @@ class ManagementServerTest {
         track(ManagementServer(tls.core(ManagementStore(dir.resolve("state.json")), repository, token, router), users = users, recoverOnStart = recover).start())
 
     private fun stub(server: ManagementServer, token: String? = null): ManagementServiceCoroutineStub {
-        val channel: ManagedChannel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        val channel: ManagedChannel = ManagementTls.channelTo(server)
         closeables += AutoCloseable { channel.shutdownNow() }
         val s = ManagementServiceCoroutineStub(channel)
         if (token == null) return s

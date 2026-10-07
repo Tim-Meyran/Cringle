@@ -41,7 +41,7 @@ internal class RegistryLink(
     private val routerAddress: String,
     private val interval: Duration,
     private val fabrics: () -> List<FabricStateSummary>,
-    private val tls: EngineTls?,
+    private val tls: EngineTls,
     private var enrollmentSecret: ByteArray?,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -63,10 +63,8 @@ internal class RegistryLink(
                             .setManagementAddress(managementAddress)
 
                         // Add certificate and enrollment secret if using mTLS
-                        if (tls != null) {
-                            builder.setCertificate(ByteString.copyFrom(tls.identity.certificate.encoded))
-                            enrollmentSecret?.let { builder.setEnrollmentSecret(ByteString.copyFrom(it)) }
-                        }
+                        builder.setCertificate(ByteString.copyFrom(tls.identity.certificate.encoded))
+                        enrollmentSecret?.let { builder.setEnrollmentSecret(ByteString.copyFrom(it)) }
 
                         stub.registerEngine(builder.build())
                         registered = true
@@ -110,7 +108,6 @@ internal class RegistryLink(
     }
 
     private fun createChannel(): ManagedChannel {
-        val tls = tls ?: return NettyChannelBuilder.forTarget(routerAddress).usePlaintext().build()
         return NettyChannelBuilder.forTarget(routerAddress)
             .sslContext(TlsHelper.channelCredentials(tls.identity, tls.trustStore))
             .build()
