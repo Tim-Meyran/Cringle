@@ -65,6 +65,9 @@ public class ManagementTls(private val root: Path) {
 
     private val daemons = ArrayList<Daemon>()
 
+    /** The fingerprint of the key of the repository that [startRepository] started as number [index] (from 0). */
+    public fun repositoryFingerprint(index: Int): String = tls.fingerprint("repository-$index")
+
     /**
      * Starts a repository over [repository] with mutual TLS. The management server trusts it, it trusts the management
      * server and the engines of the daemons given to [trust], and the engines are told to trust it (it is a `COMPONENT` of
