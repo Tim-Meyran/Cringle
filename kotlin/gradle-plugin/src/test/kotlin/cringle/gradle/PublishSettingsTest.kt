@@ -131,4 +131,30 @@ class PublishSettingsTest {
         val noAddress = assertThrows<GradleException> { PublishSettings.resolve(null, emptyMap(), CliProfile(null, "secret")) }
         assertFalse("secret" in noAddress.message.orEmpty(), noAddress.message.orEmpty())
     }
+    /** TLS (#37): the fingerprint comes from the task, then the environment, then the profile; the first one wins. */
+    @Test
+    fun theFingerprintComesFromTheTaskThenTheEnvironmentThenTheProfile() {
+        val withProfile = CliProfile("profile-server:1234", null, "profile-fp")
+        val environment = mapOf("CRINGLE_FINGERPRINT" to "env-fp")
+        assertEquals("task-fp", PublishSettings.resolve("s:1", environment, withProfile, "task-fp").fingerprint)
+        assertEquals("env-fp", PublishSettings.resolve("s:1", environment, withProfile).fingerprint)
+        assertEquals("profile-fp", PublishSettings.resolve("s:1", emptyMap(), withProfile).fingerprint)
+        assertNull(PublishSettings.resolve("s:1", emptyMap(), null).fingerprint)
+        assertEquals("profile-fp", PublishSettings.resolve("s:1", mapOf("CRINGLE_FINGERPRINT" to "  "), withProfile, "").fingerprint, "a blank value counts as none")
+    }
+
+    @Test
+    fun theProfileReadsTheFingerprintField() {
+        val home = temp.resolve("home").also { it.createDirectories() }
+        home.resolve("cli.json").writeText("""{"server": "s:1", "token": null, "fingerprint": "abc"}""")
+        assertEquals("abc", CliProfile.load(home)?.fingerprint)
+    }
+
+    @Test
+    fun theMissingFingerprintMessageNamesTheFourPlaces() {
+        val message = PublishSettings.missingFingerprint("cringlePublish")
+        for (place in listOf("-Pcringle.fingerprint", "cringle { publish { fingerprint", "CRINGLE_FINGERPRINT", "cli.json")) {
+            assertTrue(place in message, "'$place' is missing in: $message")
+        }
+    }
 }

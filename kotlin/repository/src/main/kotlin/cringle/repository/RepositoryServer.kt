@@ -4,6 +4,7 @@ package cringle.repository
 
 import com.google.protobuf.ByteString
 import com.google.protobuf.Timestamp
+import cringle.common.TlsHelper
 import cringle.packaging.PackageKind
 import cringle.repository.v1.DownloadRequest
 import cringle.repository.v1.DownloadResponse
@@ -55,7 +56,9 @@ internal fun toProto(e: PackageEntry): PackageMetadata = PackageMetadata.newBuil
     .build()
 
 /**
- * The repository as a gRPC server (plaintext on the loopback interface until trust management exists, #13). When
+ * The repository as a gRPC server on the loopback interface. With [tls] it speaks mutual TLS and refuses a client whose key is
+ * not in the trust store before any token is looked at; without it, it speaks plaintext (a transition until the fallbacks
+ * go away, #39). When
  * [users] is given, every call needs a token: reading needs the `READ` right, publishing `OPERATE`, changing plugin
  * trust `ADMINISTER`.
  */
@@ -64,11 +67,13 @@ public class RepositoryServer(
     port: Int = 0,
     users: UserManager? = null,
     private val tempDir: Path = Files.createTempDirectory("cringle-repository-upload"),
+    tls: RepositoryTls? = null,
 ) {
     private val service = Service()
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .maxInboundMessageSize(CHUNK_BYTES * 4)
+        .also { if (tls != null) it.sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore)) }
         .addService(
             service.bindService().let { definition ->
                 if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS))

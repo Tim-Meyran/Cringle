@@ -4,6 +4,7 @@ import com.google.protobuf.gradle.id
 
 plugins {
     alias(libs.plugins.protobuf)
+    `java-test-fixtures`
 }
 
 val versionCatalog = extensions.getByType<VersionCatalogsExtension>().named("libs")
@@ -58,4 +59,11 @@ sourceSets {
             srcDir(rootProject.file("proto"))
         }
     }
+}
+
+// The test fixtures (`TestTls`) are for the tests of this build only; the publication of `common` (samples, Gradle
+// plugin) carries the main library and nothing else.
+(components["java"] as AdhocComponentWithVariants).apply {
+    withVariantsFromConfiguration(configurations["testFixturesApiElements"]) { skip() }
+    withVariantsFromConfiguration(configurations["testFixturesRuntimeElements"]) { skip() }
 }

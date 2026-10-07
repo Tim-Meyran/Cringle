@@ -123,8 +123,10 @@ class PluginValidateFunctionalTest {
         return repository
     }
 
+    private val tlsRepo by lazy { TlsRepository(temp, home) }
+
     private fun server(repository: PackageRepository, users: UserManager? = null): RepositoryServer =
-        RepositoryServer(repository, users = users, tempDir = temp.resolve("upload").also { it.createDirectories() }).start()
+        tlsRepo.start(repository, users, temp.resolve("upload").also { it.createDirectories() })
 
     /** The sample, with the `in` port of its block using the schema [ref] of the dependency `acme-core`. */
     private fun sampleUsing(name: String, ref: String): Path {
@@ -138,7 +140,7 @@ class PluginValidateFunctionalTest {
     /** An environment with no address and no token of the machine the test runs on, and a home without a profile. */
     private fun cleanEnvironment(extra: Map<String, String> = emptyMap()): Map<String, String> {
         val empty = home.resolve("empty").also { it.createDirectories() }
-        return System.getenv().filterKeys { it != "CRINGLE_SERVER" && it != "CRINGLE_TOKEN" } + mapOf("CRINGLE_HOME" to empty.toString()) + extra
+        return System.getenv().filterKeys { it != "CRINGLE_SERVER" && it != "CRINGLE_TOKEN" && it != "CRINGLE_FINGERPRINT" } + mapOf("CRINGLE_HOME" to empty.toString()) + extra
     }
 
     private fun validateWith(project: Path, vararg arguments: String, environment: Map<String, String>? = null): GradleRunner =
@@ -192,10 +194,27 @@ class PluginValidateFunctionalTest {
     fun anUnreachableRepositoryAlsoOnlyWarns() {
         val project = sampleUsing("unreachable", "acme.core/Money")
 
-        val result = validateWith(project, "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${closedPort()}").build()
+        val result = validateWith(project, "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${closedPort()}", "-P${CringlePlugin.PROPERTY_FINGERPRINT}=${"0".repeat(64)}").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":cringleValidate")?.outcome, result.output)
         assertTrue("is not reachable" in result.output, "the warning has to say that the repository is not there:\n${result.output}")
+    }
+
+    /** TLS (#37): a repository that is up but cannot be pinned makes the validation go on with a warning that names the four places. */
+    @Test
+    fun aRepositoryWithoutAFingerprintOnlyWarnsAndNamesTheFourPlaces() {
+        val server = server(repositoryWithCore())
+        try {
+            tlsRepo.writeProfile("127.0.0.1:${server.port}", null, fingerprint = null)
+            val result = validateWith(sampleUsing("no-fingerprint", "acme.core/Money")).build()
+
+            assertEquals(TaskOutcome.SUCCESS, result.task(":cringleValidate")?.outcome, result.output)
+            for (place in listOf("-Pcringle.fingerprint", "cringle { publish { fingerprint", "CRINGLE_FINGERPRINT", "cli.json")) {
+                assertTrue(place in result.output, "the warning has to name '$place':\n${result.output}")
+            }
+        } finally {
+            server.stop()
+        }
     }
 
     @Test
@@ -231,21 +250,20 @@ class PluginValidateFunctionalTest {
         val address = "127.0.0.1:${server.port}"
         try {
             // the profile of `cringle login` in the Cringle home; the repository is asked, or the missing schema would pass
-            home.createDirectories()
-            profile.writeText("""{"server": "$address", "token": "$token"}""")
+            tlsRepo.writeProfile(address, token)
             val fromProfile = validateWith(sampleUsing("profile", "acme.core/Nope")).buildAndFail()
             assertTrue("schema 'acme.core/Nope' does not resolve" in fromProfile.output, fromProfile.output)
             assertFalse(token in fromProfile.output, "the token appeared in the output:\n${fromProfile.output}")
 
             // without a token in the profile the repository refuses the read: a warning that names both places
-            profile.writeText("""{"server": "$address", "token": null}""")
+            tlsRepo.writeProfile(address, null)
             val withoutToken = validateWith(sampleUsing("no-token", "acme.core/Money")).build()
             assertEquals(TaskOutcome.SUCCESS, withoutToken.task(":cringleValidate")?.outcome, withoutToken.output)
             assertTrue("CRINGLE_TOKEN" in withoutToken.output && "cringle login" in withoutToken.output, withoutToken.output)
 
             // the environment wins over the profile, as for cringlePublish
             Files.deleteIfExists(profile)
-            val environment = cleanEnvironment(mapOf("CRINGLE_SERVER" to address, "CRINGLE_TOKEN" to token))
+            val environment = cleanEnvironment(mapOf("CRINGLE_SERVER" to address, "CRINGLE_TOKEN" to token, "CRINGLE_FINGERPRINT" to tlsRepo.fingerprint))
             val fromEnvironment = validateWith(sampleUsing("environment", "acme.core/Nope"), environment = environment).buildAndFail()
             assertTrue("schema 'acme.core/Nope' does not resolve" in fromEnvironment.output, fromEnvironment.output)
             assertFalse(token in fromEnvironment.output, "the token appeared in the output:\n${fromEnvironment.output}")

@@ -10,7 +10,6 @@ import cringle.packaging.PluginManifest
 import cringle.repository.PackageEntry
 import cringle.repository.PackageRepository
 import cringle.repository.RepositoryClient
-import cringle.repository.RepositoryServer
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
 import java.net.ServerSocket
@@ -49,6 +48,8 @@ class ProjectPublishFunctionalTest {
 
     private lateinit var repository: PackageRepository
 
+    private val tlsRepo by lazy { TlsRepository(temp, home) }
+
     @BeforeEach
     fun repositoryWithThePluginTheProjectNeeds() {
         Files.deleteIfExists(profile)
@@ -58,7 +59,7 @@ class ProjectPublishFunctionalTest {
             PackageWriter.writePlugin(PluginManifest("acme-core", "1.0.0"), emptyMap(), emptyMap(), emptyMap(), out)
         }
         repository.publish(core)
-        val server = RepositoryServer(repository, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, upload = upload())
         try {
             val plugin = SamplePlugin.copyTo(temp, "plugin")
             val result = SamplePlugin.runner(plugin, "cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${server.port}").build()
@@ -81,7 +82,7 @@ class ProjectPublishFunctionalTest {
     @Test
     fun publishesTheProjectPackageAndRefusesTheSameVersionASecondTime() {
         val project = SampleProject.copyTo(temp, "publish")
-        val server = RepositoryServer(repository, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, upload = upload())
         val address = "127.0.0.1:${server.port}"
         val arguments = arrayOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=$address")
 
@@ -113,10 +114,9 @@ class ProjectPublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val operator = users.createUser("author", setOf(UserRole.OPERATOR))
         val token = users.createToken(operator.user.id, "t", null).secret
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
-        home.createDirectories()
-        profile.writeText("""{"server": "$address", "token": "$token"}""")
+        tlsRepo.writeProfile(address, token)
         val project = SampleProject.copyTo(temp, "profile")
 
         val result = runner(project, "cringlePublish").build()
@@ -145,7 +145,7 @@ class ProjectPublishFunctionalTest {
     fun withoutATokenTheMessageNamesTheEnvironmentAndTheLogin() {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         users.bootstrap()
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val project = SampleProject.copyTo(temp, "without-token")
 
         val result = runner(project, "cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${server.port}").buildAndFail()
@@ -160,7 +160,7 @@ class ProjectPublishFunctionalTest {
     fun anInvalidProjectIsNotPublished() {
         val project = SampleProject.copyTo(temp, "invalid")
         SampleProject.replaceInBuildScript(project, """fabric("orders")""", """fabric("nope")""")
-        val server = RepositoryServer(repository, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, upload = upload())
 
         val result = runner(project, "cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${server.port}").buildAndFail()
         assertEquals(TaskOutcome.FAILED, result.task(":cringleValidate")?.outcome, result.output)
@@ -179,7 +179,7 @@ class ProjectPublishFunctionalTest {
     private fun upload(): Path = temp.resolve("upload").also { it.createDirectories() }
 
     private fun stored(address: String, token: String? = null): PackageEntry =
-        RepositoryClient(address, token).use { client -> runBlocking { client.get("acme-shop", "0.3.1") } }
+        tlsRepo.client(address, token).use { client -> runBlocking { client.get("acme-shop", "0.3.1") } }
 
     private fun closedPort(): Int = ServerSocket(0).use { it.localPort }
 

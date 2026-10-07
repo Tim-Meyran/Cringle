@@ -56,6 +56,7 @@ public class CringleProjectPlugin : Plugin<Project> {
             dependsOn(packageProject)
             packageFile.set(packageProject.flatMap { it.packageFile })
             server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
+            fingerprint.set(project.providers.gradleProperty(PROPERTY_FINGERPRINT).orElse(extension.publishSettings.fingerprint))
             dryRun.convention(false)
             group = TASK_GROUP
             description = "Publishes the Cringle project package to a repository."
@@ -115,6 +116,9 @@ public class CringleProjectPlugin : Plugin<Project> {
 
         /** The project property that names the repository, as `-Pcringle.server=host:port`. */
         public const val PROPERTY_SERVER: String = "cringle.server"
+
+        /** The project property that pins the repository key, as `-Pcringle.fingerprint=<sha256>`. */
+        public const val PROPERTY_FINGERPRINT: String = "cringle.fingerprint"
 
         /** The task group the tasks appear under. */
         public const val TASK_GROUP: String = "cringle"

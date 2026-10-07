@@ -29,6 +29,11 @@ public abstract class ValidatePluginTask : CringlePluginPackageTask() {
     @get:Optional
     public abstract val server: Property<String>
 
+    /** The fingerprint of the key of the repository; without it the environment and the profile are asked. */
+    @get:Input
+    @get:Optional
+    public abstract val fingerprint: Property<String>
+
     @TaskAction
     internal fun validate() {
         val problems = ArrayList<String>()
@@ -65,7 +70,7 @@ public abstract class ValidatePluginTask : CringlePluginPackageTask() {
                 null
             }
             if (pkg != null) {
-                val result = PluginValidation.validate(pkg, server.orNull)
+                val result = PluginValidation.validate(pkg, server.orNull, fingerprint.orNull)
                 result.warnings.forEach { logger.warn(it) }
                 problems += result.problems.map { ProblemRender.text(it) }
             }

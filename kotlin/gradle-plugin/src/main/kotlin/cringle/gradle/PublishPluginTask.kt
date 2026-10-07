@@ -7,7 +7,6 @@ import cringle.packaging.PackageHash
 import cringle.packaging.PackageKind
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
-import cringle.repository.RepositoryClient
 import cringle.repository.RepositoryClientException
 import io.grpc.Status
 import java.nio.file.Path
@@ -51,6 +50,11 @@ public abstract class PublishPluginTask : DefaultTask() {
     @get:Optional
     public abstract val server: Property<String>
 
+    /** The fingerprint of the key of the repository; without it the environment and the profile are asked. */
+    @get:Input
+    @get:Optional
+    public abstract val fingerprint: Property<String>
+
     /** Whether the task only reports what it would publish and connects to nothing. */
     @get:Input
     @get:Option(option = "dryRun", description = "Reports what would be published and connects to nothing.")
@@ -61,7 +65,7 @@ public abstract class PublishPluginTask : DefaultTask() {
         val file = packageFile.get().asFile.toPath()
         val manifest = read(file)
         val environment = System.getenv()
-        val target = PublishSettings.resolve(server.orNull, environment, CliProfile.load(PublishSettings.home(environment)))
+        val target = PublishSettings.resolve(server.orNull, environment, CliProfile.load(PublishSettings.home(environment)), fingerprint.orNull)
         if (dryRun.getOrElse(false)) {
             logger.lifecycle(
                 "cringlePublish: would publish {} {} to {}; --dryRun sent nothing",
@@ -86,7 +90,7 @@ public abstract class PublishPluginTask : DefaultTask() {
         val (published, problems) = when (PackageReader.kind(file)) {
             PackageKind.PLUGIN -> PackageReader.readPlugin(file).let { plugin ->
                 // against the plugins it depends on, like the repository does; --dryRun connects to nothing
-                val result = PluginValidation.validate(plugin, server.orNull, mayConnect = !dryRun.getOrElse(false))
+                val result = PluginValidation.validate(plugin, server.orNull, fingerprint.orNull, mayConnect = !dryRun.getOrElse(false))
                 result.warnings.forEach { logger.warn(it) }
                 Published(plugin.manifest.name, plugin.manifest.version) to result.problems
             }
@@ -101,12 +105,13 @@ public abstract class PublishPluginTask : DefaultTask() {
     }
 
     /** Uploads [file] and checks that the repository stored the bytes that were sent. */
-    private fun upload(file: Path, target: PublishTarget, manifest: Published) = RepositoryClient(target.server, target.token).use { client ->
+    private fun upload(file: Path, target: PublishTarget, manifest: Published) = RepositoryConnection.open(target, PublishSettings.home(System.getenv()), "cringlePublish").use { connection ->
+        val client = connection.client
         val expected = PackageHash.sha256(file)
         val entry = try {
             runBlocking { client.publish(file) }
         } catch (e: RepositoryClientException) {
-            throw GradleException(refusal(target, manifest, e))
+            throw GradleException(refusal(target, manifest, e, connection.identityFingerprint))
         }
         if (entry.sha256 != expected) {
             throw GradleException(
@@ -122,7 +127,7 @@ public abstract class PublishPluginTask : DefaultTask() {
      * wants a token, a token that may not publish, a server that is not there. The token is in none of them, because
      * none of them knows it.
      */
-    private fun refusal(target: PublishTarget, manifest: Published, e: RepositoryClientException): String {
+    private fun refusal(target: PublishTarget, manifest: Published, e: RepositoryClientException, identityFingerprint: String): String {
         val pkg = "${manifest.name} ${manifest.version}"
         return when (e.status) {
             Status.Code.ALREADY_EXISTS ->
@@ -135,7 +140,8 @@ public abstract class PublishPluginTask : DefaultTask() {
                 "cringlePublish: the token may not publish $pkg to ${target.server}: publishing needs the right to " +
                     "operate (Permission.OPERATE)."
             Status.Code.UNAVAILABLE ->
-                "cringlePublish: ${target.server} is not reachable: ${e.message}"
+                "cringlePublish: ${target.server} is not reachable: ${e.message}. The connection is TLS: the repository has to be running, " +
+                    "its key has to match the configured fingerprint, and it has to trust the key of this build (fingerprint $identityFingerprint)."
             else -> {
                 val detail = e.message?.takeIf { it != e.status.name }.orEmpty()
                 "cringlePublish: ${target.server} refused $pkg with ${e.status}" + if (detail.isEmpty()) "" else ": $detail"

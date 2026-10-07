@@ -10,4 +10,5 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.grpc.netty.shaded)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(testFixtures(project(":common")))
 }
