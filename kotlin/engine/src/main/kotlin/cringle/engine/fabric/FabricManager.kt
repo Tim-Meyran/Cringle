@@ -10,7 +10,7 @@ import cringle.engine.tether.TetherConfig
 import cringle.engine.EngineArgs
 import cringle.engine.classloading.ContractClassLoader
 import cringle.engine.classloading.FabricClassLoaders
-import cringle.engine.tether.TetherNetwork
+import cringle.engine.tether.RemoteTetherDriver
 import cringle.packaging.Blueprint
 import cringle.packaging.ManifestJson
 import cringle.packaging.PackageFormatException
@@ -121,6 +121,8 @@ public class LocalFabricDeployer(
     private val contract: ContractClassLoader = ContractClassLoader(),
     private val defaultRestart: RestartPolicy = RestartPolicy(),
     private val watchdog: WatchdogConfig = WatchdogConfig(),
+    /** Runs the tethers that end on another engine; `null` rejects a blueprint that has one. */
+    private val remoteTethers: RemoteTetherDriver? = null,
 ) : FabricDeployer {
     private class LoadedPlugin(val root: Path, val manifest: PluginManifest, val schemas: Map<String, String>, val trust: PluginTrust)
 
@@ -143,7 +145,6 @@ public class LocalFabricDeployer(
         }
         val blueprint = blueprints.firstOrNull { it.name == request.blueprint }
             ?: throw FabricException("project ${request.projectName}@${request.projectVersion} has no blueprint '${request.blueprint}' (has: ${blueprints.joinToString { it.name }})")
-        if (blueprint.tethers.any { it.remote != null }) throw FabricException(TetherNetwork.REMOTE_NOT_SUPPORTED)
         val projectSchemas = projectManifest.schemas.associateWith { read(projectRoot.resolve(it), it) }
 
         val plugins = request.plugins.map { load(it) }
@@ -194,6 +195,7 @@ public class LocalFabricDeployer(
                             registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor,
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
                             it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
+                            remote = remoteTethers?.portsFor(request.fabricId),
                         )
                     },
                     defaultRestart = defaultRestart,

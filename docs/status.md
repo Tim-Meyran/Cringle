@@ -8,7 +8,7 @@ Written for an agent that starts without the history of the conversations. It sa
 |---|---|
 | M0 – M4 (foundation, engine core, schema and tether types, artifacts and repository, machine level and first deployment) | done |
 | M5 – Trust and encryption | done: every link of a component is mutual TLS, there is no unencrypted mode and no `--insecure-dev-mode`; the CLI is pinned to the fingerprint of the management server; `cringle trust` manages trust; `TwoMachineTrustTest` shows two machines that trust each other |
-| M6 – Distribution and shared services | started: the wire format (`spec/wire.md`, module `wire`) is done. Open: cross-engine tethers (#145, #146, #147, #148), then tethers between projects and shared services (tracking issue #149) |
+| M6 – Distribution and shared services | started: the wire format (`spec/wire.md`, module `wire`) is done. Cross-engine tethers: the blueprint field (#145) and the transport with `MESSAGE` tethers over mTLS (#146) are done; open: #147, #148, then tethers between projects and shared services (tracking issue #149) |
 | M7 – Observability | not started, no issues yet (architecture chapter 25, M7) |
 | M8 – WebUI and blueprint editor | not started, no issues yet |
 | M9 – Operations, security and hardening | partly: self-update, cache cleanup, plugin trust in the repository, logging. Open: blue-green, rollback, migrations, isolated blocks (deferred), assertions, debugging, renewal, documentation |

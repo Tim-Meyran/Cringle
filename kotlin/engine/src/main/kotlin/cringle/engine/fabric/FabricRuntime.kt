@@ -260,7 +260,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         try {
             runBlocking { stop() }
         } finally {
-            network?.close()
+            network?.release()
             watchdog?.shutdownNow()
             scope.cancel()
             executor.shutdown()

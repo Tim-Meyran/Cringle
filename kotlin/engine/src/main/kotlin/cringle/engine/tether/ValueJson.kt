@@ -27,3 +27,16 @@ internal fun toJson(value: Any?, path: String = "$"): JsonElement = when (value)
     is Iterable<*> -> JsonArray(value.mapIndexed { i, v -> toJson(v, "$path[$i]") })
     else -> throw IllegalArgumentException("$path: unsupported value type ${value.javaClass.name}")
 }
+
+/** The value of [e] as the plain Kotlin value a block receives (strings, booleans, numbers, lists and maps; `null` for JSON null). */
+internal fun fromJson(e: JsonElement): Any? = when (e) {
+    is JsonNull -> null
+    is JsonPrimitive -> when {
+        e.isString -> e.content
+        e.content == "true" -> true
+        e.content == "false" -> false
+        else -> e.content.toLongOrNull() ?: e.content.toDouble()
+    }
+    is JsonArray -> e.map { fromJson(it) }
+    is JsonObject -> e.mapValues { fromJson(it.value) }
+}
