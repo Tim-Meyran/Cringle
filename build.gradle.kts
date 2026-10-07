@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
@@ -270,4 +272,95 @@ tasks.register("cringleDist") {
     group = "distribution"
     description = "Builds the release archives, SHA256SUMS and manifest.json into build/dist (see docs/releasing.md)."
     dependsOn(distManifest)
+}
+
+// --- The Windows distribution with an embedded JRE (#155, docs/releasing.md) ---
+//
+// `./gradlew cringleWindowsRuntime -PreleaseVersion=1.2.3` writes build/dist-stage/windows-jre/cringle-<version>/: the
+// Windows distribution plus `jre/` (Eclipse Temurin 21, the whole JRE) and THIRD-PARTY.txt. The MSI (#156) installs that
+// tree. It is not part of `build` or `cringleDist`: the JRE is downloaded, and the download is checked against the
+// SHA-256 below. The four constants are the one place to change for a new Temurin version; -PcringleJreUrl and
+// -PcringleJreSha256 replace the URL and the checksum for one run (a file: URL works).
+val windowsJreVersion = "21.0.12+8"
+val windowsJreFile = "OpenJDK21U-jre_x64_windows_hotspot_21.0.12_8.zip"
+val windowsJreUrl = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/$windowsJreFile"
+val windowsJreSha256 = "b8aa18fef5edb69bee8618f99677d66d0873d22cb40d974c15ac9ffcdecf73ba"
+
+fun fileSha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            digest.update(buffer, 0, n)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+tasks.register("cringleWindowsRuntime") {
+    group = "distribution"
+    description = "Writes build/dist-stage/windows-jre/cringle-<version>/: the Windows distribution with an embedded Temurin 21 JRE."
+    val stage = layout.buildDirectory.dir("dist-stage/windows")
+    val output = layout.buildDirectory.dir("dist-stage/windows-jre")
+    val downloads = layout.buildDirectory.dir("downloads")
+    val url = providers.gradleProperty("cringleJreUrl").orElse(windowsJreUrl)
+    val sha256 = providers.gradleProperty("cringleJreSha256").orElse(windowsJreSha256)
+    dependsOn(stageWindows)
+    inputs.dir(stage)
+    inputs.property("jreUrl", url)
+    inputs.property("jreSha256", sha256)
+    outputs.dir(output)
+    doLast {
+        val expected = sha256.get().lowercase()
+        val fileName = url.get().substringAfterLast('/').substringBefore('?').ifBlank { windowsJreFile }
+        val cached = Files.createDirectories(downloads.get().asFile.toPath()).resolve(fileName).toFile()
+        if (cached.exists() && fileSha256(cached) != expected) cached.delete()
+        if (!cached.exists()) {
+            logger.lifecycle("downloading ${url.get()}")
+            val connection = URI(url.get()).toURL().openConnection().apply { connectTimeout = 30_000; readTimeout = 120_000 }
+            val partial = File(cached.path + ".part")
+            connection.getInputStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+            val actual = fileSha256(partial)
+            if (actual != expected) {
+                partial.delete()
+                throw GradleException("the JRE download ${url.get()} has the wrong SHA-256: expected $expected, found $actual; the file was deleted")
+            }
+            check(partial.renameTo(cached)) { "cannot move $partial to $cached" }
+        }
+        val home = output.get().asFile.toPath().resolve("cringle-$releaseVersion")
+        output.get().asFile.deleteRecursively()
+        stage.get().asFile.resolve("cringle-$releaseVersion").copyRecursively(home.toFile())
+        // the archive has one top directory (jdk-21.0.12+8-jre/); its content becomes jre/
+        val jre = Files.createDirectories(home.resolve("jre"))
+        ZipFile(cached).use { zip ->
+            for (entry in zip.entries()) {
+                val relative = entry.name.substringAfter('/', "")
+                if (relative.isEmpty()) continue
+                val target = jre.resolve(relative).normalize()
+                check(target.startsWith(jre)) { "the JRE archive has an entry outside of jre/: ${entry.name}" }
+                if (entry.isDirectory) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    zip.getInputStream(entry).use { Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING) }
+                }
+            }
+        }
+        check(Files.isRegularFile(jre.resolve("bin/java.exe"))) { "the JRE archive $fileName has no bin/java.exe" }
+        Files.writeString(
+            home.resolve("THIRD-PARTY.txt"),
+            """
+            |Third-party software in this distribution
+            |
+            |jre/  Eclipse Temurin $windowsJreVersion JRE for Windows x64 (OpenJDK 21), https://adoptium.net/
+            |      License: GNU General Public License, version 2, with the Classpath Exception.
+            |      Source: ${url.get()}
+            |      SHA-256: $expected
+            |      The license texts of the JRE are in jre/legal/.
+            |
+            """.trimMargin().replace("\n", "\r\n"),
+        )
+    }
 }
