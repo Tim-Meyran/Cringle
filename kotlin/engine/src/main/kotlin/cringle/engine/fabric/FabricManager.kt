@@ -10,6 +10,7 @@ import cringle.engine.tether.TetherConfig
 import cringle.engine.EngineArgs
 import cringle.engine.classloading.ContractClassLoader
 import cringle.engine.classloading.FabricClassLoaders
+import cringle.engine.tether.TetherNetwork
 import cringle.packaging.Blueprint
 import cringle.packaging.ManifestJson
 import cringle.packaging.PackageFormatException
@@ -142,6 +143,7 @@ public class LocalFabricDeployer(
         }
         val blueprint = blueprints.firstOrNull { it.name == request.blueprint }
             ?: throw FabricException("project ${request.projectName}@${request.projectVersion} has no blueprint '${request.blueprint}' (has: ${blueprints.joinToString { it.name }})")
+        if (blueprint.tethers.any { it.remote != null }) throw FabricException(TetherNetwork.REMOTE_NOT_SUPPORTED)
         val projectSchemas = projectManifest.schemas.associateWith { read(projectRoot.resolve(it), it) }
 
         val plugins = request.plugins.map { load(it) }

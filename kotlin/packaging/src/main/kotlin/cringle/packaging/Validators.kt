@@ -61,7 +61,7 @@ public object PackageValidator {
             val ids = blockIds(blueprint, report)
             blueprint.tethers.forEachIndexed { i, t ->
                 val path = "$.tethers[$i]"
-                for ((side, endpoint) in listOf("from" to t.from, "to" to t.to)) {
+                for ((side, endpoint) in listOfNotNull(t.from?.let { "from" to it }, t.to?.let { "to" to it })) {
                     if (endpoint.block !in ids) report("$path.$side.block", "unknown block id '${endpoint.block}'")
                     PackageNames.identifierProblem(endpoint.port)
                         ?.let { report("$path.$side.port", it) }
@@ -129,13 +129,14 @@ public object PackageValidator {
         }
         blueprint.tethers.forEachIndexed { i, t ->
             val path = "$.tethers[$i]"
-            val from = endpoint(t.from, "$path.from", instances, unresolved, PortDirection.OUT, ::problem)
-            val to = endpoint(t.to, "$path.to", instances, unresolved, PortDirection.IN, ::problem)
-            if (from != null && t.type !in from.tetherTypes) problem("$path.type", "port '${t.from.port}' does not support ${t.type}")
-            if (to != null && t.type !in to.tetherTypes) problem("$path.type", "port '${t.to.port}' does not support ${t.type}")
+            val from = t.from?.let { endpoint(it, "$path.from", instances, unresolved, PortDirection.OUT, ::problem) }
+            val to = t.to?.let { endpoint(it, "$path.to", instances, unresolved, PortDirection.IN, ::problem) }
+            if (from != null && t.type !in from.tetherTypes) problem("$path.type", "port '${t.from?.port}' does not support ${t.type}")
+            if (to != null && t.type !in to.tetherTypes) problem("$path.type", "port '${t.to?.port}' does not support ${t.type}")
             tetherRules(t, path) { path, message -> problem(path, message) }
+            // The schema of a remote port is only known when the tether connects (#146); only two local ports compare here.
             if (from != null && to != null && !isAssignable(from.schema, to.schema, registry)) {
-                problem(path, "schema ${from.schema} of '${t.from.port}' is not assignable to ${to.schema} of '${t.to.port}'")
+                problem(path, "schema ${from.schema} of '${t.from?.port}' is not assignable to ${to.schema} of '${t.to?.port}'")
             }
         }
         return problems
@@ -169,6 +170,7 @@ public object PackageValidator {
      * report the same wording.
      */
     private fun tetherRules(t: TetherDef, path: String, problem: (String, String) -> Unit) {
+        endpointRules(t, path, problem)
         if (t.type == TetherType.TCP) {
             if (t.port == null || t.port !in 1..65535) problem("$path.port", "a TCP tether needs a 'port' between 1 and 65535")
             if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a TCP tether only supports delivery DROP")
@@ -200,6 +202,42 @@ public object PackageValidator {
             if (s.stopBits !in 1..2) problem("$path.serial.stopBits", "stopBits must be 1 or 2")
         }
     }
+
+    /**
+     * A tether has two local endpoints, or exactly one local endpoint and a `remote`: `from` when the remote end
+     * receives, `to` when it sends. A remote is only allowed for the typed tether types and byte streams; `TCP` and
+     * `SERIAL` tethers are local resources.
+     */
+    private fun endpointRules(t: TetherDef, path: String, problem: (String, String) -> Unit) {
+        val remote = t.remote
+        when {
+            remote == null && (t.from == null || t.to == null) ->
+                problem(path, "a tether needs 'from' and 'to', or exactly one of them and a 'remote'")
+            remote != null && t.from != null && t.to != null ->
+                problem(path, "a tether with a 'remote' has exactly one local endpoint: 'from' when the remote end receives, 'to' when it sends")
+            remote != null && t.from == null && t.to == null ->
+                problem(path, "a tether with a 'remote' needs its local endpoint 'from' (the remote end receives) or 'to' (the remote end sends)")
+        }
+        if (remote == null) return
+        if (t.type !in remoteTetherTypes) problem("$path.remote", "a ${t.type} tether is a local resource and cannot have a 'remote'")
+        if (!remoteAddress.matches(remote.address) || remote.address.substringAfterLast(':').toInt() !in 1..65535) {
+            problem("$path.remote.address", "invalid address '${remote.address}': expected host:port with a port between 1 and 65535")
+        }
+        if (!remoteFingerprint.matches(remote.fingerprint)) {
+            problem("$path.remote.fingerprint", "invalid fingerprint '${remote.fingerprint}': expected 64 lowercase hex characters")
+        }
+        PackageNames.identifierProblem(remote.fabric)?.let { problem("$path.remote.fabric", it) }
+        PackageNames.identifierProblem(remote.block)?.let { problem("$path.remote.block", it) }
+        PackageNames.identifierProblem(remote.port)?.let { problem("$path.remote.port", it) }
+        if (remote.index != null && remote.index < 0) problem("$path.remote.index", "index must not be negative")
+    }
+
+    private val remoteTetherTypes = setOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.STREAM, TetherType.BYTE_STREAM)
+
+    // host (name, IPv4) or [IPv6], then ':' and up to five digits; the range of the port is checked separately.
+    private val remoteAddress = Regex("""^(\[[0-9A-Fa-f:.]+]|[A-Za-z0-9._-]+):[0-9]{1,5}$""")
+
+    private val remoteFingerprint = Regex("^[0-9a-f]{64}$")
 
     private fun endpoint(
         e: Endpoint,

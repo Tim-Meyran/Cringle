@@ -90,8 +90,9 @@ public object ManifestJson {
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
     private val blueprintKeys = setOf("name", "blocks", "tethers")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
-    private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial")
+    private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote")
     private val endpointKeys = setOf("block", "port", "index")
+    private val remoteKeys = setOf("address", "fingerprint", "fabric", "block", "port", "index")
 
     /** Parses `cringle-project.json`. */
     public fun parseProject(text: String): ProjectManifest {
@@ -211,8 +212,8 @@ public object ManifestJson {
     private fun tether(o: JsonObject, path: String): TetherDef {
         JsonReading.keys(o, path, tetherKeys)
         val type = enumValue<TetherType>(JsonReading.string(o, "type", path), "$path.type")
-        val from = endpoint(o["from"] ?: throw PackageFormatException(path, "missing key 'from'"), "$path.from")
-        val to = endpoint(o["to"] ?: throw PackageFormatException(path, "missing key 'to'"), "$path.to")
+        val from = o["from"]?.let { endpoint(it, "$path.from") }
+        val to = o["to"]?.let { endpoint(it, "$path.to") }
         val delivery = o["delivery"]?.let { enumValue<DeliveryPolicy>(JsonReading.string(o, "delivery", path), "$path.delivery") } ?: DeliveryPolicy.DROP
         val port = JsonReading.optInt(o, "port", path)
         val bufferCapacity = JsonReading.optInt(o, "bufferCapacity", path)
@@ -238,7 +239,23 @@ public object ManifestJson {
                 stopBits = JsonReading.optInt(s, "stopBits", "$path.serial") ?: 1,
             )
         }
-        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial)
+        val remote = o["remote"]?.let { remoteEndpoint(it, "$path.remote") }
+        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial, remote)
+    }
+
+    private fun remoteEndpoint(e: JsonElement, path: String): RemoteEndpoint {
+        val o = JsonReading.obj(e, path)
+        JsonReading.keys(o, path, remoteKeys)
+        val index = JsonReading.optInt(o, "index", path)
+        if (index != null && index < 0) throw PackageFormatException("$path.index", "must not be negative")
+        return RemoteEndpoint(
+            JsonReading.string(o, "address", path),
+            JsonReading.string(o, "fingerprint", path),
+            JsonReading.string(o, "fabric", path),
+            JsonReading.string(o, "block", path),
+            JsonReading.string(o, "port", path),
+            index,
+        )
     }
 
     private fun endpoint(e: JsonElement, path: String): Endpoint {
@@ -331,8 +348,18 @@ public object ManifestJson {
                     b.tethers.map { t ->
                         buildJsonObject {
                             put("type", t.type.name)
-                            put("from", endpoint(t.from))
-                            put("to", endpoint(t.to))
+                            t.from?.let { put("from", endpoint(it)) }
+                            t.to?.let { put("to", endpoint(it)) }
+                            t.remote?.let { r ->
+                                put("remote", buildJsonObject {
+                                    put("address", r.address)
+                                    put("fingerprint", r.fingerprint)
+                                    put("fabric", r.fabric)
+                                    put("block", r.block)
+                                    put("port", r.port)
+                                    r.index?.let { put("index", it) }
+                                })
+                            }
                             if (t.delivery != DeliveryPolicy.DROP) put("delivery", t.delivery.name)
                             t.port?.let { put("port", it) }
                             t.bufferCapacity?.let { put("bufferCapacity", it) }

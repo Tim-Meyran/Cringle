@@ -112,6 +112,27 @@ version of its own and no engine, role or label fields, so it always runs entire
   required), `baudRate` (integer > 0, default 9600), `dataBits` (5 to 8, default 8), `parity` (`NONE` default,
   `EVEN` or `ODD`) and `stopBits` (1 or 2, default 1). It supports only `DROP` and carries no schema. Only a
   `SERIAL` tether may set `serial`.
+- A tether to a port on **another engine** has one local endpoint and a `remote` object instead of the other one.
+  The local endpoint is `from` (an `OUT` port) when the remote end receives, and `to` (an `IN` port) when it sends;
+  the missing endpoint is omitted. `remote` is `{"address", "fingerprint", "fabric", "block", "port"}` plus
+  `"index"` for a VarArg port. `address` is `host:port` (port 1 to 65535; an IPv6 host is written in brackets),
+  `fingerprint` is the SHA-256 of the public key of the remote engine as 64 lowercase hex characters (the remote
+  engine is trusted by this key only, never on first use), and `fabric`, `block` and `port` name the remote port in
+  the blueprint that is deployed there, with the identifier grammar of section 3; both sides have to agree on those
+  names out of band. Only `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM` tethers may have a `remote`:
+  `TCP` and `SERIAL` tethers are local resources. Both delivery policies are allowed. This is the one place where a
+  blueprint names another engine; it does not add engine, role or label fields to the blueprint. The field is only
+  specified and validated so far: an engine rejects a blueprint with a `remote` tether until the connection is
+  implemented (`tether.md`).
+
+  ```json
+  { "type": "MESSAGE", "from": { "block": "source", "port": "out" },
+    "remote": {
+      "address": "10.0.0.7:7443",
+      "fingerprint": "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12",
+      "fabric": "shop", "block": "sink", "port": "in"
+    } }
+  ```
 
 ## 6. Semantic validation
 
@@ -126,7 +147,8 @@ blueprint:
 2. `varArgCounts` has an entry for every VarArg port of the block and no entry for any other name;
 3. `config` is valid for the block's `configSchema` (paths like `$.blocks[1].config.limit`); a block without a
    `configSchema` takes no configuration;
-4. tether endpoints exist; `from` is an OUT port and `to` an IN port;
+4. tether endpoints exist; `from` is an OUT port and `to` an IN port; a tether has `from` and `to`, or exactly one of
+   them and a `remote` (and nothing else is valid);
 5. the tether `type` is in the `tetherTypes` of both ports;
 6. the `schema` of the OUT port is assignable to the `schema` of the IN port (`schema.md`, section 7);
 7. `index` is present and below the `varArgCounts` size for a VarArg port, and absent for any other port;
@@ -135,7 +157,12 @@ blueprint:
 10. `bufferCapacity` is at least 1 and `requestTimeout` is positive;
 11. `retry` is only set with `BUFFER`, `maxAttempts` is at least 1, and `backoffMs` and `maxBackoffMs` are positive;
 12. `serial` is only set on a `SERIAL` tether, which needs one, and its `baudRate`, `dataBits`, `parity` and
-    `stopBits` are in range; a `SERIAL` tether supports only `DROP`.
+    `stopBits` are in range; a `SERIAL` tether supports only `DROP`;
+13. a `remote` is only set on a `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` or `BYTE_STREAM` tether; its `address` is
+    `host:port` with a port from 1 to 65535, its `fingerprint` is 64 lowercase hex characters, `fabric`, `block` and
+    `port` follow the identifier grammar and `index` is not negative. The local port of such a tether is checked as
+    for a local tether (existence, direction, tether type, `index`); the schema of the remote port cannot be checked
+    here and is checked when the tether connects.
 
 Validation reports all of these together; reading a package reports the first violation it meets, because parsing
 stops there.

@@ -44,8 +44,8 @@ class ManifestJsonTest {
         assertEquals(IsolationLevel.PROCESS, sink.isolation)
         assertEquals(mapOf("replicas" to 2), sink.varArgCounts)
         assertEquals(IsolationLevel.SHARED, Fixtures.main.blocks[0].isolation)
-        assertEquals(1, Fixtures.main.tethers[1].to.index)
-        assertEquals(null, Fixtures.main.tethers[0].to.index)
+        assertEquals(1, Fixtures.main.tethers[1].to?.index)
+        assertEquals(null, Fixtures.main.tethers[0].to?.index)
     }
 
     @Test
@@ -149,7 +149,8 @@ class ManifestJsonTest {
         assertTrue(blueprint(""""blocks":[{"id":"a","block":"p/b","engine":"x"}]""").message!!.contains("unknown key 'engine'"))
         assertTrue(blueprint(""""blocks":[{"id":"a","block":"p/b","varArgCounts":{"x":-1}}]""").message!!.contains("non-negative"))
         assertTrue(blueprint(""""tethers":[{"type":"PIPE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"}}]""").message!!.contains("unknown value 'PIPE'"))
-        assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"}}]""").message!!.contains("missing key 'to'"))
+        // a missing endpoint is no format error any more: with a `remote` it is valid, without it the PackageValidator rejects it (#145)
+        assertEquals(null, ManifestJson.parseBlueprint("""{"name":"m","tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"}}]}""", "f.json").tethers.single().to)
         assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p","index":-1},"to":{"block":"b","port":"q"}}]""").message!!.contains("must not be negative"))
         assertTrue(blueprint(""""blocks":{}""").message!!.contains("must be an array"))
     }
@@ -216,5 +217,54 @@ class ManifestJsonTest {
         assertTrue(blueprint(""""tethers":[{"type":"SERIAL","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"serial":{"device":"x","parity":"MAYBE"}}]""").message!!.contains("unknown value 'MAYBE'"))
         assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"bufferCapacity":"big"}]""").message!!.contains("must be an integer"))
         assertTrue(blueprint(""""tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"to":{"block":"b","port":"q"},"retry":{"nope":1}}]""").message!!.contains("unknown key 'nope'"))
+    }
+
+    private val remoteBlueprint = """
+        {
+          "name": "m",
+          "blocks": [ { "id": "a", "block": "p/b" } ],
+          "tethers": [
+            { "type": "MESSAGE", "from": { "block": "a", "port": "out" },
+              "remote": { "address": "10.0.0.7:7443", "fingerprint": "${"ab".repeat(32)}", "fabric": "shop", "block": "sink", "port": "in", "index": 1 } },
+            { "type": "STREAM", "to": { "block": "a", "port": "in", "index": 0 }, "delivery": "BUFFER",
+              "remote": { "address": "[::1]:7444", "fingerprint": "${"01".repeat(32)}", "fabric": "shop", "block": "source", "port": "out" } }
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun remoteTetherIsReadAndWrittenBackUnchanged() {
+        val blueprint = ManifestJson.parseBlueprint(remoteBlueprint, "f.json")
+        val receives = blueprint.tethers[0]
+        assertEquals(Endpoint("a", "out"), receives.from)
+        assertEquals(null, receives.to)
+        assertEquals(RemoteEndpoint("10.0.0.7:7443", "ab".repeat(32), "shop", "sink", "in", 1), receives.remote)
+        val sends = blueprint.tethers[1]
+        assertEquals(null, sends.from)
+        assertEquals(Endpoint("a", "in", 0), sends.to)
+        assertEquals(RemoteEndpoint("[::1]:7444", "01".repeat(32), "shop", "source", "out"), sends.remote)
+        assertEquals(DeliveryPolicy.BUFFER, sends.delivery)
+
+        val written = ManifestJson.encode(blueprint)
+        assertEquals(blueprint, ManifestJson.parseBlueprint(written, "f.json"))
+        assertEquals(written, ManifestJson.encode(ManifestJson.parseBlueprint(written, "f.json")))
+        assertTrue("\"from\"" !in written.substringAfter("\"STREAM\""), written)
+        assertTrue("\"remote\"" in written)
+    }
+
+    @Test
+    fun localTetherWritesNoRemote() {
+        assertTrue("remote" !in ManifestJson.encode(Fixtures.main))
+        assertEquals(null, Fixtures.main.tethers[0].remote)
+    }
+
+    @Test
+    fun rejectsBadRemoteObjects() {
+        fun remote(body: String) = bad("""{"name":"m","tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"remote":$body}]}""") { ManifestJson.parseBlueprint(it, "f.json") }
+        val ok = """"address":"h:1","fingerprint":"x","fabric":"f","block":"b","port":"p""""
+        assertTrue(remote("""{"fingerprint":"x","fabric":"f","block":"b","port":"p"}""").message!!.contains("missing key 'address'"))
+        assertTrue(remote("""{$ok,"nope":1}""").message!!.contains("unknown key 'nope'"))
+        assertTrue(remote("""{$ok,"index":-1}""").path.endsWith("remote.index"))
+        assertTrue(remote("""[]""").path.endsWith("remote"))
     }
 }

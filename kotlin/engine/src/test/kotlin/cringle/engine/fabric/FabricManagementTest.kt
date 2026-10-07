@@ -8,6 +8,7 @@ import cringle.common.v1.PluginRef
 import cringle.common.v1.ProjectRef
 import cringle.contract.BlockDefinition
 import cringle.contract.SchemaRef
+import cringle.contract.TetherType
 import cringle.engine.Engine
 import cringle.engine.EngineArgs
 import cringle.engine.v1.DeployFabricRequest
@@ -19,6 +20,10 @@ import cringle.engine.v1.ListFabricsRequest
 import cringle.engine.v1.PluginTrust as ProtoTrust
 import cringle.packaging.Blueprint
 import cringle.packaging.BlueprintBlock
+import cringle.packaging.Endpoint
+import cringle.packaging.ManifestJson
+import cringle.packaging.RemoteEndpoint
+import cringle.packaging.TetherDef
 import cringle.packaging.SafeUnzip
 import cringle.testkit.TestJar
 import cringle.testkit.TestPluginBuilder
@@ -210,6 +215,27 @@ class FabricManagementTest {
         assertTrue(failure(deploy("dup", ProtoTrust.PLUGIN_TRUST_TRUSTED)).status.description!!.contains("already exists"))
         assertEquals(Status.Code.NOT_FOUND, code { stub.startFabric(fabricRequest("nope")) })
         assertEquals(Status.Code.NOT_FOUND, code { stub.removeFabric(fabricRequest("nope")) })
+    }
+
+    @Test
+    fun aBlueprintWithARemoteTetherIsRejectedAndStartsNoBlock() = withEngine { stub, m1, _ ->
+        // The test project builder validates its packages, and the marker block has no ports; so the blueprint is added to the unpacked project.
+        val projectDir = dir.resolve("home/projects/demo/0.1.0")
+        val remote = Blueprint(
+            "remote",
+            listOf(BlueprintBlock("m1", "acme-demo/marker", config = JsonObject(mapOf("marker" to JsonPrimitive(m1.toString()))))),
+            listOf(TetherDef(TetherType.MESSAGE, Endpoint("m1", "out"), null, remote = RemoteEndpoint("10.0.0.7:7443", "ab".repeat(32), "shop", "sink", "in"))),
+        )
+        Files.createDirectories(projectDir.resolve("blueprints"))
+        Files.writeString(projectDir.resolve("blueprints/remote.json"), ManifestJson.encode(remote))
+        val manifest = projectDir.resolve("cringle-project.json")
+        Files.writeString(manifest, Files.readString(manifest).replace("\"blueprints/main.json\"", "\"blueprints/main.json\", \"blueprints/remote.json\""))
+        val failure: StatusException = assertThrows { runBlocking { stub.deployFabric(deploy("remote-1", ProtoTrust.PLUGIN_TRUST_TRUSTED, blueprint = "remote")) } }
+        assertEquals(Status.Code.INVALID_ARGUMENT, failure.status.code)
+        assertTrue(failure.status.description!!.contains("remote tethers are not supported by this engine yet"), failure.status.description)
+        assertTrue(stub.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsList.isEmpty())
+        assertEquals(Status.Code.NOT_FOUND, code { stub.startFabric(fabricRequest("remote-1")) })
+        assertFalse(Files.exists(m1))
     }
 
     @Test

@@ -35,6 +35,16 @@ the device; the failed start releases the device, so it can be repeated. An I/O 
 byte stream and is logged; the device is not reopened automatically (a follow-up). The device is closed when the
 fabric stops; `awaitClosed` waits for it, like the TCP ports.
 
+### Remote tethers (blueprint field)
+
+A tether can end at a port of a block on another engine at a fixed address: the blueprint gives the tether one local
+endpoint and a `remote` object (`address`, `fingerprint`, `fabric`, `block`, `port`, optional `index`) instead of the
+other endpoint; see `package-format.md`, section 5. The local endpoint is the `OUT` port (`from`) when the remote end
+receives and the `IN` port (`to`) when it sends. The types `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM`
+may have a `remote`, both delivery policies apply. The remote engine is identified by the fingerprint of its key and
+trusted by it only. Only the blueprint field is defined so far; an engine that does not implement the connection yet
+rejects the deployment of a blueprint with a `remote` tether with `remote tethers are not supported by this engine yet`.
+
 ## Schemas
 
 Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). The schema check applies to these three types, on local tethers, and to nothing else: byte streams (`BYTE_STREAM`, `TCP` and `SERIAL`) are not checked. Schema messages for every tether type, across process boundaries too, follow with the wire format of #76. **Decided:** a response is validated against the same schema as the request; a port has one schema for both directions.
