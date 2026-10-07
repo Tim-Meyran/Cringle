@@ -25,6 +25,7 @@ import cringle.packaging.Backoff
 import cringle.packaging.Blueprint
 import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
+import cringle.packaging.RemoteEndpoint
 import cringle.packaging.RetryConfig
 import cringle.packaging.SerialTetherConfig
 import cringle.schema.SchemaValidator
@@ -44,6 +45,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 
 /** Hands an event to a block; implemented by the fabric runtime. */
 public fun interface TetherDeliverer {
@@ -72,6 +75,9 @@ public class TetherNetwork private constructor(
     private val validator = config.schemas?.let { SchemaValidator(it) }
 
     @Volatile private var deliverer: TetherDeliverer? = null
+
+    /** What the receiving ends of this network registered at the remote driver; see [release]. */
+    @Volatile private var registration: AutoCloseable? = null
 
     @Volatile private var scope: CoroutineScope? = null
     private val streamChannels = ConcurrentHashMap.newKeySet<Channel<*>>()
@@ -115,7 +121,7 @@ public class TetherNetwork private constructor(
                 when (c.info.type) {
                     TetherType.TCP -> openTcp(c, s, deliverer)
                     TetherType.SERIAL -> openSerial(c, deliverer)
-                    else -> {}
+                    else -> if (c.remoteSends) openRemote(c)
                 }
             }
         } catch (e: TetherWiringException) {
@@ -128,6 +134,43 @@ public class TetherNetwork private constructor(
             close()
             throw TetherWiringException("tether cannot start: ${e.message}")
         }
+    }
+
+    /** Opens the call of a tether that sends to another engine; the call is accepted by the other engine before this returns. */
+    private suspend fun openRemote(c: Connection) {
+        val ports = config.remote ?: throw TetherWiringException("tether ${c.info.id}: this engine cannot run tethers to other engines")
+        val remote = checkNotNull(c.remote)
+        c.lost = null
+        c.lostSignal = CompletableDeferred()
+        c.call = ports.connect(
+            RemoteSender(
+                c.info.id,
+                remote,
+                c.fromPort.schema.namespace,
+                onError = { e -> onDeliveryFailure(c.info, e) },
+                onClosed = { e -> connectionLost(c, e) },
+            ),
+        )
+    }
+
+    /** The other engine ended the call: waiting and later senders fail at once, as when the fabric stops. */
+    private fun connectionLost(c: Connection, cause: Throwable?) {
+        if (stopping != null) return
+        val reason = (cause as? TetherDeliveryException) ?: TetherDeliveryException("tether ${c.info.id}: the connection to ${c.remote?.address} was lost", cause)
+        c.lost = reason
+        c.lostSignal.complete(Unit)
+        c.queue?.close(reason)
+        onDeliveryFailure(c.info, reason)
+    }
+
+    /**
+     * Takes a value from the wire for the receiving end of [c] (called by the remote driver): validates it against the
+     * schema of the local port and queues it like a value of a local tether. Suspends while the buffer is full.
+     */
+    private suspend fun receiveRemote(c: Connection, value: JsonElement) {
+        val queue = c.queue ?: throw TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
+        validate(c, value, "message")
+        send(queue, Envelope.Message(fromJson(value) ?: JsonNull))
     }
 
     private suspend fun openTcp(c: Connection, s: CoroutineScope, deliverer: TetherDeliverer) {
@@ -200,7 +243,11 @@ public class TetherNetwork private constructor(
         scope?.cancel()
         scope = null
         deliverer = null
-        for (c in connections.values.distinctBy { it.info.id }) c.queue?.close(reason)
+        for (c in connections.values.distinctBy { it.info.id }) {
+            c.queue?.close(reason)
+            c.call?.close()
+            c.call = null
+        }
         for (ch in streamChannels) ch.close(reason)
         streamChannels.clear()
         for (r in pendingRequests) r.completeExceptionally(reason)
@@ -213,6 +260,16 @@ public class TetherNetwork private constructor(
         serialDrivers.clear()
     }
 
+    /**
+     * Ends what [create] registered at the remote driver: the senders that the receiving ends of this network allow.
+     * Called when the fabric is removed; [close] only stops the traffic.
+     */
+    public fun release() {
+        close()
+        registration?.close()
+        registration = null
+    }
+
     /** The reason a sender gets when the network stops under it. */
     private fun stopReason(): TetherDeliveryException = stopping ?: TetherDeliveryException("the fabric is stopping")
 
@@ -220,9 +277,10 @@ public class TetherNetwork private constructor(
      * Puts [value] into a bounded [channel] and suspends while it is full, as every other send does. A closed
      * channel alone would leave a waiting sender suspended, so the stop is awaited beside the send.
      */
-    private suspend fun <T> send(channel: Channel<T>, value: T) {
+    private suspend fun <T> send(channel: Channel<T>, value: T, connection: Connection? = null) {
         select {
             stopped.onAwait { throw stopReason() }
+            connection?.lostSignal?.onAwait { throw connection.lost ?: stopReason() }
             channel.onSend(value) { }
         }
     }
@@ -256,7 +314,19 @@ public class TetherNetwork private constructor(
         val requestTimeout: Duration,
         val retry: RetryConfig,
         val serialConfig: SerialTetherConfig?,
+        /** Set for a tether that ends on another engine; [remoteSends] says whether the local end is the sending one. */
+        val remote: RemoteEndpoint? = null,
+        val remoteSends: Boolean = false,
     ) {
+        /** The open call of a tether whose local end sends to another engine. */
+        @Volatile var call: RemoteCall? = null
+
+        /** Why the call to the other engine ended, or `null`. */
+        @Volatile var lost: TetherDeliveryException? = null
+
+        /** Completed with [lost]: a sender that waits for room in the queue waits for this as well (closing the queue does not wake it). */
+        @Volatile var lostSignal: CompletableDeferred<Unit> = CompletableDeferred()
+
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
@@ -310,7 +380,7 @@ public class TetherNetwork private constructor(
             // closed
         } catch (e: Throwable) {
             // close() closed the queue with the reason its senders get; nothing is left to pump
-            if (e !== stopping) throw e
+            if (e !== stopping && e !== c.lost) throw e
         }
     }
 
@@ -333,7 +403,12 @@ public class TetherNetwork private constructor(
         when (env) {
             is Envelope.Message -> {
                 if (first) hook(c, TrafficKind.MESSAGE, env.value)
-                target.deliver(to.block, TetherEvent.Message(port, env.value))
+                if (c.remoteSends) {
+                    val call = c.call ?: throw c.lost ?: TetherDeliveryException("tether ${c.info.id}: the fabric is not running")
+                    call.send(toJson(env.value))
+                } else {
+                    target.deliver(to.block, TetherEvent.Message(port, env.value))
+                }
             }
             is Envelope.Request -> {
                 if (first) hook(c, TrafficKind.REQUEST, env.value)
@@ -426,7 +501,7 @@ public class TetherNetwork private constructor(
         override suspend fun send(message: Any) {
             require(TetherType.MESSAGE, "send")
             // a closed queue throws the reason close() gave it
-            send(queue(), Envelope.Message(validate(c, message, "message")))
+            send(queue(), Envelope.Message(validate(c, message, "message")), c)
         }
 
         override suspend fun request(request: Any): Any {
@@ -512,8 +587,8 @@ public class TetherNetwork private constructor(
     }
 
     public companion object {
-        /** Why a blueprint with a `remote` tether is rejected until cross-engine tethers exist (#146). */
-        public const val REMOTE_NOT_SUPPORTED: String = "remote tethers are not supported by this engine yet"
+        /** Why a remote tether of another type than `MESSAGE` is rejected until it is implemented (#147). */
+        public const val REMOTE_TYPE_NOT_SUPPORTED: String = "is not supported across engines yet (only MESSAGE is, the other types follow)"
 
         private fun key(block: String, port: String, index: Int?) = "$block/$port/${index ?: "-"}"
 
@@ -553,11 +628,45 @@ public class TetherNetwork private constructor(
                 return port
             }
 
+            val receivers = ArrayList<Pair<Connection, RemoteEndpoint>>()
             for (t in blueprint.tethers) {
+                val remote = t.remote
                 val localFrom = t.from
                 val localTo = t.to
-                if (t.remote != null || localFrom == null || localTo == null) {
-                    problems += REMOTE_NOT_SUPPORTED
+                if (remote != null) {
+                    val local = if (localFrom != null && localTo == null) localFrom else if (localTo != null && localFrom == null) localTo else null
+                    if (local == null) {
+                        problems += "tether ${t.type} to ${remote.address}: a remote tether has exactly one local endpoint"
+                        continue
+                    }
+                    val sends = local === localFrom
+                    val far = Endpoint(remote.block, remote.port, remote.index)
+                    fun label(e: Endpoint) = "${e.block}.${e.port}${e.index?.let { "[$it]" }.orEmpty()}"
+                    val id = if (sends) "${label(local)} -> ${remote.address}/${remote.fabric}/${label(far)}" else "${remote.address}/${remote.fabric}/${label(far)} -> ${label(local)}"
+                    val port = endpoint(local, if (sends) PortDirection.OUT else PortDirection.IN, "tether $id") ?: continue
+                    if (t.type !in port.tetherTypes) problems += "tether $id: port '${local.port}' does not support ${t.type}"
+                    if (t.type != TetherType.MESSAGE) problems += "tether $id: a remote ${t.type} tether $REMOTE_TYPE_NOT_SUPPORTED"
+                    if (config.remote == null) problems += "tether $id: this engine cannot run tethers to other engines"
+                    val c = Connection(
+                        TetherInfo(id, t.type, if (sends) local else far, if (sends) far else local, remote),
+                        port,
+                        port,
+                        t.delivery,
+                        null,
+                        t.bufferCapacity ?: config.bufferCapacity,
+                        t.requestTimeout ?: config.requestTimeout,
+                        t.retry ?: RetryConfig(),
+                        null,
+                        remote,
+                        sends,
+                    )
+                    val k = key(local.block, local.port, local.index)
+                    if (connections.put(k, c) != null) problems += "tether $id: endpoint '${local.block}.${local.port}' is already connected"
+                    if (!sends) receivers += c to remote
+                    continue
+                }
+                if (localFrom == null || localTo == null) {
+                    problems += "tether ${t.type}: a tether needs a from and a to endpoint, or one of them and a remote"
                     continue
                 }
                 val id = "${localFrom.block}.${localFrom.port}${localFrom.index?.let { "[$it]" }.orEmpty()} -> ${localTo.block}.${localTo.port}${localTo.index?.let { "[$it]" }.orEmpty()}"
@@ -596,7 +705,16 @@ public class TetherNetwork private constructor(
                 }
             }
             if (problems.isNotEmpty()) throw TetherWiringException("tethers cannot be wired:\n" + problems.joinToString("\n") { "  $it" })
-            return TetherNetwork(config, connections, onDeliveryFailure)
+            val network = TetherNetwork(config, connections, onDeliveryFailure)
+            if (receivers.isNotEmpty()) {
+                network.registration = config.remote!!.register(
+                    receivers.map { (c, remote) ->
+                        val local = c.info.to
+                        RemoteReceiver(c.info.id, local.block, local.port, local.index, remote.fingerprint) { value -> network.receiveRemote(c, value) }
+                    },
+                )
+            }
+            return network
         }
     }
 }

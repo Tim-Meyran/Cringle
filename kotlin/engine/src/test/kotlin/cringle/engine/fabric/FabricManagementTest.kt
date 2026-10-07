@@ -218,7 +218,7 @@ class FabricManagementTest {
     }
 
     @Test
-    fun aBlueprintWithARemoteTetherIsRejectedAndStartsNoBlock() = withEngine { stub, m1, _ ->
+    fun aRemoteTetherIsCheckedLikeALocalOneAndAFailedDeployStartsNoBlock() = withEngine { stub, m1, _ ->
         // The test project builder validates its packages, and the marker block has no ports; so the blueprint is added to the unpacked project.
         val projectDir = dir.resolve("home/projects/demo/0.1.0")
         val remote = Blueprint(
@@ -232,7 +232,8 @@ class FabricManagementTest {
         Files.writeString(manifest, Files.readString(manifest).replace("\"blueprints/main.json\"", "\"blueprints/main.json\", \"blueprints/remote.json\""))
         val failure: StatusException = assertThrows { runBlocking { stub.deployFabric(deploy("remote-1", ProtoTrust.PLUGIN_TRUST_TRUSTED, blueprint = "remote")) } }
         assertEquals(Status.Code.INVALID_ARGUMENT, failure.status.code)
-        assertTrue(failure.status.description!!.contains("remote tethers are not supported by this engine yet"), failure.status.description)
+        // the marker block has no port "out": the local end of the remote tether is validated like any other
+        assertTrue(failure.status.description!!.contains("has no port 'out'"), failure.status.description)
         assertTrue(stub.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsList.isEmpty())
         assertEquals(Status.Code.NOT_FOUND, code { stub.startFabric(fabricRequest("remote-1")) })
         assertFalse(Files.exists(m1))

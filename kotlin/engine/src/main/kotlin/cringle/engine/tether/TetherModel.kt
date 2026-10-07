@@ -6,6 +6,7 @@ import cringle.contract.SerialDriver
 import cringle.contract.TcpDriver
 import cringle.contract.TetherType
 import cringle.packaging.Endpoint
+import cringle.packaging.RemoteEndpoint
 import cringle.schema.SchemaRegistry
 import java.time.Duration
 import kotlinx.coroutines.CoroutineDispatcher
@@ -24,7 +25,17 @@ public class TetherTimeoutException(message: String) : RuntimeException(message)
 public class TetherDeliveryException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /** Static description of one tether of a blueprint. */
-public data class TetherInfo(val id: String, val type: TetherType, val from: Endpoint, val to: Endpoint)
+public data class TetherInfo(
+    val id: String,
+    val type: TetherType,
+    val from: Endpoint,
+    val to: Endpoint,
+    /**
+     * Set for a tether that ends on another engine: the end that is not local ([from] or [to]) then names the port on the
+     * other engine by the ids of this object.
+     */
+    val remote: RemoteEndpoint? = null,
+)
 
 /** What kind of traffic a hook sees. */
 public enum class TrafficKind { MESSAGE, REQUEST, RESPONSE, STREAM_OPENED, STREAM_ITEM, BYTES }
@@ -71,6 +82,8 @@ public class TetherConfig(
     public val serial: ((blockId: String) -> SerialDriver)? = null,
     /** Dispatcher the network runs its delivery coroutines on. */
     public val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Runs the tethers that end on another engine (bound to the fabric); `null` means this engine cannot run them. */
+    public val remote: RemoteTetherPorts? = null,
 ) {
     init {
         require(bufferCapacity >= 1) { "bufferCapacity must be at least 1" }

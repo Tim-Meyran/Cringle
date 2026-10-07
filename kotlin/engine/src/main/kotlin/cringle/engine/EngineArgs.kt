@@ -14,6 +14,8 @@ public data class EngineArgs(
     val name: String?,
     val home: Path?,
     val managementPort: Int,
+    /** Port of the server for tethers between engines; 0 picks a free port. */
+    val tetherPort: Int = 0,
 ) {
     public companion object {
         /** Engine ids become directory names, so they are restricted to a safe grammar. */
@@ -21,7 +23,7 @@ public data class EngineArgs(
 
         /** Usage text printed on argument errors. */
         public const val USAGE: String =
-            "usage: engine --id <id> [--name <name>] [--home <dir>] [--management-port <port>]"
+            "usage: engine --id <id> [--name <name>] [--home <dir>] [--management-port <port>] [--tether-port <port>]"
 
         /** Parses [args]; throws [EngineArgsException] for unknown, missing or malformed arguments. */
         public fun parse(args: List<String>): EngineArgs {
@@ -29,6 +31,7 @@ public data class EngineArgs(
             var name: String? = null
             var home: Path? = null
             var port = 0
+            var tetherPort = 0
             var i = 0
             fun value(option: String): String {
                 if (i + 1 >= args.size) throw EngineArgsException("$option needs a value")
@@ -45,6 +48,11 @@ public data class EngineArgs(
                         port = text.toIntOrNull()?.takeIf { it in 0..65535 }
                             ?: throw EngineArgsException("--management-port must be 0..65535, got '$text'")
                     }
+                    "--tether-port" -> {
+                        val text = value(option)
+                        tetherPort = text.toIntOrNull()?.takeIf { it in 0..65535 }
+                            ?: throw EngineArgsException("--tether-port must be 0..65535, got '$text'")
+                    }
                     else -> throw EngineArgsException("unknown argument '$option'")
                 }
                 i += 1
@@ -54,7 +62,7 @@ public data class EngineArgs(
                 throw EngineArgsException("--id '$engineId' must match ${idPattern.pattern}")
             }
             if (name != null && name.isBlank()) throw EngineArgsException("--name must not be blank")
-            return EngineArgs(engineId, name, home, port)
+            return EngineArgs(engineId, name, home, port, tetherPort)
         }
     }
 }

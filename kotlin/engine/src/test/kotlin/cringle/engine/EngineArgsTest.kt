@@ -35,6 +35,9 @@ class EngineArgsTest {
         assertTrue(bad("--id", "a", "--bogus").message!!.contains("unknown argument '--bogus'"))
         assertTrue(bad("--id", "a", "--management-port", "70000").message!!.contains("0..65535"))
         assertTrue(bad("--id", "a", "--management-port", "x").message!!.contains("0..65535"))
+        assertTrue(bad("--id", "a", "--tether-port", "70000").message!!.contains("--tether-port must be 0..65535"))
+        assertEquals(7447, EngineArgs.parse(listOf("--id", "a", "--tether-port", "7447")).tetherPort)
+        assertEquals(0, EngineArgs.parse(listOf("--id", "a")).tetherPort)
         assertTrue(bad("--id", "a", "--name", " ").message!!.contains("must not be blank"))
     }
 

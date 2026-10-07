@@ -271,13 +271,25 @@ class TetherNetworkTest {
     }
 
     @Test
-    fun remoteTetherIsNotWiredYet() {
+    fun remoteTetherNeedsTheRemoteDriverAndTheMessageType() {
         val defs = mapOf("s" to srcDef, "d" to dstDef)
         val blocks = listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst"))
         val remote = RemoteEndpoint("10.0.0.7:7443", "ab".repeat(32), "shop", "sink", "in")
-        val remoteOnly = listOf(TetherDef(TetherType.MESSAGE, Endpoint("s", "out"), null, remote = remote))
-        val e = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, remoteOnly), defs, config()) }
-        assertTrue(e.message!!.contains("remote tethers are not supported by this engine yet"), e.message)
+        val message = listOf(TetherDef(TetherType.MESSAGE, Endpoint("s", "out"), null, remote = remote))
+        val noDriver = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, message), defs, config()) }
+        assertTrue(noDriver.message!!.contains("this engine cannot run tethers to other engines"), noDriver.message)
+        val request = listOf(TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("s", "out"), null, remote = remote))
+        val driver = object : RemoteTetherPorts {
+            override fun register(receivers: List<RemoteReceiver>): AutoCloseable = AutoCloseable { }
+            override suspend fun connect(sender: RemoteSender): RemoteCall = throw AssertionError("not connected in this test")
+        }
+        val config = TetherConfig(remote = driver)
+        val unsupported = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, request), defs, config) }
+        assertTrue(unsupported.message!!.contains("a remote REQUEST_RESPONSE tether is not supported across engines yet"), unsupported.message)
+        // the local end of a remote tether is checked like a local one: an IN port cannot send
+        val wrongDirection = listOf(TetherDef(TetherType.MESSAGE, Endpoint("d", "in"), null, remote = remote))
+        val direction = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, wrongDirection), defs, config) }
+        assertTrue(direction.message!!.contains("expected OUT"), direction.message)
     }
 
     @Test

@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cringle.engine.v1;
+
+option java_multiple_files = true;
+option java_package = "cringle.engine.v1";
+
+// Tethers between engines (spec/tether.md, "Tethers between engines"). Every engine serves this service on its tether
+// port, over mutual TLS: a caller is accepted only if the fabric that receives allows its key.
+service RemoteTetherService {
+  // One call carries the traffic of one tether. The caller names the receiving end in the call metadata:
+  // `cringle-fabric` (the fabric id) and `cringle-block-port` (`<block>/<port>` or `<block>/<port>/<index>`).
+  //
+  // The server answers a call it accepts with one empty WireData (the call is established), and a call it refuses
+  // with one ERROR frame and the end of the call. After that, the frames of the wire format (spec/wire.md) flow in
+  // the direction of the tether; the other direction carries ERROR frames for what the receiver could not take.
+  //
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Exchange(stream WireData) returns (stream WireData);
+}
+
+// Bytes of the wire format (spec/wire.md). One message holds the bytes of one frame; an empty message is the
+// acknowledgement of a new call and is never a frame.
+message WireData {
+  bytes frame = 1;
+}

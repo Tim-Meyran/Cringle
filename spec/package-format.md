@@ -121,9 +121,10 @@ version of its own and no engine, role or label fields, so it always runs entire
   the blueprint that is deployed there, with the identifier grammar of section 3; both sides have to agree on those
   names out of band. Only `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM` tethers may have a `remote`:
   `TCP` and `SERIAL` tethers are local resources. Both delivery policies are allowed. This is the one place where a
-  blueprint names another engine; it does not add engine, role or label fields to the blueprint. The field is only
-  specified and validated so far: an engine rejects a blueprint with a `remote` tether until the connection is
-  implemented (`tether.md`).
+  blueprint names another engine; it does not add engine, role or label fields to the blueprint. How the tether is
+  carried, and which types an engine carries, is in `tether.md` ("Tethers between engines"). On the receiving side
+  `address` is not used for a connection (the sender connects); `fingerprint` is the key of the sending engine that the
+  receiving fabric allows.
 
   ```json
   { "type": "MESSAGE", "from": { "block": "source", "port": "out" },

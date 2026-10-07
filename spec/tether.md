@@ -35,15 +35,45 @@ the device; the failed start releases the device, so it can be repeated. An I/O 
 byte stream and is logged; the device is not reopened automatically (a follow-up). The device is closed when the
 fabric stops; `awaitClosed` waits for it, like the TCP ports.
 
-### Remote tethers (blueprint field)
+### Tethers between engines
 
 A tether can end at a port of a block on another engine at a fixed address: the blueprint gives the tether one local
 endpoint and a `remote` object (`address`, `fingerprint`, `fabric`, `block`, `port`, optional `index`) instead of the
 other endpoint; see `package-format.md`, section 5. The local endpoint is the `OUT` port (`from`) when the remote end
-receives and the `IN` port (`to`) when it sends. The types `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM`
-may have a `remote`, both delivery policies apply. The remote engine is identified by the fingerprint of its key and
-trusted by it only. Only the blueprint field is defined so far; an engine that does not implement the connection yet
-rejects the deployment of a blueprint with a `remote` tether with `remote tethers are not supported by this engine yet`.
+receives and the `IN` port (`to`) when it sends. The remote engine is identified by the fingerprint of its key and
+trusted by it only. Of the types that may have a `remote`, **`MESSAGE`** is carried so far; an engine rejects the
+deployment of a blueprint with a remote `REQUEST_RESPONSE`, `STREAM` or `BYTE_STREAM` tether.
+
+**Transport.** Every engine serves `cringle.engine.v1.RemoteTetherService` (`proto/cringle/engine/v1/remote_tether.proto`)
+on its tether port (`<engineDir>/tether.port`, option `--tether-port`, default any free port), over mutual TLS with the
+identity of the engine. One bidirectional call `Exchange` carries one tether; each gRPC message holds the bytes of one
+frame of the wire format (`wire.md`, typed mode, JSON payload). The sender opens the call when its fabric starts, before
+the blocks run, and names the receiving end in the call metadata: `cringle-fabric` (the fabric id) and
+`cringle-block-port` (`<block>/<port>` or `<block>/<port>/<index>`), taken from the `remote` object of its blueprint.
+
+**Trust.** The key of a caller is accepted at the handshake if, and only if, a fabric of the receiving engine allows it:
+every tether of a fabric whose local end receives and that has a `remote` allows the `fingerprint` of that `remote` as a
+sender, until the fabric is removed. These keys are kept in a trust store of their own (`<engineDir>/tether-trust.json`,
+emptied when the engine starts), separate from the trust of the daemon and the management server. A call also has to
+come from the key that the receiving tether names: a call that names an unknown fabric, block or port, or that comes from
+another allowed key, gets the same answer, so that a caller learns nothing about what runs on the engine. A sender
+connects to the address and the key of its `remote` and to nothing else; a certificate that does not have this key is
+refused. There is no trust on first use.
+
+**Calls.** The server answers a call it accepts with one empty message (the call is established), and a call it refuses
+with one `ERROR` frame (`cringle.std/Error`, code `unknown-target`) and the end of the call. A sender is started only
+after that: a fabric whose tether cannot connect (not reachable, wrong key, refused) fails to start with a message that
+names the address and the expected key. After that, `MESSAGE` frames flow from the sender to the receiver. The receiver
+validates a value against the schema of its port (the schema of the remote port is only known here) and queues it like a
+value of a local tether: ordering, the bounded buffer and `DROP`/`BUFFER` with `retry` behave as for a local tether, and a
+full buffer suspends the sender through the flow control of the connection. A value the receiver cannot take is answered
+with an `ERROR` frame: code `validation` (the sender sees a `TetherValidationException`), `delivery` (a
+`TetherDeliveryException`, for example because the fabric is not running) or `unsupported`; the sender reports it as a
+delivery failure of the tether, as it does for a local tether.
+
+**Failure.** A connection that is lost, or a call that the other engine ends, fails the waiting senders and every later send
+at once with a `TetherDeliveryException` (as a stopping fabric does). The tether is not reconnected: the fabric has to be
+restarted. Reconnecting, at-least-once delivery, resolution through the registry and failover are not part of this.
 
 ## Schemas
 
@@ -73,5 +103,5 @@ Every tether has bounded buffers (default 64 entries; every stream direction has
 
 ## Not covered
 
-- The wire format for typed (schema) messages across process boundaries and between engines, one format for every tether type: issue #76 (together with #20).
+- `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM` across engines (#147), reconnecting and resolution of the address (#148).
 - The filesystem driver: issue #75.

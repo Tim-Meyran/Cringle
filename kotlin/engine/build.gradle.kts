@@ -5,6 +5,7 @@ dependencies {
     implementation(project(":schema"))
     implementation(project(":packaging"))
     implementation(project(":common"))
+    implementation(project(":wire"))
     implementation(project(":repository"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.grpc.netty.shaded)

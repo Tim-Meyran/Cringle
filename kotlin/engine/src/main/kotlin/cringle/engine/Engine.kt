@@ -21,6 +21,7 @@ import cringle.engine.fabric.FabricState
 import cringle.engine.fabric.FabricStatus
 import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
+import cringle.engine.tether.RemoteTetherDriver
 import cringle.common.v1.FabricStateSummary
 import cringle.common.EngineTls
 import cringle.common.TlsHelper
@@ -73,12 +74,21 @@ public class Engine private constructor(
     public val trustStore: TrustStore,
     private val tls: EngineTls,
     private val enrollmentSecret: ByteArray?,
+    requestedTetherPort: Int,
 ) {
     /** The fabrics of this engine. */
     /** The built-in drivers of this engine (logging, filesystem, TCP). */
     public val drivers: BuiltinDrivers = BuiltinDrivers(dir)
 
-    public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers))
+    /**
+     * The tethers between engines (`spec/tether.md`): serves the senders that the fabrics of this engine allow, over mutual
+     * TLS with the identity of this engine. Its trust store (`tether-trust.json`) is separate from [trustStore] and starts
+     * empty with every process.
+     */
+    public val remoteTethers: RemoteTetherDriver =
+        RemoteTetherDriver(identity.common, TrustStore(dir.resolve("tether-trust.json")), dir.resolve("tether-peers"), requestedTetherPort)
+
+    public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers, remoteTethers = remoteTethers))
 
     /** The package cache of the machine (shared by all engines with the same Cringle home). */
     public val cache: PackageCache = PackageCache(home).also {
@@ -133,11 +143,19 @@ public class Engine private constructor(
     /** Port of the management server; valid after [start]. */
     public val managementPort: Int get() = server.port
 
-    /** Starts the management server and publishes its port in `<engine dir>/management.port`. */
+    /** Port of the server for tethers between engines; valid after [start]. */
+    public val tetherPort: Int get() = remoteTethers.port
+
+    /**
+     * Starts the management server and the server for tethers between engines and publishes their ports in
+     * `<engine dir>/management.port` and `<engine dir>/tether.port`.
+     */
     public fun start(): Engine {
         server.start()
+        remoteTethers.start()
         started = true
         Files.writeString(dir.resolve(PORT_FILE), managementPort.toString() + "\n")
+        Files.writeString(dir.resolve(TETHER_PORT_FILE), tetherPort.toString() + "\n")
         synchronized(lock) { restartLink() }
         return this
     }
@@ -153,7 +171,9 @@ public class Engine private constructor(
         }
         server.shutdown()
         if (!server.awaitTermination(5, TimeUnit.SECONDS)) server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+        remoteTethers.close()
         Files.deleteIfExists(dir.resolve(PORT_FILE))
+        Files.deleteIfExists(dir.resolve(TETHER_PORT_FILE))
     }
 
     /** Sets (or, with `null`, clears) the router this engine registers at; persists the config and reconnects. */
@@ -371,6 +391,9 @@ public class Engine private constructor(
         /** Name of the file that holds the management port of a running engine. */
         public const val PORT_FILE: String = "management.port"
 
+        /** Name of the file that holds the port for tethers between engines of a running engine. */
+        public const val TETHER_PORT_FILE: String = "tether.port"
+
         /**
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
          * started yet. The management API and the router channel are always mTLS: the engine opens its trust store and reads
@@ -388,7 +411,7 @@ public class Engine private constructor(
             val trustStore = TrustStore(dir.resolve("trust.json"))
             val tls = EngineTls(identity.common, trustStore)
             val enrollmentSecret = readEnrollmentSecret(env)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret)
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort)
         }
 
         /**
