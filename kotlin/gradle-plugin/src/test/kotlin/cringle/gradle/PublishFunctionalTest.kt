@@ -9,7 +9,6 @@ import cringle.packaging.PluginManifest
 import cringle.repository.PackageEntry
 import cringle.repository.PackageRepository
 import cringle.repository.RepositoryClient
-import cringle.repository.RepositoryServer
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
 import java.net.ServerSocket
@@ -55,6 +54,8 @@ class PublishFunctionalTest {
 
     private lateinit var repository: PackageRepository
 
+    private val tlsRepo by lazy { TlsRepository(temp, home) }
+
     @BeforeEach
     fun repositoryAndProfile() {
         Files.deleteIfExists(profile)
@@ -74,7 +75,7 @@ class PublishFunctionalTest {
     fun publishesThePackageOfTheSampleAndRefusesTheSameVersionASecondTime() {
         val project = SamplePlugin.copyTo(temp, "publish")
         publishCore()
-        val server = RepositoryServer(repository, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, upload = upload())
         val address = "127.0.0.1:${server.port}"
         val arguments = listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=$address")
 
@@ -104,7 +105,7 @@ class PublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val operator = users.createUser("author", setOf(UserRole.OPERATOR))
         val token = users.createToken(operator.user.id, "t", null).secret
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
         writeProfile(address, token)
         val project = SamplePlugin.copyTo(temp, "profile")
@@ -127,13 +128,14 @@ class PublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val operator = users.createUser("author", setOf(UserRole.OPERATOR))
         val token = users.createToken(operator.user.id, "t", null).secret
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
         val project = SamplePlugin.copyTo(temp, "environment")
         publishCore()
         val environment = System.getenv() + mapOf(
             "CRINGLE_SERVER" to address,
             "CRINGLE_TOKEN" to token,
+            "CRINGLE_FINGERPRINT" to tlsRepo.fingerprint,
             "CRINGLE_HOME" to emptyHome().toString(),
         )
 
@@ -148,7 +150,7 @@ class PublishFunctionalTest {
     fun withoutATokenTheMessageNamesTheEnvironmentAndTheLogin() {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         users.bootstrap()
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val project = SamplePlugin.copyTo(temp, "without-token")
 
         val result = runner(project, listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${server.port}"))
@@ -164,7 +166,7 @@ class PublishFunctionalTest {
     fun aTokenWithoutTheRightToOperateIsRefusedWithAMessageThatNamesIt() {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val viewer = users.createUser("reader", setOf(UserRole.VIEWER))
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
         writeProfile(address, users.createToken(viewer.user.id, "t", null).secret)
         val project = SamplePlugin.copyTo(temp, "without-right")
@@ -182,7 +184,7 @@ class PublishFunctionalTest {
 
         val result = runner(
             project,
-            listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${closedPort()}"),
+            listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${closedPort()}", "-P${CringlePlugin.PROPERTY_FINGERPRINT}=${"0".repeat(64)}"),
         ).buildAndFail()
         assertTrue("not reachable" in result.output, "the message has to say that the server is not there:\n${result.output}")
         assertFalse("\tat " in result.output, "the message has to stand on its own, without a stack trace:\n${result.output}")
@@ -220,7 +222,7 @@ class PublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val operator = users.createUser("author", setOf(UserRole.OPERATOR))
         val token = users.createToken(operator.user.id, "quiet", null).secret
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
         writeProfile(address, token)
         val project = SamplePlugin.copyTo(temp, "quiet")
@@ -249,7 +251,7 @@ class PublishFunctionalTest {
         val users = UserManager(FileUserStore(temp.resolve("users.json")))
         val operator = users.createUser("author", setOf(UserRole.OPERATOR))
         val token = users.createToken(operator.user.id, "info", null).secret
-        val server = RepositoryServer(repository, users = users, tempDir = upload()).start()
+        val server = tlsRepo.start(repository, users, upload())
         val address = "127.0.0.1:${server.port}"
         writeProfile(address, token)
         val project = SamplePlugin.copyTo(temp, "info")
@@ -262,6 +264,92 @@ class PublishFunctionalTest {
         assertFalse(token in result.output, "the token appeared in the output of an --info build:\n${excerpt(result.output)}")
         server.stop()
     }
+    /**
+     * TLS (#37): a repository that is up but without a fingerprint to pin it to fails the task with a message that names
+     * all four places the fingerprint comes from, and without a stack trace. Nothing is sent: there is no trust on first use.
+     */
+    @Test
+    fun withoutAFingerprintTheMessageNamesTheFourPlaces() {
+        val server = tlsRepo.start(repository, upload = upload())
+        val address = "127.0.0.1:${server.port}"
+        tlsRepo.writeProfile(address, null, fingerprint = null)
+        val project = SamplePlugin.copyTo(temp, "without-fingerprint")
+        publishCore()
+
+        val result = runner(project, listOf("cringlePublish")).buildAndFail()
+        for (place in listOf("-Pcringle.fingerprint", "cringle { publish { fingerprint", "CRINGLE_FINGERPRINT", "cli.json")) {
+            assertTrue(place in result.output, "the message has to name '$place':\n${result.output}")
+        }
+        assertFalse("\tat " in result.output, "the message has to stand on its own, without a stack trace:\n${result.output}")
+        assertTrue(repository.list().none { it.name == "acme-orders" }, "nothing may reach the repository without a fingerprint")
+        server.stop()
+    }
+
+    /** TLS (#37): a repository whose key is not the pinned one is not accepted, and the message says what to check. */
+    @Test
+    fun aRepositoryWithAnotherKeyThanTheFingerprintIsRefused() {
+        val server = tlsRepo.start(repository, upload = upload())
+        val address = "127.0.0.1:${server.port}"
+        val project = SamplePlugin.copyTo(temp, "wrong-fingerprint")
+        publishCore()
+
+        val result = runner(
+            project,
+            listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=$address", "-P${CringlePlugin.PROPERTY_FINGERPRINT}=${"ab".repeat(32)}"),
+        ).buildAndFail()
+        assertTrue("not reachable" in result.output && "fingerprint" in result.output, "the message has to point at the fingerprint:\n${result.output}")
+        assertFalse("\tat " in result.output, "the message has to stand on its own, without a stack trace:\n${result.output}")
+        assertTrue(repository.list().none { it.name == "acme-orders" })
+        server.stop()
+    }
+
+    /** TLS (#37): a text that is no SHA-256 fingerprint is refused before any connection, with the value in the message. */
+    @Test
+    fun aFingerprintThatIsNoFingerprintIsRefused() {
+        val project = SamplePlugin.copyTo(temp, "bad-fingerprint")
+
+        val result = runner(
+            project,
+            listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_SERVER}=127.0.0.1:${closedPort()}", "-P${CringlePlugin.PROPERTY_FINGERPRINT}=not-a-fingerprint"),
+        ).buildAndFail()
+        assertTrue("not-a-fingerprint" in result.output && "SHA-256" in result.output, result.output)
+    }
+
+    /** TLS (#37): the property of the command line wins over the profile; a wrong value in the profile does not matter then. */
+    @Test
+    fun theFingerprintOfTheCommandLineWinsOverTheProfile() {
+        val server = tlsRepo.start(repository, upload = upload())
+        val address = "127.0.0.1:${server.port}"
+        tlsRepo.writeProfile(address, null, fingerprint = "cd".repeat(32))
+        val project = SamplePlugin.copyTo(temp, "fingerprint-property")
+        publishCore()
+
+        val result = runner(project, listOf("cringlePublish", "-P${CringlePlugin.PROPERTY_FINGERPRINT}=${tlsRepo.fingerprint}")).build()
+        assertEquals(TaskOutcome.SUCCESS, result.task(":cringlePublish")?.outcome, result.output)
+        assertEquals("acme-orders", stored(address).name)
+        server.stop()
+    }
+
+    /** TLS (#37): `cringle { publish { fingerprint = … } }` in the build script pins the repository, as `server` names it. */
+    @Test
+    fun theBlockOfTheBuildScriptCanPinTheFingerprint() {
+        val server = tlsRepo.start(repository, upload = upload())
+        val address = "127.0.0.1:${server.port}"
+        tlsRepo.writeProfile(address, null, fingerprint = null)
+        val project = SamplePlugin.copyTo(temp, "fingerprint-block")
+        SamplePlugin.replaceInBuildScript(
+            project,
+            "    name = \"acme-orders\"",
+            "    publish { fingerprint = \"${tlsRepo.fingerprint}\" }\n    name = \"acme-orders\"",
+        )
+        publishCore()
+
+        val result = runner(project, listOf("cringlePublish")).build()
+        assertEquals(TaskOutcome.SUCCESS, result.task(":cringlePublish")?.outcome, result.output)
+        assertEquals("acme-orders", stored(address).name)
+        server.stop()
+    }
+
     /**
      * The `acme-core` the sample depends on. A repository only takes a package whose dependencies it can resolve, so
      * the fixture has to hold the plugin the sample names.
@@ -279,12 +367,11 @@ class PublishFunctionalTest {
 
     /** The metadata of the published version as the repository reports it to another client. */
     private fun stored(address: String, token: String? = null): PackageEntry =
-        RepositoryClient(address, token).use { client -> runBlocking { client.get("acme-orders", "1.2.0") } }
+        tlsRepo.client(address, token).use { client -> runBlocking { client.get("acme-orders", "1.2.0") } }
 
     /** The profile of `cringle login`, in the format the CLI writes it: the address and the token, or `null`. */
     private fun writeProfile(server: String, token: String?) {
-        home.createDirectories()
-        profile.writeText("""{"server": "$server", "token": ${token?.let { "\"$it\"" } ?: "null"}}""")
+        tlsRepo.writeProfile(server, token)
     }
 
     /** A home without a profile, for the tests that take the address and the token from the environment. */

@@ -99,6 +99,13 @@ public abstract class PublishSpec @Inject constructor(objects: ObjectFactory) {
 
     /** Address of the repository as `host:port`; without it the task asks `CRINGLE_SERVER` and then the profile. */
     public val server: Property<String> = objects.property(String::class.java)
+
+    /**
+     * The SHA-256 fingerprint of the key of the repository (64 hexadecimal characters). `cringlePublish` and
+     * `cringleValidate` talk TLS and accept the repository only with this key; there is no trust on first use. Without it
+     * the task asks `CRINGLE_FINGERPRINT` and then the `fingerprint` field of the profile.
+     */
+    public val fingerprint: Property<String> = objects.property(String::class.java)
 }
 
 /** Collects the parts of one [BlockDefinition] before it is built. */

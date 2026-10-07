@@ -54,6 +54,7 @@ public class CringlePlugin : Plugin<Project> {
             common(project, extension, jar, manifest)
             // the same repository as `cringlePublish`: it holds the plugins this one depends on
             server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
+            fingerprint.set(project.providers.gradleProperty(PROPERTY_FINGERPRINT).orElse(extension.publishSettings.fingerprint))
             group = TASK_GROUP
             description = "Validates the Cringle plugin package without writing it."
         }
@@ -72,6 +73,7 @@ public class CringlePlugin : Plugin<Project> {
             // A property of the command line wins over the block of the build script, and both win over the
             // environment and the profile, which the task itself resolves.
             server.set(project.providers.gradleProperty(PROPERTY_SERVER).orElse(extension.publishSettings.server))
+            fingerprint.set(project.providers.gradleProperty(PROPERTY_FINGERPRINT).orElse(extension.publishSettings.fingerprint))
             dryRun.convention(false)
             group = TASK_GROUP
             description = "Publishes the Cringle plugin package to a repository."
@@ -163,6 +165,9 @@ public class CringlePlugin : Plugin<Project> {
 
         /** The project property that names the repository, as `-Pcringle.server=host:port`. */
         public const val PROPERTY_SERVER: String = "cringle.server"
+
+        /** The project property that pins the repository key, as `-Pcringle.fingerprint=<sha256>`. */
+        public const val PROPERTY_FINGERPRINT: String = "cringle.fingerprint"
 
         /** The task group both tasks appear under. */
         public const val TASK_GROUP: String = "cringle"

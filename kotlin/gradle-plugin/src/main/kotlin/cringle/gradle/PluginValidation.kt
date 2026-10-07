@@ -11,7 +11,6 @@ import cringle.packaging.PackageValidator
 import cringle.packaging.PluginPackage
 import cringle.packaging.ResolutionException
 import cringle.packaging.Resolver
-import cringle.repository.RepositoryClient
 import cringle.repository.RepositoryClientException
 import io.grpc.Status
 import java.io.IOException
@@ -50,7 +49,7 @@ internal object PluginValidation {
      * are asked behind it, in the order of `cringlePublish`. With [mayConnect] `false` (`--dryRun`) the repository is not
      * contacted.
      */
-    fun validate(plugin: PluginPackage, server: String?, mayConnect: Boolean = true): PluginValidationResult {
+    fun validate(plugin: PluginPackage, server: String?, fingerprint: String? = null, mayConnect: Boolean = true): PluginValidationResult {
         val declared = plugin.manifest.dependencies
         if (declared.isEmpty()) return PluginValidationResult(withMissingDependencyHint(PackageValidator.validatePlugin(plugin)), emptyList())
         if (!mayConnect) return withoutRepository(plugin, "--dryRun connects to nothing")
@@ -61,7 +60,7 @@ internal object PluginValidation {
         } catch (e: GradleException) {
             return withoutRepository(plugin, e.message.orEmpty().removePrefix("cringlePublish: "))
         }
-        val target = PublishSettings.find(server, environment, profile)
+        val target = PublishSettings.find(server, environment, profile, fingerprint)
             ?: return withoutRepository(
                 plugin,
                 "no repository is configured (use -Pcringle.server=host:port, cringle { publish { server = \"host:port\" } }, " +
@@ -76,7 +75,8 @@ internal object PluginValidation {
     }
 
     /** The plugins [declared] resolves to in the repository of [target], read from their packages. */
-    private fun fetch(target: PublishTarget, declared: Map<String, String>): List<PluginPackage> = RepositoryClient(target.server, target.token).use { client ->
+    private fun fetch(target: PublishTarget, declared: Map<String, String>): List<PluginPackage> = connect(target).use { connection ->
+        val client = connection.client
         try {
             val resolution = Resolver.resolve(declared, client)
             resolution.packages.values.mapNotNull { info ->
@@ -93,7 +93,7 @@ internal object PluginValidation {
         } catch (e: ResolutionException) {
             throw Unavailable("the dependencies cannot be resolved in ${target.server}: ${e.message}")
         } catch (e: RepositoryClientException) {
-            throw Unavailable(describe(target, e))
+            throw Unavailable(describe(target, e, connection.identityFingerprint))
         } catch (e: PackageHashMismatchException) {
             throw Unavailable("a dependency from ${target.server} does not match its hash: ${e.message}")
         } catch (e: PackageFormatException) {
@@ -103,8 +103,10 @@ internal object PluginValidation {
         }
     }
 
-    private fun describe(target: PublishTarget, e: RepositoryClientException): String = when (e.status) {
-        Status.Code.UNAVAILABLE -> "${target.server} is not reachable: ${e.message}"
+    private fun describe(target: PublishTarget, e: RepositoryClientException, identityFingerprint: String): String = when (e.status) {
+        Status.Code.UNAVAILABLE ->
+            "${target.server} is not reachable: ${e.message}. The connection is TLS: its key has to match the configured fingerprint, " +
+                "and it has to trust the key of this build (fingerprint $identityFingerprint)"
         Status.Code.UNAUTHENTICATED ->
             "${target.server} wants a token to read the dependencies: set ${PublishSettings.TOKEN_VARIABLE} or run 'cringle login --server ${target.server}'"
         Status.Code.PERMISSION_DENIED -> "the token may not read from ${target.server}"
@@ -158,5 +160,12 @@ internal object PluginValidation {
     }
 
     /** The repository did not give the dependencies; the reason is the text of the warning. */
+    /** Opens the TLS connection; a missing or malformed fingerprint makes the repository unavailable for the validation, not the build fail. */
+    private fun connect(target: PublishTarget): RepositoryConnection = try {
+        RepositoryConnection.open(target, PublishSettings.home(System.getenv()), "cringleValidate")
+    } catch (e: GradleException) {
+        throw Unavailable(e.message.orEmpty().removePrefix("cringleValidate: "))
+    }
+
     private class Unavailable(message: String) : RuntimeException(message)
 }

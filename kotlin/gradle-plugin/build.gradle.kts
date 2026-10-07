@@ -26,6 +26,7 @@ dependencies {
     implementation(libs.findLibrary("kotlinx-serialization-json").get())
 
     testImplementation(project(":router"))
+    testImplementation(testFixtures(project(":common")))
     testImplementation(gradleTestKit())
 }
 
