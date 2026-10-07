@@ -512,6 +512,9 @@ public class TetherNetwork private constructor(
     }
 
     public companion object {
+        /** Why a blueprint with a `remote` tether is rejected until cross-engine tethers exist (#146). */
+        public const val REMOTE_NOT_SUPPORTED: String = "remote tethers are not supported by this engine yet"
+
         private fun key(block: String, port: String, index: Int?) = "$block/$port/${index ?: "-"}"
 
         /**
@@ -551,12 +554,18 @@ public class TetherNetwork private constructor(
             }
 
             for (t in blueprint.tethers) {
-                val id = "${t.from.block}.${t.from.port}${t.from.index?.let { "[$it]" }.orEmpty()} -> ${t.to.block}.${t.to.port}${t.to.index?.let { "[$it]" }.orEmpty()}"
-                val from = endpoint(t.from, PortDirection.OUT, "tether $id")
-                val to = endpoint(t.to, PortDirection.IN, "tether $id")
+                val localFrom = t.from
+                val localTo = t.to
+                if (t.remote != null || localFrom == null || localTo == null) {
+                    problems += REMOTE_NOT_SUPPORTED
+                    continue
+                }
+                val id = "${localFrom.block}.${localFrom.port}${localFrom.index?.let { "[$it]" }.orEmpty()} -> ${localTo.block}.${localTo.port}${localTo.index?.let { "[$it]" }.orEmpty()}"
+                val from = endpoint(localFrom, PortDirection.OUT, "tether $id")
+                val to = endpoint(localTo, PortDirection.IN, "tether $id")
                 if (from == null || to == null) continue
-                if (t.type !in from.tetherTypes) problems += "tether $id: port '${t.from.port}' does not support ${t.type}"
-                if (t.type !in to.tetherTypes) problems += "tether $id: port '${t.to.port}' does not support ${t.type}"
+                if (t.type !in from.tetherTypes) problems += "tether $id: port '${localFrom.port}' does not support ${t.type}"
+                if (t.type !in to.tetherTypes) problems += "tether $id: port '${localTo.port}' does not support ${t.type}"
                 if (t.type != TetherType.BYTE_STREAM && t.type != TetherType.TCP && t.type != TetherType.SERIAL) {
                     val registry = config.schemas
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
@@ -571,7 +580,7 @@ public class TetherNetwork private constructor(
                     if (config.serial == null) problems += "tether $id: this fabric has no serial driver"
                 }
                 val c = Connection(
-                    TetherInfo(id, t.type, t.from, t.to),
+                    TetherInfo(id, t.type, localFrom, localTo),
                     from,
                     to,
                     t.delivery,
@@ -581,7 +590,7 @@ public class TetherNetwork private constructor(
                     t.retry ?: RetryConfig(),
                     t.serial,
                 )
-                for (e in listOf(t.from, t.to)) {
+                for (e in listOf(localFrom, localTo)) {
                     val k = key(e.block, e.port, e.index)
                     if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"
                 }

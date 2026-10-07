@@ -333,4 +333,114 @@ class PackageValidatorTest {
             .single { it.path.endsWith("$.blocks[1].id") }
         assertEquals("duplicate block id 'source'", r.message)
     }
+
+    // --- remote tethers (#145) ---
+
+    private val fp = "ab".repeat(32)
+
+    private fun remote(address: String = "10.0.0.7:7443", fingerprint: String = fp, fabric: String = "shop", block: String = "sink", port: String = "in", index: Int? = null) =
+        RemoteEndpoint(address, fingerprint, fabric, block, port, index)
+
+    /** The first tether of the fixture with its endpoints and remote replaced. */
+    private fun withTether(from: Endpoint?, to: Endpoint?, remote: RemoteEndpoint?, change: (TetherDef) -> TetherDef = { it }): Blueprint =
+        Fixtures.main.copy(tethers = listOf(change(Fixtures.main.tethers[0].copy(from = from, to = to, remote = remote))))
+
+    private fun remoteSends(r: RemoteEndpoint = remote(), change: (TetherDef) -> TetherDef = { it }) =
+        withTether(null, Endpoint("sink", "in"), r, change)
+
+    private fun remoteReceives(r: RemoteEndpoint = remote(), change: (TetherDef) -> TetherDef = { it }) =
+        withTether(Endpoint("source", "out"), null, r, change)
+
+    private fun assertRemoteProblem(blueprint: Blueprint, path: String, message: String) {
+        val p = problems(blueprint).single()
+        assertEquals("blueprints/main.json $.tethers[0]$path", p.path)
+        assertTrue(p.message.contains(message), p.message)
+    }
+
+    @Test
+    fun remoteTetherWithOneLocalEndpointIsValid() {
+        assertEquals(emptyList<PackageProblem>(), problems(remoteReceives()))
+        assertEquals(emptyList<PackageProblem>(), problems(remoteSends()))
+        assertEquals(emptyList<PackageProblem>(), problems(remoteReceives(remote(address = "[::1]:65535", index = 2))))
+        assertEquals(emptyList<PackageProblem>(), problems(remoteReceives(remote(address = "engine-2.example.org:1"))))
+    }
+
+    @Test
+    fun remoteTetherSupportsBothDeliveryPolicies() {
+        for (delivery in DeliveryPolicy.values()) {
+            assertEquals(emptyList<PackageProblem>(), problems(remoteReceives { it.copy(delivery = delivery) }), "$delivery")
+        }
+    }
+
+    @Test
+    fun badCombinationsOfFromToAndRemote() {
+        val from = Endpoint("source", "out")
+        val to = Endpoint("sink", "in")
+        val both = "needs 'from' and 'to', or exactly one of them and a 'remote'"
+        assertRemoteProblem(withTether(null, null, null), "", both)
+        assertRemoteProblem(withTether(from, null, null), "", both)
+        assertRemoteProblem(withTether(null, to, null), "", both)
+        assertRemoteProblem(withTether(from, to, remote()), "", "has exactly one local endpoint")
+        assertRemoteProblem(withTether(null, null, remote()), "", "needs its local endpoint 'from'")
+    }
+
+    @Test
+    fun localEndpointOfARemoteTetherIsCheckedLikeALocalOne() {
+        // the remote end sends, so the local end is `to` and an IN port; an OUT port is the wrong direction
+        val wrongDirection = problems(withTether(null, Endpoint("source", "out"), remote()))
+        assertTrue(wrongDirection.any { it.path.endsWith("$.tethers[0].to.port") && it.message.contains("is OUT but must be IN") }, wrongDirection.toString())
+        val unknown = problems(remoteReceives().copy(tethers = listOf(Fixtures.main.tethers[0].copy(from = Endpoint("ghost", "out"), to = null, remote = remote()))))
+        assertTrue(unknown.any { it.path.endsWith("$.tethers[0].from.block") && it.message.contains("unknown block id 'ghost'") }, unknown.toString())
+        // the sink's `in` port supports MESSAGE only
+        assertRemoteProblem(remoteSends { it.copy(type = TetherType.STREAM) }, ".type", "port 'in' does not support STREAM")
+    }
+
+    @Test
+    fun remoteAddressMustBeHostAndPort() {
+        for (bad in listOf("", "host", "host:", ":7443", "host:0", "host:65536", "host:99999", "host:123456", "ho st:80", "host:80x", "[::1]", "http://host:80", "host:-1")) {
+            assertRemoteProblem(remoteReceives(remote(address = bad)), ".remote.address", "invalid address '$bad'")
+        }
+    }
+
+    @Test
+    fun remoteFingerprintMustBe64LowercaseHexCharacters() {
+        for (bad in listOf("", fp.uppercase(), fp.dropLast(1), fp + "a", "g".repeat(64), "sha256:$fp".take(64))) {
+            assertRemoteProblem(remoteReceives(remote(fingerprint = bad)), ".remote.fingerprint", "expected 64 lowercase hex characters")
+        }
+    }
+
+    @Test
+    fun remoteFabricBlockAndPortFollowTheIdentifierGrammar() {
+        assertRemoteProblem(remoteReceives(remote(fabric = "../x")), ".remote.fabric", "invalid identifier")
+        assertRemoteProblem(remoteReceives(remote(block = "a/b")), ".remote.block", "invalid identifier")
+        assertRemoteProblem(remoteReceives(remote(port = "")), ".remote.port", "invalid identifier")
+        assertRemoteProblem(remoteReceives(remote(index = -1)), ".remote.index", "must not be negative")
+    }
+
+    @Test
+    fun tcpAndSerialTethersCannotHaveARemote() {
+        val tcp = problems(remoteReceives { it.copy(type = TetherType.TCP, port = 9000) })
+        assertTrue(tcp.any { it.path.endsWith("$.tethers[0].remote") && it.message == "a TCP tether is a local resource and cannot have a 'remote'" }, tcp.toString())
+        val serial = problems(remoteReceives { it.copy(type = TetherType.SERIAL, serial = SerialTetherConfig("/dev/ttyUSB0")) })
+        assertTrue(serial.any { it.path.endsWith("$.tethers[0].remote") && it.message == "a SERIAL tether is a local resource and cannot have a 'remote'" }, serial.toString())
+    }
+
+    @Test
+    fun messageRequestResponseStreamAndByteStreamMayHaveARemote() {
+        for (type in listOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.STREAM, TetherType.BYTE_STREAM)) {
+            val found = problems(remoteReceives { it.copy(type = type) })
+            // the fixture ports may not support the type, but the remote itself is never the problem
+            assertTrue(found.none { it.path.contains(".remote") }, "$type: $found")
+        }
+    }
+
+    @Test
+    fun sourceValidationChecksTheCombinationAndTheRemote() {
+        val bad = Fixtures.projectPackage(listOf(withTether(Endpoint("source", "out"), Endpoint("sink", "in"), remote(address = "x"))))
+        val found = PackageValidator.validateProjectSources(bad)
+        assertTrue(found.any { it.message.contains("has exactly one local endpoint") }, found.toString())
+        assertTrue(found.any { it.path.endsWith("$.tethers[0].remote.address") }, found.toString())
+        val ok = Fixtures.projectPackage(listOf(remoteSends()))
+        assertEquals(emptyList<PackageProblem>(), PackageValidator.validateProjectSources(ok))
+    }
 }

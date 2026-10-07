@@ -63,6 +63,22 @@ public data class ProjectManifest(
 /** One end of a tether. [index] selects the slot of a VarArg port and must be `null` for plain ports. */
 public data class Endpoint(public val block: String, public val port: String, public val index: Int? = null)
 
+/**
+ * The far end of a cross-engine tether: a port of a block of a fabric on another engine at a fixed [address]
+ * (`host:port`). [fingerprint] is the SHA-256 of the public key of that engine in lowercase hex; the connection is
+ * trusted by this key only, never on first use. [fabric], [block], [port] and [index] name the remote port in the
+ * blueprint that is deployed there. The blueprint only names it; checking the remote schema and the connection are
+ * later work (#146).
+ */
+public data class RemoteEndpoint(
+    public val address: String,
+    public val fingerprint: String,
+    public val fabric: String,
+    public val block: String,
+    public val port: String,
+    public val index: Int? = null,
+)
+
 /** What the engine does with a message, request or stream opening when the receiving block is not running. */
 public enum class DeliveryPolicy {
     /** Drop it and log the event (at most once). The default. */
@@ -113,8 +129,13 @@ public data class SerialTetherConfig(
 /** A tether of fixed [type] from an OUT port to an IN port, with a [delivery] policy for a receiver that is not running. */
 public data class TetherDef(
     public val type: TetherType,
-    public val from: Endpoint,
-    public val to: Endpoint,
+    /**
+     * The sending end of a tether between two local ports. `null` only in a tether with a [remote] whose far end sends
+     * (then [to] is set); a valid tether has [from] and [to], or exactly one of them and a [remote].
+     */
+    public val from: Endpoint?,
+    /** The receiving end; see [from]. `null` only in a tether with a [remote] that receives (then [from] is set). */
+    public val to: Endpoint?,
     public val delivery: DeliveryPolicy = DeliveryPolicy.DROP,
     /** The TCP port of a [TetherType.TCP] tether; `null` for every other type. */
     public val port: Int? = null,
@@ -126,6 +147,8 @@ public data class TetherDef(
     public val retry: RetryConfig? = null,
     /** The serial line of a [TetherType.SERIAL] tether; `null` for every other type. */
     public val serial: SerialTetherConfig? = null,
+    /** The far end on another engine; `null` for a tether between two local ports. See [RemoteEndpoint]. */
+    public val remote: RemoteEndpoint? = null,
 )
 
 /**
