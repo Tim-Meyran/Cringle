@@ -398,9 +398,17 @@ fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks
         if (flag("noService")) command += "-NoService"
         command += listOf("-InstallRoot", installRoot)
         option("dataRoot")?.let { command += listOf("-DataRoot", it) }
+        // `net session` only works in an administrative shell; the script checks it too, but its message is easy to miss
+        if (!flag("noService")) {
+            val admin = ProcessBuilder("net", "session").redirectErrorStream(true).start().also { it.inputStream.readAllBytes() }.waitFor() == 0
+            if (!admin) throw GradleException("$taskName needs administrative rights to register the services: start PowerShell with \"Run as administrator\", or add -PnoService to install only the files")
+        }
         logger.lifecycle(command.joinToString(" "))
-        val result = ProcessBuilder(command).inheritIO().start().waitFor()
-        if (result != 0) throw GradleException("install.ps1 ended with exit code $result")
+        val process = ProcessBuilder(command).redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().readText()
+        val result = process.waitFor()
+        if (output.isNotBlank()) logger.lifecycle(output.trim())
+        if (result != 0) throw GradleException("install.ps1 ended with exit code $result:\n${output.trim()}")
     }
 }
 
