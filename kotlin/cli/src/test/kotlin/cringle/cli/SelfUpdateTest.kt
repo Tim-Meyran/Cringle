@@ -58,6 +58,8 @@ class SelfUpdateTest {
     @AfterEach
     fun tearDown() {
         server.stop(0)
+        // a junction or link `current` is removed itself, so that the cleanup of the temporary folder never follows it
+        Files.deleteIfExists(installRoot.resolve("current"))
     }
 
     // --- tests ---
@@ -230,7 +232,7 @@ class SelfUpdateTest {
         install("1.0.0", "1.0.0")
         releaseWindows("1.1.0")
         val services = FakeServices()
-        val lines = SelfUpdate(installRoot, "1.0.0", Platform.WINDOWS, source, services, SymlinkLinkSwitcher(), Duration.ZERO, false, Duration.ZERO).update(null)
+        val lines = SelfUpdate(installRoot, "1.0.0", Platform.WINDOWS, source, services, linkSwitcherFor(Platform.current()), Duration.ZERO, false, Duration.ZERO).update(null)
         assertEquals("1.1.0", currentTarget())
         assertEquals(listOf("stop cringle-daemon.service", "start cringle-daemon.service"), services.calls)
         assertTrue(lines.contains("updated to 1.1.0"))
@@ -345,16 +347,16 @@ class SelfUpdateTest {
             val dir = Files.createDirectories(installRoot.resolve(v))
             Files.writeString(dir.resolve("VERSION"), "$v\n")
         }
-        SymlinkLinkSwitcher().switchTo(installRoot, current)
+        linkSwitcherFor(Platform.current()).switchTo(installRoot, current)
     }
 
     private fun update(running: String, requested: String? = null, allowMajor: Boolean = false, services: ServiceController = FakeServices(), stablePeriod: Duration = Duration.ZERO, timeout: Duration = Duration.ofSeconds(30)): List<String> =
-        SelfUpdate(installRoot, running, Platform.LINUX, source, services, SymlinkLinkSwitcher(), timeout, allowMajor, stablePeriod).update(requested)
+        SelfUpdate(installRoot, running, Platform.LINUX, source, services, linkSwitcherFor(Platform.current()), timeout, allowMajor, stablePeriod).update(requested)
 
     private fun check(running: String): List<String> =
-        SelfUpdate(installRoot, running, Platform.LINUX, source, FakeServices(), SymlinkLinkSwitcher(), Duration.ZERO).check()
+        SelfUpdate(installRoot, running, Platform.LINUX, source, FakeServices(), linkSwitcherFor(Platform.current()), Duration.ZERO).check()
 
-    private fun currentTarget(): String? = SymlinkLinkSwitcher().currentTarget(installRoot)
+    private fun currentTarget(): String? = linkSwitcherFor(Platform.current()).currentTarget(installRoot)
 
     private fun assertNoStaging() {
         val staging = Files.list(installRoot).use { stream -> stream.filter { it.fileName.toString().startsWith(".update-") }.toList() }

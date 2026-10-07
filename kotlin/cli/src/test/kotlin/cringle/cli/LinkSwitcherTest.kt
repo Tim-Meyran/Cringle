@@ -44,10 +44,15 @@ class LinkSwitcherTest {
         Files.createDirectories(root.resolve("1.1.0"))
 
         val switcher = JunctionLinkSwitcher()
-        assertNull(switcher.switchTo(root, "1.0.0"))
-        assertEquals("1.0.0", switcher.currentTarget(root))
+        try {
+            assertNull(switcher.switchTo(root, "1.0.0"))
+            assertEquals("1.0.0", switcher.currentTarget(root))
 
-        assertEquals("1.0.0", switcher.switchTo(root, "1.1.0"))
-        assertEquals("1.1.0", switcher.currentTarget(root))
+            assertEquals("1.0.0", switcher.switchTo(root, "1.1.0"))
+            assertEquals("1.1.0", switcher.currentTarget(root))
+        } finally {
+            // the junction is removed itself, so that the cleanup of the temporary folder never follows it
+            Files.deleteIfExists(root.resolve("current"))
+        }
     }
 }

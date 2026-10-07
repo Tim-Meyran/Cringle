@@ -38,9 +38,10 @@ internal class JunctionLinkSwitcher : LinkSwitcher {
     override fun currentTarget(root: Path): String? {
         val current = root.resolve("current")
         if (!Files.exists(current)) return null
+        // Java cannot read a junction with readSymbolicLink (it is no symbolic link); the real path follows it to the version
         return try {
-            Files.readSymbolicLink(current).fileName?.toString()
-        } catch (_: Exception) {
+            current.toRealPath().fileName?.toString()
+        } catch (_: java.io.IOException) {
             null
         }
     }
@@ -57,3 +58,10 @@ internal class JunctionLinkSwitcher : LinkSwitcher {
         return previous
     }
 }
+
+/**
+ * The switcher of [platform]: a junction on Windows, a symbolic link elsewhere. A junction needs no privilege, a symbolic
+ * link on Windows needs the right to create one (administrator or developer mode), which an installation cannot count on.
+ */
+internal fun linkSwitcherFor(platform: Platform): LinkSwitcher =
+    if (platform == Platform.WINDOWS) JunctionLinkSwitcher() else SymlinkLinkSwitcher()
