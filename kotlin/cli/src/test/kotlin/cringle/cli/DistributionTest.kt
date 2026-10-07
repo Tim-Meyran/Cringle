@@ -26,7 +26,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 import org.junit.jupiter.api.io.TempDir
 
 /**
@@ -241,6 +244,46 @@ class DistributionTest {
         val missing = run(script(home, "cringle"), "--version", environment = javaHome(temp.resolve("no-such-jdk").toString()))
         assertEquals(1, missing.code, missing.error)
         assertTrue("no Java found" in missing.error && "JDK 21" in missing.error, missing.error)
+    }
+
+    /**
+     * The Windows start scripts use the Java runtime in `jre\` of the installation before `JAVA_HOME` and the `PATH`
+     * (#155): with a `jre` folder, an invalid `JAVA_HOME` and no `java` on the `PATH`, `cringle --version` still works.
+     * `jre` is a junction to the running JDK (it needs no privilege, unlike a symbolic link).
+     */
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    fun theWindowsStartScriptPrefersTheJreOfTheInstallation() {
+        val home = unpack()
+        val junction = ProcessBuilder("cmd", "/c", "mklink", "/J", home.resolve("jre").toString(), System.getProperty("java.home")).redirectErrorStream(true).start()
+        val made = junction.inputStream.bufferedReader().readText()
+        assertTrue(junction.waitFor(60, TimeUnit.SECONDS) && junction.exitValue() == 0, "mklink failed: $made")
+        val system32 = System.getenv("SystemRoot") + "\\System32"
+        val environment = mapOf("JAVA_HOME" to temp.resolve("no-such-jdk").toString(), "PATH" to system32)
+        val version = run(script(home, "cringle"), "--version", environment = environment)
+        assertEquals(0, version.code, version.error)
+        assertEquals("cringle ${this.version}", version.output.trim())
+    }
+
+    /**
+     * The tree that `./gradlew cringleWindowsRuntime` stages for the MSI (#155): the Windows distribution plus `jre/` and
+     * `THIRD-PARTY.txt`. The task downloads the JRE and the tests never do, so this test only runs if the task ran before.
+     */
+    @Test
+    fun theWindowsRuntimeStageHasTheJreAndTheThirdPartyNotice() {
+        val stage = distDir.parent.resolve("dist-stage/windows-jre").resolve(top)
+        assumeTrue(Files.isDirectory(stage), "run ./gradlew cringleWindowsRuntime -PreleaseVersion=$version first: $stage does not exist")
+        assertTrue(Files.isRegularFile(stage.resolve("jre/bin/java.exe")), "jre/bin/java.exe")
+        assertTrue(Files.isDirectory(stage.resolve("jre/legal")), "jre/legal")
+        assertTrue(Files.isRegularFile(stage.resolve("jre/release")), "jre/release")
+        val notice = Files.readString(stage.resolve("THIRD-PARTY.txt"))
+        assertTrue("Eclipse Temurin" in notice && "Classpath Exception" in notice && "jre/legal/" in notice, notice)
+        assertEquals("$version\n", Files.readString(stage.resolve("VERSION")))
+        for (command in launchers.keys) {
+            assertTrue(Files.isRegularFile(stage.resolve("bin/$command.bat")), "bin/$command.bat")
+            assertTrue("%APP_HOME%\\jre\\bin\\java.exe" in Files.readString(stage.resolve("bin/$command.bat")), "$command.bat has to look for the jre first")
+        }
+        assertTrue(Files.list(stage.resolve("lib")).use { files -> files.anyMatch { it.fileName.toString().startsWith("cli") } }, "lib/ has the JARs of the distribution")
     }
 
     /** A directory that looks like a JDK for the start script: `bin/java` that only prints [versionLine] as `java -version` does. */
