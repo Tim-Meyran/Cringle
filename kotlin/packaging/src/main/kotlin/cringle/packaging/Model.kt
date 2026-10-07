@@ -65,13 +65,17 @@ public data class Endpoint(public val block: String, public val port: String, pu
 
 /**
  * The far end of a cross-engine tether: a port of a block of a fabric on another engine at a fixed [address]
- * (`host:port`). [fingerprint] is the SHA-256 of the public key of that engine in lowercase hex; the connection is
+ * (`host:port`), or on the engine that the registry names for the [fabric] when there is no address. [fingerprint] is the SHA-256 of the public key of that engine in lowercase hex; the connection is
  * trusted by this key only, never on first use. [fabric], [block], [port] and [index] name the remote port in the
  * blueprint that is deployed there. The blueprint only names it; checking the remote schema and the connection are
  * later work (#146).
  */
 public data class RemoteEndpoint(
-    public val address: String,
+    /**
+     * `host:port` of the tether service of the engine, or `null` to resolve the engine at run time through the registry of
+     * the router from the [fabric] id (#148).
+     */
+    public val address: String?,
     public val fingerprint: String,
     public val fabric: String,
     public val block: String,

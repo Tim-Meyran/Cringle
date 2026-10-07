@@ -21,7 +21,10 @@ import cringle.engine.fabric.FabricState
 import cringle.engine.fabric.FabricStatus
 import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
+import cringle.engine.tether.FabricNotResolvedException
+import cringle.engine.tether.FabricResolver
 import cringle.engine.tether.RemoteTetherDriver
+import cringle.engine.tether.RemoteTetherOptions
 import cringle.common.v1.FabricStateSummary
 import cringle.common.EngineTls
 import cringle.common.TlsHelper
@@ -75,6 +78,7 @@ public class Engine private constructor(
     private val tls: EngineTls,
     private val enrollmentSecret: ByteArray?,
     requestedTetherPort: Int,
+    tetherOptions: RemoteTetherOptions,
 ) {
     /** The fabrics of this engine. */
     /** The built-in drivers of this engine (logging, filesystem, TCP). */
@@ -86,7 +90,14 @@ public class Engine private constructor(
      * empty with every process.
      */
     public val remoteTethers: RemoteTetherDriver =
-        RemoteTetherDriver(identity.common, TrustStore(dir.resolve("tether-trust.json")), dir.resolve("tether-peers"), requestedTetherPort)
+        RemoteTetherDriver(
+            identity.common, TrustStore(dir.resolve("tether-trust.json")), dir.resolve("tether-peers"), requestedTetherPort,
+            resolver = FabricResolver { fabricId ->
+                val registry = synchronized(lock) { link } ?: throw FabricNotResolvedException("this engine has no router to ask for the fabric '$fabricId'")
+                registry.lookupFabric(fabricId)
+            },
+            options = tetherOptions,
+        )
 
     public val fabrics: FabricManager = FabricManager(LocalFabricDeployer(home, dir, builtin = drivers, remoteTethers = remoteTethers))
 
@@ -194,6 +205,7 @@ public class Engine private constructor(
                 currentConfig.id,
                 currentConfig.name,
                 "127.0.0.1:$managementPort",
+                "127.0.0.1:$tetherPort",
                 router,
                 heartbeatInterval,
                 { fabricStates() },
@@ -403,6 +415,7 @@ public class Engine private constructor(
             args: EngineArgs,
             env: Map<String, String> = System.getenv(),
             heartbeatInterval: Duration = Duration.ofSeconds(5),
+            tetherOptions: RemoteTetherOptions = RemoteTetherOptions(),
         ): Engine {
             val dir = CringleHome.engineDir(CringleHome.resolve(args.home, env), args.id)
             Files.createDirectories(dir)
@@ -411,7 +424,7 @@ public class Engine private constructor(
             val trustStore = TrustStore(dir.resolve("trust.json"))
             val tls = EngineTls(identity.common, trustStore)
             val enrollmentSecret = readEnrollmentSecret(env)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort)
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort, tetherOptions)
         }
 
         /**

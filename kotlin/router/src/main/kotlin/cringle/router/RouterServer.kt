@@ -102,6 +102,7 @@ public class RemoteRouters(
                         e.engineId.value, e.name, e.managementAddress,
                         e.fabricsList.map { FabricSummary(it.fabricId.value, it.blueprintName, it.state.name) },
                         fingerprint = e.fingerprint,
+                        tetherAddress = e.tetherAddress,
                     ) to if (e.reachability == cringle.router.v1.Reachability.REACHABILITY_REACHABLE) Reachability.REACHABLE else Reachability.UNREACHABLE
                 },
                 null,
@@ -232,6 +233,7 @@ public class RouterServer(
             .setEngineId(EngineId.newBuilder().setValue(v.record.id))
             .setName(v.record.name)
             .setManagementAddress(v.record.managementAddress)
+            .setTetherAddress(v.record.tetherAddress)
             .setReachability(
                 if (v.reachability == Reachability.REACHABLE) cringle.router.v1.Reachability.REACHABILITY_REACHABLE else cringle.router.v1.Reachability.REACHABILITY_UNREACHABLE,
             )
@@ -269,7 +271,7 @@ public class RouterServer(
             if (request.engineId.value.isBlank()) throw StatusException(Status.INVALID_ARGUMENT.withDescription("engine_id is required"))
             val name = request.name.ifBlank { request.engineId.value }
             if (enrollment == null) {
-                registry.register(request.engineId.value, name, request.managementAddress)
+                registry.register(request.engineId.value, name, request.managementAddress, tetherAddress = request.tetherAddress)
             } else {
                 val fingerprint = enrollment.enroll(
                     request.engineId.value,
@@ -278,7 +280,7 @@ public class RouterServer(
                     TrustInterceptor.PEER.get(),
                     request.managementAddress,
                 )
-                registry.register(request.engineId.value, name, request.managementAddress, fingerprint)
+                registry.register(request.engineId.value, name, request.managementAddress, fingerprint, request.tetherAddress)
             }
             return RegisterEngineResponse.getDefaultInstance()
         }

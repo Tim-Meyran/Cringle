@@ -249,7 +249,7 @@ public object ManifestJson {
         val index = JsonReading.optInt(o, "index", path)
         if (index != null && index < 0) throw PackageFormatException("$path.index", "must not be negative")
         return RemoteEndpoint(
-            JsonReading.string(o, "address", path),
+            JsonReading.optString(o, "address", path),
             JsonReading.string(o, "fingerprint", path),
             JsonReading.string(o, "fabric", path),
             JsonReading.string(o, "block", path),
@@ -352,7 +352,7 @@ public object ManifestJson {
                             t.to?.let { put("to", endpoint(it)) }
                             t.remote?.let { r ->
                                 put("remote", buildJsonObject {
-                                    put("address", r.address)
+                                    r.address?.let { put("address", it) }
                                     put("fingerprint", r.fingerprint)
                                     put("fabric", r.fabric)
                                     put("block", r.block)

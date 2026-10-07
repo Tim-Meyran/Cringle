@@ -6,7 +6,11 @@ import com.google.protobuf.ByteString
 import com.google.protobuf.Timestamp
 import cringle.common.v1.EngineHeartbeat
 import cringle.common.v1.EngineId
+import cringle.common.v1.FabricId
+import cringle.engine.tether.FabricNotResolvedException
 import cringle.common.v1.FabricStateSummary
+import cringle.router.v1.LookupFabricRequest
+import cringle.router.v1.Reachability
 import cringle.router.v1.RegisterEngineRequest
 import cringle.router.v1.RegistryServiceGrpcKt
 import cringle.router.v1.SendHeartbeatRequest
@@ -38,6 +42,7 @@ internal class RegistryLink(
     private val engineId: String,
     private val name: String,
     private val managementAddress: String,
+    private val tetherAddress: String,
     private val routerAddress: String,
     private val interval: Duration,
     private val fabrics: () -> List<FabricStateSummary>,
@@ -61,6 +66,7 @@ internal class RegistryLink(
                             .setEngineId(id)
                             .setName(name)
                             .setManagementAddress(managementAddress)
+                            .setTetherAddress(tetherAddress)
 
                         // Add certificate and enrollment secret if using mTLS
                         builder.setCertificate(ByteString.copyFrom(tls.identity.certificate.encoded))
@@ -92,6 +98,23 @@ internal class RegistryLink(
             .setTimestamp(Timestamp.newBuilder().setSeconds(now.epochSecond).setNanos(now.nano))
             .addAllFabricStates(fabrics())
             .build()
+    }
+
+    /**
+     * Asks the router which engine runs [fabricId] and returns `host:port` of its tether service. Throws
+     * [FabricNotResolvedException] if the router does not know the fabric or its engine has no tether service.
+     */
+    suspend fun lookupFabric(fabricId: String): String {
+        val engine = try {
+            stub.lookupFabric(LookupFabricRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabricId)).build()).engine
+        } catch (e: StatusException) {
+            throw FabricNotResolvedException(
+                if (e.status.code == Status.Code.NOT_FOUND) "the router does not know the fabric '$fabricId'" else "cannot ask the router for the fabric '$fabricId': ${e.status.code}",
+                e,
+            )
+        }
+        if (engine.reachability != Reachability.REACHABILITY_REACHABLE) throw FabricNotResolvedException("the engine '${engine.engineId.value}' of the fabric '$fabricId' is not reachable")
+        return engine.tetherAddress.ifEmpty { throw FabricNotResolvedException("the engine '${engine.engineId.value}' of the fabric '$fabricId' has no tether service") }
     }
 
     /** Stops the loop and unregisters from the router (best effort). */

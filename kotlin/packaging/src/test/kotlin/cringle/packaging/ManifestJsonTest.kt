@@ -253,6 +253,20 @@ class ManifestJsonTest {
     }
 
     @Test
+    fun remoteTetherWithoutAddressIsReadAndWrittenBackWithoutOne() {
+        val text = """
+            {"name":"m","tethers":[{"type":"MESSAGE","from":{"block":"a","port":"out"},
+              "remote":{"fingerprint":"${"ab".repeat(32)}","fabric":"shop","block":"sink","port":"in"}}]}
+        """.trimIndent()
+        val remote = ManifestJson.parseBlueprint(text, "f.json").tethers.single().remote
+        assertEquals(null, remote?.address)
+        assertEquals("shop", remote?.fabric)
+        val written = ManifestJson.encode(ManifestJson.parseBlueprint(text, "f.json"))
+        assertTrue("\"address\"" !in written, written)
+        assertEquals(remote, ManifestJson.parseBlueprint(written, "f.json").tethers.single().remote)
+    }
+
+    @Test
     fun localTetherWritesNoRemote() {
         assertTrue("remote" !in ManifestJson.encode(Fixtures.main))
         assertEquals(null, Fixtures.main.tethers[0].remote)
@@ -262,7 +276,8 @@ class ManifestJsonTest {
     fun rejectsBadRemoteObjects() {
         fun remote(body: String) = bad("""{"name":"m","tethers":[{"type":"MESSAGE","from":{"block":"a","port":"p"},"remote":$body}]}""") { ManifestJson.parseBlueprint(it, "f.json") }
         val ok = """"address":"h:1","fingerprint":"x","fabric":"f","block":"b","port":"p""""
-        assertTrue(remote("""{"fingerprint":"x","fabric":"f","block":"b","port":"p"}""").message!!.contains("missing key 'address'"))
+        // the address is optional (#148); the other keys are not
+        assertTrue(remote("""{"address":"h:1","fabric":"f","block":"b","port":"p"}""").message!!.contains("missing key 'fingerprint'"))
         assertTrue(remote("""{$ok,"nope":1}""").message!!.contains("unknown key 'nope'"))
         assertTrue(remote("""{$ok,"index":-1}""").path.endsWith("remote.index"))
         assertTrue(remote("""[]""").path.endsWith("remote"))

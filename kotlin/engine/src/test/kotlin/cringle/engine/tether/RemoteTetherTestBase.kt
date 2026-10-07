@@ -72,9 +72,15 @@ abstract class RemoteTetherTestBase {
         engines.forEach { runCatching { it.stop() } }
     }
 
-    protected fun engine(id: String): Engine {
-        val home = Files.createDirectories(dir.resolve("home-$id"))
-        return Engine.create(EngineArgs(id, null, home, 0), mapOf("CRINGLE_HOME" to home.toString())).start().also { engines += it }
+    protected fun engine(
+        id: String,
+        home: Path = dir.resolve("home-$id"),
+        env: Map<String, String> = emptyMap(),
+        heartbeat: java.time.Duration = java.time.Duration.ofSeconds(5),
+        options: RemoteTetherOptions = RemoteTetherOptions(),
+    ): Engine {
+        Files.createDirectories(home)
+        return Engine.create(EngineArgs(id, null, home, 0), mapOf("CRINGLE_HOME" to home.toString()) + env, heartbeat, options).start().also { engines += it }
     }
 
     protected fun senderDef(schema: SchemaRef = string, types: Set<TetherType> = setOf(TetherType.MESSAGE)) =
