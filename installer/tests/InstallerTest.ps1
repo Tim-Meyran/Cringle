@@ -204,8 +204,9 @@ try {
         Skip 'the start without administrative rights (this PowerShell is administrative)'
     } else {
         $r4 = New-Roots
-        $res = Invoke-Installer @('-Version', '1.0.0', '-BaseUrl', $Releases, '-InstallRoot', $r4.Install, '-DataRoot', $r4.Data)
-        Check 'exit code 1 without administrative rights' ($res.Code -eq 1)
+        # -NoElevate: the default would ask for the rights with the Windows dialog and wait for the answer
+        $res = Invoke-Installer @('-Version', '1.0.0', '-NoElevate', '-BaseUrl', $Releases, '-InstallRoot', $r4.Install, '-DataRoot', $r4.Data)
+        Check 'exit code 1 without administrative rights (-NoElevate)' ($res.Code -eq 1)
         Check 'the message says what is needed' ($res.Output -match 'administrative')
         Check 'nothing was installed' (-not (Test-Path $r4.Install))
     }
