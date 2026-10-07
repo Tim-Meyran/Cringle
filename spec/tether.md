@@ -97,11 +97,34 @@ same tether.
 `BYTES` frames of that ID (a write is split into frames of at most 256 KiB), in order, with the same backpressure and
 closing rules as a stream. Bytes are not checked against a schema.
 
+**Finding the target.** Without `address` in the `remote` object the sender finds the engine of the fabric at run time
+(`BindingResolver` and `FabricResolver` in `cringle.engine.tether`). The `fabric` of the `remote` is the *abstract
+dependency* of the tether; a `BindingResolver` binds it to a concrete fabric instance at deploy time (the engine binds every
+target to the fabric of the same id; a management server and a discovery model with capabilities and priorities are not
+defined yet). The concrete fabric id is looked up with `LookupFabric` at the router of the engine
+(`RegistryService`, `proto/cringle/router/v1/registry.proto`); the engine entry carries `tether_address`, which every
+engine sends when it registers. The answer is kept for 30 seconds (`resolutionTtl`) and is dropped as soon as the
+connection to that address ends. The `fingerprint` of the `remote` is still the key that the engine has to present: the
+registry names where to connect, not whom to trust. The tether is established at once, also when the target is not in the
+registry yet: the fabric of the sender is not held back by a fabric that has not started.
+
+**Supervision and reconnecting.** A connection whose target was found through the registry is kept up. When it ends, or
+when `healthFailures` (3) checks in a row find it down, everything that waited for it fails at once (requests, writers,
+streams: a `TetherDeliveryException`), the cached address is dropped and the sender looks the fabric up and connects again,
+waiting 250 ms before the first new attempt and twice as long after each failure up to 10 s (`backoffStart`,
+`backoffCap`). It never gives up while the fabric runs. Meanwhile a message is handled as for a receiver that is not
+running: with the delivery policy `BUFFER` it is kept and tried again (`retry` of the tether), with `DROP` it is dropped and
+logged; a request or a stream fails at once. The block sees no failover, only these semantics. The checks are a coroutine
+of the driver (not of a block) that looks at the state of the connection every `healthInterval` (5 s); the transport pings
+a silent peer (HTTP/2 keep-alive, at most every 10 s). A receiver that is slow is not a connection that is down. All times
+are options of the driver (`RemoteTetherOptions`), with an injectable clock. A tether with a fixed `address` is not
+reconnected, as before.
+
 **Failure.** A connection that is lost, or a call that the other engine ends, fails the waiting senders and every later send
 at once with a `TetherDeliveryException` (as a stopping fabric does): so do the waiting requests and writers and the open
 streams, on both engines. A fabric that stops tells the senders first (an `ERROR` frame with the code `stopping` and the
 ID 0, then the end of the call), so that the exception names the stop and nobody waits for a timeout. The tether is not
-reconnected: the fabric has to be restarted. Reconnecting, at-least-once delivery, resolution through the registry and failover are not part of this.
+reconnected if it has a fixed address: the fabric has to be restarted (see "Supervision and reconnecting" for the others). At-least-once delivery is not part of this.
 
 ## Schemas
 
@@ -131,5 +154,5 @@ Every tether has bounded buffers (default 64 entries; every stream direction has
 
 ## Not covered
 
-- Reconnecting after a lost connection and the resolution of the address of a remote tether (#148).
+- At-least-once delivery across a lost connection, a discovery model for the binding of abstract dependencies (capabilities, priorities), and the binding in the ManagementServer.
 - The filesystem driver: issue #75.

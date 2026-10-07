@@ -215,6 +215,17 @@ public class TetherNetwork private constructor(
         }
 
         override fun onEnded(cause: Throwable?) = connectionLost(c, cause)
+
+        /** The target is looked up again: what waited for the old connection fails, the tether goes on. */
+        override fun onInterrupted(cause: Throwable?) {
+            if (stopping != null) return
+            val reason = TetherDeliveryException("tether ${c.info.id}: the connection to the fabric '${c.remote?.fabric}' was interrupted, it is being looked up again", cause)
+            for (r in c.remoteRequests.values) r.completeExceptionally(reason)
+            c.remoteRequests.clear()
+            for (st in c.remoteStreams.values) st.fail(reason)
+            c.remoteStreams.clear()
+            onDeliveryFailure(c.info, reason)
+        }
     }
 
     /** A sender is allowed for [c]: what it sends is queued like the traffic of a local tether. */
@@ -337,6 +348,9 @@ public class TetherNetwork private constructor(
         try {
             call.send(Request(id.toULong(), c.fromPort.schema.namespace, toJson(value)))
             return withTimeout(c.requestTimeout.toMillis()) { response.await() }
+        } catch (e: RemoteUnavailableException) {
+            response.cancel()
+            throw TetherDeliveryException(e.message.orEmpty(), e)
         } catch (e: TimeoutCancellationException) {
             response.cancel()
             throw TetherTimeoutException("tether ${c.info.id}: no response within ${c.requestTimeout}")
@@ -357,10 +371,15 @@ public class TetherNetwork private constructor(
         try {
             hook(c, TrafficKind.STREAM_OPENED, null)
             call.send(StreamOpen(id.toULong()))
+        } catch (e: CancellationException) {
+            c.remoteStreams.remove(id)
+            st.fail(e)
+            throw e
         } catch (e: Throwable) {
             c.remoteStreams.remove(id)
-            st.fail(e as? TetherDeliveryException ?: TetherDeliveryException("tether ${c.info.id}: ${e.message}", e))
-            throw e
+            val failure = e as? TetherDeliveryException ?: TetherDeliveryException("tether ${c.info.id}: ${e.message}", e)
+            st.fail(failure)
+            throw failure
         }
         pumpToWire(c, id, st, { call.send(it) }) { c.remoteStreams.remove(id) }
         return wrap(st.toWire, st.fromWire)
@@ -596,7 +615,7 @@ public class TetherNetwork private constructor(
                         throw e
                     } catch (e: Throwable) {
                         attempt++
-                        if (c.policy == DeliveryPolicy.BUFFER && e is FabricException) {
+                        if (c.policy == DeliveryPolicy.BUFFER && (e is FabricException || e is RemoteUnavailableException)) {
                             val maxAttempts = c.retry.maxAttempts
                             if (maxAttempts != null && attempt >= maxAttempts) {
                                 fail(c, env, to, e, "after $attempt attempts")
@@ -874,13 +893,13 @@ public class TetherNetwork private constructor(
                 if (remote != null) {
                     val local = if (localFrom != null && localTo == null) localFrom else if (localTo != null && localFrom == null) localTo else null
                     if (local == null) {
-                        problems += "tether ${t.type} to ${remote.address}: a remote tether has exactly one local endpoint"
+                        problems += "tether ${t.type} to ${remote.address ?: "registry"}: a remote tether has exactly one local endpoint"
                         continue
                     }
                     val sends = local === localFrom
                     val far = Endpoint(remote.block, remote.port, remote.index)
                     fun label(e: Endpoint) = "${e.block}.${e.port}${e.index?.let { "[$it]" }.orEmpty()}"
-                    val id = if (sends) "${label(local)} -> ${remote.address}/${remote.fabric}/${label(far)}" else "${remote.address}/${remote.fabric}/${label(far)} -> ${label(local)}"
+                    val id = if (sends) "${label(local)} -> ${remote.address ?: "registry"}/${remote.fabric}/${label(far)}" else "${remote.address ?: "registry"}/${remote.fabric}/${label(far)} -> ${label(local)}"
                     val port = endpoint(local, if (sends) PortDirection.OUT else PortDirection.IN, "tether $id") ?: continue
                     if (t.type !in port.tetherTypes) problems += "tether $id: port '${local.port}' does not support ${t.type}"
                     if (t.type == TetherType.TCP || t.type == TetherType.SERIAL) problems += "tether $id: a ${t.type} tether is a local resource and cannot end on another engine"

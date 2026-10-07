@@ -29,6 +29,8 @@ public data class EngineRecord(
     val origin: String? = null,
     /** Public key fingerprint of the engine once it enrolled (Architecture 5); empty for engines without one. */
     val fingerprint: String = "",
+    /** `host:port` of the tether service of the engine (tethers between engines), empty if it has none. */
+    val tetherAddress: String = "",
 )
 
 /** An [EngineRecord] with its current reachability and last heartbeat. */
@@ -98,13 +100,13 @@ public class Registry(
     }
 
     /** Registers or refreshes an engine; counts as a heartbeat. Keeps the fabric list of an existing registration. */
-    public fun register(id: String, name: String, managementAddress: String, fingerprint: String = "") {
+    public fun register(id: String, name: String, managementAddress: String, fingerprint: String = "", tetherAddress: String = "") {
         synchronized(lock) {
             val existing = engines[id]
             val bound = fingerprint.ifEmpty { existing?.fingerprint.orEmpty() }
-            engines[id] = EngineRecord(id, name, managementAddress, existing?.fabrics.orEmpty(), fingerprint = bound)
+            engines[id] = EngineRecord(id, name, managementAddress, existing?.fabrics.orEmpty(), fingerprint = bound, tetherAddress = tetherAddress)
             heartbeats[id] = clock.instant()
-            changed(persist = existing?.name != name || existing.managementAddress != managementAddress || existing.fingerprint != bound)
+            changed(persist = existing?.name != name || existing.managementAddress != managementAddress || existing.fingerprint != bound || existing.tetherAddress != tetherAddress)
         }
     }
 

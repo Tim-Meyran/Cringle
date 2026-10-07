@@ -69,6 +69,8 @@ message EngineEntry {
   string origin_router = 7;
   // SHA-256 of the public key of the Engine (lowercase hex); empty if the Engine never enrolled.
   string fingerprint = 8;
+  // Address of the tether service of the Engine (tethers between engines) as host:port; empty if the Engine has none.
+  string tether_address = 9;
 }
 
 message RegisterEngineRequest {
@@ -79,6 +81,8 @@ message RegisterEngineRequest {
   bytes certificate = 4;
   // The one-time secret from PrepareEngine; only needed for the first registration of an id.
   bytes enrollment_secret = 5;
+  // Address of the tether service of the Engine as host:port; empty if it has none.
+  string tether_address = 6;
 }
 
 message RegisterEngineResponse {}

@@ -47,6 +47,22 @@ class RegistryTest {
     }
 
     @Test
+    fun `the tether address of an engine is kept, found by the fabric it runs and persisted`() {
+        val file = dir.resolve("registry-tether.json")
+        val r = registry(file)
+        r.register("e1", "Engine One", "127.0.0.1:1", tetherAddress = "127.0.0.1:2")
+        r.heartbeat("e1", listOf(fabric))
+        assertEquals("127.0.0.1:2", r.lookupFabric("f1")!!.record.tetherAddress)
+        // an engine that moves registers its new address
+        r.register("e1", "Engine One", "127.0.0.1:1", tetherAddress = "127.0.0.1:3")
+        assertEquals("127.0.0.1:3", r.lookupFabric("f1")!!.record.tetherAddress)
+        assertEquals("127.0.0.1:3", registry(file).engines().single().record.tetherAddress)
+        // an engine without a tether service has an empty address
+        r.register("e2", "Engine Two", "127.0.0.1:4")
+        assertEquals("", r.engines().single { it.record.id == "e2" }.record.tetherAddress)
+    }
+
+    @Test
     fun `engine becomes unreachable after the timeout and recovers with a heartbeat`() {
         val r = registry()
         r.register("e1", "e1", "127.0.0.1:1")

@@ -52,6 +52,7 @@ public class FileRegistryStore(private val file: Path) : RegistryStore {
         },
         optText(o, "origin"),
         optText(o, "fingerprint").orEmpty(),
+        optText(o, "tetherAddress").orEmpty(),
     )
 
     private fun remote(o: JsonObject) = RemoteRouterRecord(
@@ -77,6 +78,7 @@ public class FileRegistryStore(private val file: Path) : RegistryStore {
         put("id", e.id)
         put("name", e.name)
         put("managementAddress", e.managementAddress)
+        if (e.tetherAddress.isNotEmpty()) put("tetherAddress", e.tetherAddress)
         put(
             "fabrics",
             JsonArray(

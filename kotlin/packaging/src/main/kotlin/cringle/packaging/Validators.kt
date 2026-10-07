@@ -220,7 +220,7 @@ public object PackageValidator {
         }
         if (remote == null) return
         if (t.type !in remoteTetherTypes) problem("$path.remote", "a ${t.type} tether is a local resource and cannot have a 'remote'")
-        if (!remoteAddress.matches(remote.address) || remote.address.substringAfterLast(':').toInt() !in 1..65535) {
+        if (remote.address != null && (!remoteAddress.matches(remote.address) || remote.address.substringAfterLast(':').toInt() !in 1..65535)) {
             problem("$path.remote.address", "invalid address '${remote.address}': expected host:port with a port between 1 and 65535")
         }
         if (!remoteFingerprint.matches(remote.fingerprint)) {

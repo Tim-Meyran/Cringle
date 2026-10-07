@@ -16,6 +16,7 @@ import cringle.wire.TetherMode
 import cringle.wire.WireCodec
 import cringle.wire.WireFormatException
 import cringle.wire.WireFrame
+import io.grpc.ConnectivityState
 import io.grpc.Context
 import io.grpc.Contexts
 import io.grpc.Grpc
@@ -75,6 +76,10 @@ public class RemoteTetherDriver(
     private val peersDir: Path,
     requestedPort: Int = 0,
     private val connectTimeout: java.time.Duration = java.time.Duration.ofSeconds(10),
+    /** Finds the engine of a fabric for the tethers whose `remote` has no address; `null` if this engine cannot. */
+    resolver: FabricResolver? = null,
+    private val bindings: BindingResolver = BindingResolver.IDENTITY,
+    private val options: RemoteTetherOptions = RemoteTetherOptions(),
 ) : AutoCloseable {
     private val typedCodec = WireCodec(TetherMode.TYPED)
     private val bytesCodec = WireCodec(TetherMode.BYTES)
@@ -83,10 +88,13 @@ public class RemoteTetherDriver(
     private val receivers = HashMap<String, RemoteReceiver>()
     private val senderRefs = HashMap<String, Int>()
     private val channels = ConcurrentHashMap<String, ManagedChannel>()
+    private val addressCache: CachingFabricResolver? = resolver?.let { CachingFabricResolver(it, options.resolutionTtl, options.clock) }
 
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(requestedPort))
         .sslContext(TlsHelper.serverCredentials(identity, trustStore))
+        .permitKeepAliveTime(1, TimeUnit.SECONDS)
+        .permitKeepAliveWithoutCalls(true)
         .intercept(CallInterceptor)
         .addService(Service())
         .build()
@@ -235,20 +243,94 @@ public class RemoteTetherDriver(
     // ---- sending ----
 
     private suspend fun connect(sender: RemoteSender): RemoteCall {
-        val remote = sender.remote
+        val address = sender.remote.address
+        if (address != null) return connectFixed(sender, address)
+        return ResolvingCall(sender).also { it.start() }
+    }
+
+    /**
+     * A tether whose target is resolved at run time: finds the engine of the fabric in the registry, connects, and when the
+     * connection ends or fails its health check, forgets the address and starts again with a growing wait. The first
+     * connection is made in the background too: a target that is not there yet is no reason to fail the fabric.
+     */
+    private inner class ResolvingCall(private val sender: RemoteSender) : RemoteCall {
+        @Volatile private var current: RemoteCall? = null
+        private val closed = AtomicBoolean(false)
+        private var job: Job? = null
+
+        fun start() {
+            job = scope.launch { supervise() }
+        }
+
+        private suspend fun supervise() {
+            val cache = checkNotNull(addressCache) { "tether ${sender.tetherId}: this engine has no way to resolve a fabric" }
+            val binding = bindings.bind(sender.tetherId, sender.remote.fabric)
+            var failed = 0
+            while (true) {
+                try {
+                    val address = cache.resolve(binding.bound)
+                    val ended = CompletableDeferred<Throwable?>()
+                    val toTarget = RemoteSender(sender.tetherId, sender.remote.copy(address = address, fabric = binding.bound), sender.schemaNamespace, sender.mode, object : RemoteInbound {
+                        override suspend fun onFrame(frame: WireFrame) = sender.inbound.onFrame(frame)
+
+                        override fun onEnded(cause: Throwable?) {
+                            ended.complete(cause)
+                        }
+                    })
+                    current = connectFixed(toTarget, address)
+                    failed = 0
+                    val cause = ended.await()
+                    current = null
+                    cache.invalidate(binding.bound)
+                    sender.inbound.onInterrupted(cause)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    // not found in the registry, not reachable, refused: ask again later
+                    current = null
+                    cache.invalidate(binding.bound)
+                    failed++
+                }
+                options.clock.delay(options.backoff(maxOf(failed - 1, 0)))
+            }
+        }
+
+        override suspend fun send(frame: WireFrame) {
+            val call = current ?: throw RemoteUnavailableException("tether ${sender.tetherId}: the fabric '${sender.remote.fabric}' is not connected (it is being looked up again)")
+            try {
+                call.send(frame)
+            } catch (e: TetherDeliveryException) {
+                throw RemoteUnavailableException(e.message.orEmpty(), e)
+            }
+        }
+
+        override fun close() {
+            if (closed.compareAndSet(false, true)) {
+                job?.cancel()
+                current?.close()
+                current = null
+            }
+        }
+    }
+
+    private suspend fun connectFixed(sender: RemoteSender, address: String): RemoteCall {
+        val remote = sender.remote.copy(address = address)
         val codec = codecFor(sender.mode)
-        val where = "${remote.address} (key ${remote.fingerprint})"
+        val where = "$address (key ${remote.fingerprint})"
         val headers = Metadata().apply {
             put(FABRIC_KEY, remote.fabric)
             put(BLOCK_PORT_KEY, remote.block + "/" + remote.port + (remote.index?.let { "/$it" } ?: ""))
         }
-        val stub = RemoteTetherServiceGrpcKt.RemoteTetherServiceCoroutineStub(channelFor(remote))
-            .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
         val outgoing = Channel<WireData>(OUTGOING_BUFFER)
         val ready = CompletableDeferred<Unit>()
         val closedByUs = AtomicBoolean(false)
         val ended = java.util.concurrent.atomic.AtomicReference<Throwable?>()
-        val job: Job = scope.launch {
+        val healthFailure = AtomicBoolean(false)
+        val channel = channelFor(remote)
+        val stub = RemoteTetherServiceGrpcKt.RemoteTetherServiceCoroutineStub(channel)
+            .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
+        lateinit var job: Job
+        job = scope.launch {
             val decoder = codec.newDecoder()
             var failure: Throwable? = null
             try {
@@ -275,31 +357,53 @@ public class RemoteTetherDriver(
                     }
                 }
             } catch (e: CancellationException) {
-                throw e
+                if (!healthFailure.get()) failure = e
             } catch (e: Throwable) {
                 failure = e
+            } finally {
+                val reason = failure ?: TetherDeliveryException("tether ${sender.tetherId}: the other engine ended the call to $where")
+                ready.completeExceptionally(reason)
+                val lost = TetherDeliveryException(
+                    "tether ${sender.tetherId}: the connection to $where was lost: " +
+                        if (healthFailure.get()) "${options.healthFailures} checks of the connection in a row failed" else describe(failure),
+                    failure,
+                )
+                ended.set(lost)
+                outgoing.close(lost)
+                if (!closedByUs.get()) sender.inbound.onEnded(lost)
             }
-            val reason = failure ?: TetherDeliveryException("tether ${sender.tetherId}: the other engine ended the call to $where")
-            ready.completeExceptionally(reason)
-            val lost = TetherDeliveryException("tether ${sender.tetherId}: the connection to $where was lost: ${describe(failure)}", failure)
-            ended.set(lost)
-            outgoing.close(lost)
-            if (!closedByUs.get()) sender.inbound.onEnded(lost)
         }
         try {
             withTimeout(connectTimeout.toMillis()) { ready.await() }
         } catch (e: TimeoutCancellationException) {
+            closedByUs.set(true)
             job.cancel()
             throw TetherWiringException("tether ${sender.tetherId}: cannot connect to $where: no answer within $connectTimeout")
         } catch (e: TetherWiringException) {
+            closedByUs.set(true)
             job.cancel()
             throw e
         } catch (e: CancellationException) {
+            closedByUs.set(true)
             job.cancel()
             throw e
         } catch (e: Throwable) {
+            closedByUs.set(true)
             job.cancel()
             throw TetherWiringException("tether ${sender.tetherId}: cannot connect to $where: ${describe(e)}")
+        }
+        // the connection is checked from now on; a connection that fails its checks is cancelled and counts as lost
+        val health = scope.launch {
+            superviseHealth(
+                options.clock, options.healthInterval, options.healthFailures,
+                // the state of the connection itself, which keep-alive pings of the transport keep up to date: a receiver that
+                // is slow (backpressure) is not a connection that is down
+                probe = { channel.getState(false) == ConnectivityState.READY },
+                onDown = {
+                    healthFailure.set(true)
+                    job.cancel()
+                },
+            )
         }
         return object : RemoteCall {
             override suspend fun send(frame: WireFrame) {
@@ -312,12 +416,13 @@ public class RemoteTetherDriver(
                 try {
                     outgoing.send(data(bytes))
                 } catch (e: ClosedSendChannelException) {
-                    throw TetherDeliveryException("tether ${sender.tetherId}: the call to $where has ended")
+                    throw ended.get() ?: TetherDeliveryException("tether ${sender.tetherId}: the call to $where has ended")
                 }
             }
 
             override fun close() {
                 closedByUs.set(true)
+                health.cancel()
                 outgoing.close()
                 job.cancel()
             }
@@ -332,11 +437,16 @@ public class RemoteTetherDriver(
     }
 
     private fun channelFor(remote: RemoteEndpoint): ManagedChannel = channels.computeIfAbsent("${remote.address}|${remote.fingerprint}") {
+        val address = checkNotNull(remote.address)
         Files.createDirectories(peersDir)
         val store = TrustStore(peersDir.resolve("${remote.fingerprint}.json"))
-        store.add(TrustEntry(remote.fingerprint, "remote tether", TrustKind.ENGINE, address = remote.address))
-        NettyChannelBuilder.forTarget(remote.address)
+        store.add(TrustEntry(remote.fingerprint, "remote tether", TrustKind.ENGINE, address = address))
+        NettyChannelBuilder.forTarget(address)
             .sslContext(TlsHelper.channelCredentials(identity, store))
+            // pings of the transport tell a silent peer from a quiet one (gRPC does not ping more often than every 10 seconds)
+            .keepAliveTime(options.healthInterval.toMillis(), TimeUnit.MILLISECONDS)
+            .keepAliveTimeout(options.healthInterval.toMillis(), TimeUnit.MILLISECONDS)
+            .keepAliveWithoutCalls(true)
             .build()
     }
 

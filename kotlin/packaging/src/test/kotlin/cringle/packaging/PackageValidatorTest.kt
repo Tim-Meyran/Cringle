@@ -338,7 +338,7 @@ class PackageValidatorTest {
 
     private val fp = "ab".repeat(32)
 
-    private fun remote(address: String = "10.0.0.7:7443", fingerprint: String = fp, fabric: String = "shop", block: String = "sink", port: String = "in", index: Int? = null) =
+    private fun remote(address: String? = "10.0.0.7:7443", fingerprint: String = fp, fabric: String = "shop", block: String = "sink", port: String = "in", index: Int? = null) =
         RemoteEndpoint(address, fingerprint, fabric, block, port, index)
 
     /** The first tether of the fixture with its endpoints and remote replaced. */
@@ -363,6 +363,15 @@ class PackageValidatorTest {
         assertEquals(emptyList<PackageProblem>(), problems(remoteSends()))
         assertEquals(emptyList<PackageProblem>(), problems(remoteReceives(remote(address = "[::1]:65535", index = 2))))
         assertEquals(emptyList<PackageProblem>(), problems(remoteReceives(remote(address = "engine-2.example.org:1"))))
+    }
+
+    @Test
+    fun remoteTetherWithoutAddressIsResolvedAtRunTimeAndIsValid() {
+        assertEquals(emptyList<PackageProblem>(), problems(remoteReceives(remote(address = null))))
+        assertEquals(emptyList<PackageProblem>(), problems(remoteSends(remote(address = null))))
+        // the fingerprint is still required and checked, and a given address is still checked
+        assertRemoteProblem(remoteReceives(remote(address = null, fingerprint = "")), ".remote.fingerprint", "expected 64 lowercase hex characters")
+        assertRemoteProblem(remoteReceives(remote(address = "host")), ".remote.address", "invalid address 'host'")
     }
 
     @Test

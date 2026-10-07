@@ -65,6 +65,14 @@ public interface RemoteInbound {
 
     /** The call has ended: by the other engine, by [RemoteSession.end] or because the connection was lost ([cause]). */
     public fun onEnded(cause: Throwable?)
+
+    /**
+     * The call of a sender whose target is resolved at run time was interrupted and is being re-established (#148): what
+     * waited for the other engine has failed, the tether goes on. Calls that are not re-established end with [onEnded].
+     */
+    public fun onInterrupted(cause: Throwable?) {
+        onEnded(cause)
+    }
 }
 
 /** The sending end of a tether that ends on another engine. */
