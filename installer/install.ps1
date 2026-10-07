@@ -22,6 +22,11 @@
 #   -InstallRoot  program files (default %ProgramFiles%\Cringle)
 #   -DataRoot     data, CRINGLE_HOME of the services (default %ProgramData%\Cringle)
 #   -NoService    only unpack the files and switch "current": no service, no PATH entry, no administrative rights needed
+#   -NoElevate    do not ask for administrative rights: stop with an error instead (the default asks, see below)
+#
+# Registering services needs administrative rights. In a normal PowerShell the script asks for them (the Windows
+# confirmation dialog), runs itself again in an elevated window with the same arguments, shows its output and ends with
+# its exit code. If the dialog is declined the script ends with exit code 1.
 param(
     [string]$Version,
     [switch]$WithManagement,
@@ -32,8 +37,13 @@ param(
     [string]$BaseUrl = 'https://github.com/Tim-Meyran/Cringle/releases/download',
     [string]$InstallRoot = (Join-Path $env:ProgramFiles 'Cringle'),
     [string]$DataRoot = (Join-Path $env:ProgramData 'Cringle'),
-    [switch]$NoService
+    [switch]$NoService,
+    [switch]$NoElevate,
+    [string]$ElevatedLog
 )
+
+# the arguments as given, to run the script again with the same ones in an elevated PowerShell
+$GivenArguments = $PSBoundParameters
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -59,6 +69,38 @@ function Write-Info([string]$Message) {
 function Test-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# runs this script again with the same arguments in an elevated PowerShell (the Windows confirmation dialog), waits for it,
+# shows what it wrote and returns its exit code
+function Invoke-Elevated {
+    $log = Join-Path ([IO.Path]::GetTempPath()) ("cringle-install-" + [guid]::NewGuid().ToString('N') + '.log')
+    $tokens = New-Object System.Collections.Generic.List[string]
+    foreach ($name in $GivenArguments.Keys) {
+        $value = $GivenArguments[$name]
+        if ($value -is [Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) { $tokens.Add("-$name") }
+        } else {
+            $tokens.Add("-$name")
+            $tokens.Add("'" + ([string]$value).Replace("'", "''") + "'")
+        }
+    }
+    $tokens.Add('-NoElevate')
+    $tokens.Add("-ElevatedLog '" + $log.Replace("'", "''") + "'")
+    $command = "& '" + $PSCommandPath.Replace("'", "''") + "' " + ($tokens -join ' ') + " *> '" + $log.Replace("'", "''") + "'; exit `$LASTEXITCODE"
+    $shell = (Get-Process -Id $PID).Path
+    Write-Info 'administrative rights are needed: confirm the Windows dialog to continue'
+    try {
+        $process = Start-Process -FilePath $shell -Verb RunAs -WindowStyle Hidden -Wait -PassThru `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command)
+    } catch {
+        throw "could not start the elevated PowerShell ($($_.Exception.Message)); start PowerShell with `"Run as administrator`" and run the script again"
+    }
+    if (Test-Path -LiteralPath $log) {
+        Get-Content -LiteralPath $log | ForEach-Object { Write-Host $_ }
+        Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+    }
+    return $process.ExitCode
 }
 
 # ---- PATH entries (pure functions on the value of PATH) ----
@@ -386,11 +428,16 @@ try {
     if ($Uninstall -and ($Version -or $WithManagement -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -WithManagement, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     if (-not $NoService -and -not (Test-Admin)) {
-        throw 'this needs administrative rights: start PowerShell with "Run as administrator" and run the script again'
+        if ($NoElevate) {
+            throw 'this needs administrative rights: start PowerShell with "Run as administrator" and run the script again'
+        }
+        exit (Invoke-Elevated)
     }
     if ($Uninstall) { Invoke-Uninstall } else { Invoke-Install }
     exit 0
 } catch {
     [Console]::Error.WriteLine("install.ps1: $($_.Exception.Message)")
+    # the elevated run writes to a log that the first run shows; standard error would be lost there
+    if ($ElevatedLog) { Write-Host "install.ps1: $($_.Exception.Message)" }
     exit 1
 }
