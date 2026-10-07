@@ -2,6 +2,7 @@
 
 package cringle.engine.fabric
 
+import cringle.engine.TestClient
 import cringle.common.v1.FabricId
 import cringle.common.v1.PluginRef
 import cringle.common.v1.ProjectRef
@@ -118,7 +119,7 @@ class FabricManagementTest {
         val m2 = dir.resolve("m2.txt")
         installPackages(home, m1, m2)
         val engine = Engine.create(EngineArgs("e1", null, home, 0, true)).start()
-        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", engine.managementPort).usePlaintext().build()
+        val channel = TestClient(dir.resolve("client-tls")).channel(engine)
         try {
             runBlocking { body(EngineManagementServiceCoroutineStub(channel), m1, m2) }
         } finally {

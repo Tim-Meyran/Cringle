@@ -46,6 +46,20 @@ class RepositoryTest {
 
     private fun repo() = PackageRepository(dir.resolve("repo"))
 
+    private val tls by lazy { cringle.common.test.TestTls(dir.resolve("tls")) }
+
+    /** The repository over mutual TLS: the one client of the tests is trusted, and trusts the server. */
+    private fun serve(r: PackageRepository, users: UserManager? = null): RepositoryServer {
+        tls.identity("repo", cringle.common.ComponentKind.REPOSITORY)
+        tls.identity("client")
+        tls.trust("repo", "client")
+        tls.trust("client", "repo", cringle.common.TrustKind.SERVER)
+        return RepositoryServer(r, users = users, tls = RepositoryTls(tls.identity("repo"), tls.trustStore("repo"))).start()
+    }
+
+    private fun client(address: String, token: String? = null) =
+        RepositoryClient(address, token, RepositoryTls(tls.identity("client"), tls.trustStore("client")))
+
     private fun code(body: () -> Unit): RepositoryError = assertThrows<RepositoryException>(body).error
 
     @Test
@@ -153,8 +167,8 @@ class RepositoryTest {
     @Test
     fun grpcRoundTripWithHashCheck(): Unit = runBlocking {
         val r = repo()
-        val server = RepositoryServer(r).start()
-        RepositoryClient("127.0.0.1:${server.port}").use { c ->
+        val server = serve(r)
+        client("127.0.0.1:${server.port}").use { c ->
             val published = c.publish(plugin("acme-core", "1.0.0"))
             c.publish(project("shop", "0.1.0", mapOf("acme-core" to "^1.0.0")))
             assertEquals(2, c.list().size)
@@ -180,8 +194,8 @@ class RepositoryTest {
         val r = repo()
         r.publish(plugin("acme-core", "1.0.0"))
         Files.write(r.file("acme-core", "1.0.0"), byteArrayOf(1, 2, 3))
-        val server = RepositoryServer(r).start()
-        RepositoryClient("127.0.0.1:${server.port}").use { c ->
+        val server = serve(r)
+        client("127.0.0.1:${server.port}").use { c ->
             val target = dir.resolve("bad.cringle")
             assertThrows<PackageHashMismatchException> { runBlocking { c.download("acme-core", "1.0.0", target) } }
             assertTrue(Files.notExists(target))
@@ -197,21 +211,21 @@ class RepositoryTest {
         val operator = users.createUser("o", setOf(UserRole.OPERATOR))
         val viewerToken = users.createToken(viewer.user.id, "t", null).secret
         val operatorToken = users.createToken(operator.user.id, "t", null).secret
-        val server = RepositoryServer(repo(), users = users).start()
+        val server = serve(repo(), users)
         val addr = "127.0.0.1:${server.port}"
-        RepositoryClient(addr, adminToken).use { it.publish(plugin("acme-core", "1.0.0")) }
-        RepositoryClient(addr, viewerToken).use { c ->
+        client(addr, adminToken).use { it.publish(plugin("acme-core", "1.0.0")) }
+        client(addr, viewerToken).use { c ->
             assertEquals(1, c.list().size)
             assertEquals(Status.Code.PERMISSION_DENIED, assertThrows<RepositoryClientException> { runBlocking { c.publish(plugin("x-y", "1.0.0")) } }.status)
         }
-        RepositoryClient(addr, operatorToken).use { c ->
+        client(addr, operatorToken).use { c ->
             c.publish(plugin("x-y", "1.0.0"))
             assertEquals(Status.Code.PERMISSION_DENIED, assertThrows<RepositoryClientException> { runBlocking { c.setPluginTrust("x-y", PluginTrust.TRUSTED) } }.status)
         }
-        RepositoryClient(addr).use { c ->
+        client(addr).use { c ->
             assertEquals(Status.Code.UNAUTHENTICATED, assertThrows<RepositoryClientException> { runBlocking { c.list() } }.status)
         }
-        RepositoryClient(addr, adminToken).use { c ->
+        client(addr, adminToken).use { c ->
             c.setPluginTrust("x-y", PluginTrust.TRUSTED)
             assertEquals(PluginTrust.TRUSTED, c.get("x-y", "1.0.0").trust)
         }

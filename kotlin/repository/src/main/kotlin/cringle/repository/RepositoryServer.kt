@@ -56,9 +56,8 @@ internal fun toProto(e: PackageEntry): PackageMetadata = PackageMetadata.newBuil
     .build()
 
 /**
- * The repository as a gRPC server on the loopback interface. With [tls] it speaks mutual TLS and refuses a client whose key is
- * not in the trust store before any token is looked at; without it, it speaks plaintext (a transition until the fallbacks
- * go away, #39). When
+ * The repository as a gRPC server on the loopback interface. It speaks mutual TLS and refuses a client whose key is not in
+ * the trust store of [tls] before any token is looked at; there is no plaintext mode. When
  * [users] is given, every call needs a token: reading needs the `READ` right, publishing `OPERATE`, changing plugin
  * trust `ADMINISTER`.
  */
@@ -67,13 +66,13 @@ public class RepositoryServer(
     port: Int = 0,
     users: UserManager? = null,
     private val tempDir: Path = Files.createTempDirectory("cringle-repository-upload"),
-    tls: RepositoryTls? = null,
+    tls: RepositoryTls,
 ) {
     private val service = Service()
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .maxInboundMessageSize(CHUNK_BYTES * 4)
-        .also { if (tls != null) it.sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore)) }
+        .sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore))
         .addService(
             service.bindService().let { definition ->
                 if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS))

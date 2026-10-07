@@ -170,7 +170,10 @@ class DistributionTest {
         val home = unpack()
         val cringleHome = Files.createDirectories(temp.resolve("cringle-home"))
         val stderrFile = temp.resolve("daemon.err").toFile()
-        val builder = ProcessBuilder(script(home, "cringle-daemon").toString(), "--home", cringleHome.toString(), "--port", "0", "--insecure-dev-mode")
+        // the daemon API is mutual TLS: the daemon has to trust this test before it starts, as an operator enters a fingerprint
+        val client = DistributionTestClient(temp.resolve("client-tls"))
+        client.trustInDaemonHome(cringleHome)
+        val builder = ProcessBuilder(script(home, "cringle-daemon").toString(), "--home", cringleHome.toString(), "--port", "0")
         builder.environment().remove("CRINGLE_JVM_OPTS")
         builder.environment()["JAVA_HOME"] = System.getProperty("java.home")
         builder.redirectError(stderrFile)
@@ -182,7 +185,7 @@ class DistributionTest {
                 .get(120, TimeUnit.SECONDS)
             assertTrue(line != null && line.startsWith("daemon-port="), "daemon output: $line; stderr: ${stderrFile.readText()}")
             val port = line.substringAfter("=").trim().toInt()
-            channel = ManagedChannelBuilder.forAddress("127.0.0.1", port).usePlaintext().build()
+            channel = client.channel(port)
             val api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
             val engineId = EngineId.newBuilder().setValue("dist-e1").build()
             runBlocking {
@@ -190,7 +193,7 @@ class DistributionTest {
                 val started = api.startEngine(EngineRequest.newBuilder().setEngineId(engineId).build())
                 assertEquals(EngineProcessState.ENGINE_PROCESS_STATE_RUNNING, started.state, "engine logs: ${engineLogs(cringleHome)}")
                 assertTrue(started.managementPort > 0 && started.pid > 0)
-                val engineChannel = ManagedChannelBuilder.forAddress("127.0.0.1", started.managementPort).usePlaintext().build()
+                val engineChannel = client.channel(started.managementPort)
                 try {
                     val status = EngineManagementServiceGrpc.newBlockingStub(engineChannel).getStatus(GetStatusRequest.getDefaultInstance())
                     assertEquals("dist-e1", status.engineId.value)

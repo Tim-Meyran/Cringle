@@ -2,6 +2,7 @@
 
 package cringle.engine
 
+import cringle.common.ComponentKind
 import cringle.common.Identity
 import java.nio.file.Path
 import java.security.KeyPair
@@ -10,7 +11,7 @@ import java.time.Duration
 
 /**
  * The stable identity of an engine: a thin caller of [Identity] in `common` (Architecture chapter 5), stored in
- * `<engineDir>/certs` with the subject `CN=<engineId>`. [renew] issues a new certificate for the same key pair.
+ * `<engineDir>/certs` with the subject `CN=engine:<engineId>`. [renew] issues a new certificate for the same key pair.
  */
 public class EngineIdentity private constructor(private val identity: Identity) {
     /** The persistent key pair. */
@@ -39,6 +40,6 @@ public class EngineIdentity private constructor(private val identity: Identity) 
 
         /** Loads the identity from `<engineDir>/certs`, creating key pair and certificate on first use. */
         public fun loadOrCreate(engineDir: Path, engineId: String): EngineIdentity =
-            EngineIdentity(Identity.loadOrCreate(engineDir, engineId))
+            EngineIdentity(Identity.loadOrCreate(engineDir, ComponentKind.ENGINE.commonName(engineId)))
     }
 }

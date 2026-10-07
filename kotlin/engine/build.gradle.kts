@@ -12,4 +12,5 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(project(":testkit"))
     testImplementation(project(":router"))
+    testImplementation(testFixtures(project(":common")))
 }

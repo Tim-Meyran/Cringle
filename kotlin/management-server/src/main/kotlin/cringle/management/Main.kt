@@ -2,6 +2,9 @@
 
 package cringle.management
 
+import cringle.common.ComponentKind
+import cringle.common.Identity
+import cringle.common.TrustStore
 import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import cringle.router.users.FileUserStore
@@ -58,9 +61,12 @@ public fun main(args: Array<String>) {
     }
     if (!insecure) fail("secure (mTLS) operation is not available yet (issue #13); start with --insecure-dev-mode")
     CringleLogging.init(CringleHome.resolve(home), "management", "main")
-    System.err.println("WARNING: INSECURE DEV MODE - the connection is not encrypted (loopback only)")
+    System.err.println("WARNING: INSECURE DEV MODE - the connection to the management server is not encrypted (loopback only); its channels to daemons, engines and repositories are mTLS")
     val base = CringleHome.resolve(home).resolve("management")
-    val core = ManagementCore(ManagementStore(base.resolve("state.json")), repository, token, router)
+    // the identity and the peers of the management server: every channel to a daemon, engine, repository or router is mTLS
+    val identity = Identity.loadOrCreate(base, ComponentKind.MANAGEMENT.commonName("management"))
+    val trustStore = TrustStore(base.resolve("trust.json"))
+    val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, repository, token, router)
     val known = kotlinx.coroutines.runBlocking { core.listMachines().map { it.record.id }.toSet() }
     for ((id, address) in machines) {
         if (id !in known) kotlinx.coroutines.runBlocking { core.addMachine(id, address, null, null) }

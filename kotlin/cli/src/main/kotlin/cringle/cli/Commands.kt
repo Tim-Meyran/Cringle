@@ -404,8 +404,12 @@ internal val COMMANDS: List<Command> = listOf(
     },
 
     // --- routers ---
-    Command(listOf("router", "add"), "<address>", "Connect the router of the ManagementServer machine to another router", minArgs = 1) { env, a ->
-        val r = env.m.addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(a.positional[0]).build()).router
+    Command(
+        listOf("router", "add"), "<address>", "Connect the router of the ManagementServer machine to another router",
+        listOf(opt("fingerprint", "SHA-256 fingerprint of the key of the remote router, which a router with mTLS wants confirmed", "SHA256")),
+        1,
+    ) { env, a ->
+        val r = env.m.addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(a.positional[0]).setExpectedFingerprint(a.option("fingerprint").orEmpty()).build()).router
         Output.Detail(linkedMapOf("address" to r.address, "cachedEngines" to r.cachedEngines, "lastRefresh" to r.lastRefresh.iso(), "error" to r.lastError))
     },
     Command(listOf("router", "remove"), "<address>", "Disconnect a remote router", minArgs = 1) { env, a ->

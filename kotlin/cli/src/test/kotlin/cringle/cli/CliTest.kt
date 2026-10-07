@@ -2,6 +2,7 @@
 
 package cringle.cli
 
+import cringle.management.test.ManagementTls
 import cringle.contract.LogEntry
 import cringle.contract.LogLevel
 import cringle.daemon.Daemon
@@ -42,6 +43,7 @@ class CliTest {
     private lateinit var home: Path
     private lateinit var cliHome: Path
     private lateinit var daemon: Daemon
+    private lateinit var tls: ManagementTls
     private lateinit var server: ManagementServer
     private lateinit var adminToken: String
     private lateinit var users: UserManager
@@ -54,15 +56,17 @@ class CliTest {
         dir = Files.createTempDirectory("cringle-cli-test")
         home = Files.createDirectories(dir.resolve("home"))
         cliHome = dir.resolve("cli-home")
-        val repositoryServer = RepositoryServer(PackageRepository(dir.resolve("repo"))).start()
-        closeables += AutoCloseable { repositoryServer.stop() }
-        val router = RouterServer(dir.resolve("registry.json")).also { it.start() }
-        closeables += AutoCloseable { router.stop() }
+        tls = ManagementTls(dir.resolve("tls"))
         daemon = Daemon(home).start()
         closeables += daemon
+        tls.trust(daemon)
+        val repositoryServer = tls.startRepository(PackageRepository(dir.resolve("repo")))
+        closeables += AutoCloseable { repositoryServer.stop() }
+        val router = tls.startRouter(dir.resolve("registry.json"))
+        closeables += AutoCloseable { router.stop() }
         users = UserManager(FileUserStore(dir.resolve("users.json")))
         adminToken = users.bootstrap()!!
-        val core = ManagementCore(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}", null, "127.0.0.1:${router.port}")
+        val core = tls.core(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}", null, "127.0.0.1:${router.port}")
         server = ManagementServer(core, users = users, recoverOnStart = false).start()
         closeables += server
     }
@@ -325,9 +329,14 @@ class CliTest {
     @Test
     fun routersAreAddedListedAndRemoved() {
         assertEquals("no remote routers", ok("router", "list").out)
-        ok("router", "add", "127.0.0.1:1")
-        assertTrue(ok("router", "list").out.contains("127.0.0.1:1"))
-        ok("router", "remove", "127.0.0.1:1")
+        // the router of the management server runs mTLS and wants the key of the remote router confirmed
+        val remote = tls.startRouter(dir.resolve("remote-registry.json"))
+        closeables += AutoCloseable { remote.stop() }
+        val remoteAddress = "127.0.0.1:${remote.port}"
+        assertEquals(1, cli("router", "add", remoteAddress).code, "without the fingerprint the router is not added")
+        ok("router", "add", remoteAddress, "--fingerprint", remote.identity!!.publicKeyFingerprint)
+        assertTrue(ok("router", "list").out.contains(remoteAddress))
+        ok("router", "remove", remoteAddress)
         assertEquals("no remote routers", ok("router", "list").out)
     }
 

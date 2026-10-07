@@ -2,6 +2,7 @@
 
 package cringle.management
 
+import cringle.management.test.ManagementTls
 import cringle.contract.UserRole
 import cringle.router.users.FileUserStore
 import cringle.router.users.UserManager
@@ -79,7 +80,7 @@ class BootstrapTokenTest {
         val other = manager.createToken(manager.listUsers().single().user.id, "other", null).secret
         val viewer = manager.createToken(manager.createUser("v", setOf(UserRole.VIEWER)).user.id, "v", null).secret
         val file = BootstrapTokenFile(tokenFile)
-        val core = ManagementCore(ManagementStore(dir.resolve("state.json")))
+        val core = ManagementTls(dir.resolve("tls")).core(ManagementStore(dir.resolve("state.json")))
         val server = ManagementServer(core, users = manager, recoverOnStart = false, onAuthenticated = file::used).start()
         val channel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
         fun whoAmI(token: String?): String = runBlocking {
