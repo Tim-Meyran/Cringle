@@ -55,6 +55,20 @@ Without administrative rights the script stops with exit code 1 and a message. I
 
 Running files cannot be replaced on Windows, so an upgrade stops the services, unpacks the new version next to the old one, switches the junction and starts again the services that were running. Locked files of an old version do not matter: old versions are removed when possible and stay otherwise. Options for tests: `-BaseUrl`, `-InstallRoot`, `-DataRoot` and `-NoService` (only the files: no service, no `PATH` entry, no administrative rights needed). `installer/tests/InstallerTest.ps1` uses them; in an administrative PowerShell (as on the CI runner) it also tests the services and `PATH`, otherwise it reports them as skipped.
 
+### A locally built Cringle (Windows)
+
+To run what you built yourself instead of a release, use Gradle in an administrative PowerShell (the checkout is the working directory; a JDK 21 has to be installed):
+
+```
+.\gradlew.bat cringleInstallLocal --console=plain --no-daemon    # build cringleDist and install it
+.\gradlew.bat cringleUpdateLocal --console=plain --no-daemon     # build again and install over the existing installation
+.\gradlew.bat cringleUninstallLocal --console=plain --no-daemon   # remove it (the data stays)
+```
+
+`cringleInstallLocal` and `cringleUpdateLocal` build the distribution (`cringleDist`, version `0.0.0-SNAPSHOT` unless you give `-PreleaseVersion=1.2.3`) and run `installer\install.ps1 -FromBuild build\dist -Version <version>`, so a local build is installed exactly like a release: same folders, services and `PATH` entry. `cringleUpdateLocal` stops with a message if nothing is installed; the services that were running are started again after the switch. The same version is replaced, so a new build of `0.0.0-SNAPSHOT` simply overwrites the old one. Options as `-P` properties: `-Pstart`, `-PwithManagement`, `-PnoService` (files only, no administrative rights needed), `-PinstallRoot=<dir>`, `-PdataRoot=<dir>`, and for `cringleUninstallLocal` `-Ppurge`.
+
+Without Gradle: `.\gradlew.bat cringleDist`, then `.\installer\install.ps1 -FromBuild build\dist` (`-Version` is needed only if `build\dist` holds several versions). WinSW is taken from `build\dist\winsw.exe` if it is there and otherwise downloaded (pinned version, checksum checked, as in a release). On Linux run `sudo installer/install.sh` with `CRINGLE_RELEASE_BASE_URL=file://<dir>` (a folder `v<version>` with the archive and `SHA256SUMS`); Gradle tasks for Linux do not exist yet.
+
 ## Manual setup
 
 The installers do what is described here; you only need it for a setup of your own.

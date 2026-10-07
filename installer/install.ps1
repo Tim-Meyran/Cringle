@@ -3,9 +3,15 @@
 # Installer of Cringle for Windows (docs/daemon-service.md). Run it in an administrative PowerShell:
 #
 #   .\install.ps1 [-Version <version>] [-WithManagement] [-Start]
+#   .\install.ps1 -FromBuild <dir> [-Version <version>] [-WithManagement] [-Start]
 #   .\install.ps1 -Uninstall [-Purge]
 #
 #   -Version <version>  install this version (default: the latest release)
+#   -FromBuild <dir>    install a Cringle that was built locally instead of a release: <dir> is the output of
+#                       `.\gradlew.bat cringleDist` (build\dist). It holds cringle-<version>-windows.zip and SHA256SUMS; the
+#                       version is the one of the archive (give -Version if there are several). winsw.exe is taken from <dir>
+#                       if it is there and downloaded otherwise (pinned version and checksum, as in a release).
+#                       `.\gradlew.bat cringleInstallLocal` builds and runs this.
 #   -WithManagement     also register the service "Cringle Management Server"
 #   -Start              start the registered services (default: they start at the next boot only)
 #   -Uninstall          stop and remove the services, the PATH entry and the program files; the data stays
@@ -22,6 +28,7 @@ param(
     [switch]$Start,
     [switch]$Uninstall,
     [switch]$Purge,
+    [string]$FromBuild,
     [string]$BaseUrl = 'https://github.com/Tim-Meyran/Cringle/releases/download',
     [string]$InstallRoot = (Join-Path $env:ProgramFiles 'Cringle'),
     [string]$DataRoot = (Join-Path $env:ProgramData 'Cringle'),
@@ -33,6 +40,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 $DefaultBaseUrl = 'https://github.com/Tim-Meyran/Cringle/releases/download'
 $LatestApi = 'https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest'
+# the service wrapper of a release (docs/releasing.md); a local build downloads it from here when it is not in the build folder
+$WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
+$WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
 $DaemonPort = 7400
 $ManagementPort = 7500
 $Services = @(
@@ -85,6 +95,14 @@ function Update-MachinePath([scriptblock]$Change) {
 # ---- release files ----
 
 function Get-ReleaseFile([string]$Release, [string]$Name, [string]$Destination) {
+    if ($FromBuild) {
+        $source = Join-Path $FromBuild $Name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "file not found: $source (build it with: .\gradlew.bat cringleDist)"
+        }
+        Copy-Item -LiteralPath $source -Destination $Destination
+        return
+    }
     if ($BaseUrl -match '^https?://') {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $url = "$($BaseUrl.TrimEnd('/'))/v$Release/$Name"
@@ -100,6 +118,39 @@ function Get-ReleaseFile([string]$Release, [string]$Name, [string]$Destination) 
             throw "file not found: $source"
         }
         Copy-Item -LiteralPath $source -Destination $Destination
+    }
+}
+
+# the version of the archive in the build folder $FromBuild
+function Get-BuildVersion {
+    if (-not (Test-Path -LiteralPath $FromBuild -PathType Container)) {
+        throw "-FromBuild: $FromBuild is not a folder (build it with: .\gradlew.bat cringleDist)"
+    }
+    $versions = @(Get-ChildItem -LiteralPath $FromBuild -Filter 'cringle-*-windows.zip' -File |
+        Where-Object { $_.Name -match '^cringle-(.+)-windows\.zip$' } | ForEach-Object { $Matches[1] })
+    if ($versions.Count -eq 0) { throw "no cringle-<version>-windows.zip in $FromBuild (build it with: .\gradlew.bat cringleDist)" }
+    if ($versions.Count -gt 1) { throw "several versions in ${FromBuild}: $($versions -join ', '); give one with -Version <version>" }
+    return $versions[0]
+}
+
+# winsw.exe for a local build: the one in the build folder or the pinned download, always checked against the pinned checksum
+function Get-BuildWinSw([string]$Destination) {
+    $local = Join-Path $FromBuild 'winsw.exe'
+    if (Test-Path -LiteralPath $local -PathType Leaf) {
+        Copy-Item -LiteralPath $local -Destination $Destination
+    } else {
+        Write-Info "downloading WinSW from $WinSwUrl"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $WinSwUrl -OutFile $Destination
+        } catch {
+            throw "download failed: $WinSwUrl ($($_.Exception.Message))"
+        }
+    }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
+    if ($actual -ne $WinSwSha256) {
+        Remove-Item -LiteralPath $Destination -Force
+        throw "the checksum of winsw.exe does not match (expected $WinSwSha256, got $actual); nothing was installed"
     }
 }
 
@@ -224,7 +275,9 @@ function Remove-Tree([string]$Path) {
 }
 
 function Invoke-Install {
-    if ($Version) { $release = $Version.TrimStart('v') } else { $release = Get-LatestVersion; Write-Info "the latest release is $release" }
+    if ($Version) { $release = $Version.TrimStart('v') }
+    elseif ($FromBuild) { $release = Get-BuildVersion; Write-Info "the build in $FromBuild is $release" }
+    else { $release = Get-LatestVersion; Write-Info "the latest release is $release" }
     if ($release -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
         throw "'$release' is not a version like 1.2.3 or 1.2.3-rc.1"
     }
@@ -233,13 +286,17 @@ function Invoke-Install {
     $stage = $null
     try {
         New-Item -ItemType Directory -Path $downloads | Out-Null
-        Write-Info "downloading Cringle $release"
+        if ($FromBuild) { Write-Info "installing Cringle $release from the build in $FromBuild" } else { Write-Info "downloading Cringle $release" }
         Get-ReleaseFile $release $archive (Join-Path $downloads $archive)
         Get-ReleaseFile $release 'SHA256SUMS' (Join-Path $downloads 'SHA256SUMS')
         Assert-Checksum $downloads $archive
         if (-not $NoService) {
-            Get-ReleaseFile $release 'winsw.exe' (Join-Path $downloads 'winsw.exe')
-            Assert-Checksum $downloads 'winsw.exe'
+            if ($FromBuild) {
+                Get-BuildWinSw (Join-Path $downloads 'winsw.exe')
+            } else {
+                Get-ReleaseFile $release 'winsw.exe' (Join-Path $downloads 'winsw.exe')
+                Assert-Checksum $downloads 'winsw.exe'
+            }
         }
 
         New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -326,7 +383,8 @@ function Invoke-Uninstall {
 
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
-    if ($Uninstall -and ($Version -or $WithManagement -or $Start)) { throw '-Uninstall cannot be combined with -Version, -WithManagement or -Start' }
+    if ($Uninstall -and ($Version -or $WithManagement -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -WithManagement, -Start or -FromBuild' }
+    if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     if (-not $NoService -and -not (Test-Admin)) {
         throw 'this needs administrative rights: start PowerShell with "Run as administrator" and run the script again'
     }
