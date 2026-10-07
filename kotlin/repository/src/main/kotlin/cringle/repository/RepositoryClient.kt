@@ -38,12 +38,12 @@ public class RepositoryClientException(public val status: Status.Code, message: 
 /**
  * A client of a repository. It is a [PackageSource] for the resolver (the `versions` and `info` calls block) and
  * downloads packages with hash verification: a file whose SHA-256 differs from the published hash is never kept.
- * [token] is sent as `Bearer` credentials when the repository requires authentication. With [tls] the channel is mutual TLS and
- * only a server whose key is in the trust store is accepted; without it the channel is plaintext (a transition, #39).
+ * [token] is sent as `Bearer` credentials when the repository requires authentication. The channel is mutual TLS and only a server
+ * whose key is in the trust store of [tls] is accepted; there is no plaintext mode.
  */
-public class RepositoryClient(address: String, private val token: String? = null, tls: RepositoryTls? = null) : PackageSource, AutoCloseable {
+public class RepositoryClient(address: String, private val token: String? = null, tls: RepositoryTls) : PackageSource, AutoCloseable {
     private val channel: ManagedChannel = NettyChannelBuilder.forTarget(address)
-        .also { if (tls == null) it.usePlaintext() else it.sslContext(TlsHelper.channelCredentials(tls.identity, tls.trustStore)) }
+        .sslContext(TlsHelper.channelCredentials(tls.identity, tls.trustStore))
         .maxInboundMessageSize(CHUNK_BYTES * 4)
         .build()
     private val stub = RepositoryServiceGrpcKt.RepositoryServiceCoroutineStub(channel).let { s ->

@@ -64,14 +64,19 @@ All three run on a router with TLS (`RouterServer(tls = RouterTls(identity, trus
 
 The engine-router and daemon-router channels use mTLS. The engine and the daemon each own an `Identity` and a `TrustStore`; the router does the same in combined mode.
 
-- The engine opens `TrustStore(<engineDir>/trust.json)` and builds `EngineTls(identity, trustStore)`. The engine trusts nobody except what is in that store.
+- The engine opens `TrustStore(<engineDir>/trust.json)`. Its management API is mutual TLS with that store, and with a router it builds `EngineTls(identity, trustStore)` for the router channel. The engine trusts nobody except what is in that store; its subject is `CN=engine:<id>`.
 - The daemon owns its own `Identity` (under `<home>/daemon`) and `TrustStore` (under `<home>/daemon/trust.json`).
 - In combined mode, the embedded router runs with mTLS using its own `Identity` (under `<home>/router`) and `TrustStore` (under `<home>/router/trust.json`). At start, the router trusts the daemon (`COMPONENT`) and the daemon trusts the router (`ROUTER`) automatically.
 - In separate router mode, the daemon announces engines via `PrepareEngine` over mTLS using its identity and trust store. The router must already trust the daemon (manual trust, #82).
-- Before starting an engine, the daemon writes `<engineDir>/trust.json` with the router's fingerprint (looked up in the daemon's trust store by address). If the router is not in the trust store, the start fails with a clear message.
+- Before starting an engine, the daemon writes `<engineDir>/trust.json` with the daemon and every `COMPONENT` of its trust store (for the management API) and the router's fingerprint (looked up in the daemon's trust store by address). If a router is configured and not in the trust store, the start fails with a clear message.
+
+## All links
+
+`ManagementTlsTest` (module `management-server`) shows that the links ManagementServer to Daemon, Engine and Repository and Daemon to Engine run only over mTLS, that a peer without a trust entry is refused, and that a removed peer is refused on its next connection. `RepositoryTlsTest` shows that a client with a valid token but without a trust entry fails at TLS, not at authentication. `NoPlaintextGuardTest` fails if `usePlaintext` returns to one of the classes `ManagementCore`, `RepositoryServer`, `RepositoryClient`, `Daemon` and `Engine`. How the management server and its trust store are described: `docs/management-server.md` (channels and trust).
 
 ## What is missing
 
-- The CLI and the ManagementServer use pinned TLS since #85. `--insecure-dev-mode` is removed in #86.
+- The CLI and the ManagementServer channel to the CLI use pinned TLS with #6. `--insecure-dev-mode` is removed in #5 (the switch is still accepted by daemon, engine and ManagementServer).
+- Transitive trust of the ManagementServer in engines of another router (#6).
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.
