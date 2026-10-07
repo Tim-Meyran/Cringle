@@ -258,6 +258,31 @@ class WireCodecTest {
         val bytesEncoded = bytesCodec.encode(Bytes(0UL, byteArrayOf(1, 2, 3)))
         assertThrows<WireFormatException> { typedCodec.newDecoder().feed(bytesEncoded) }
     }
+
+    @Test
+    fun bytesTetherCarriesStreamControlFramesAndErrorsAndTellsStreamsApartById() {
+        val frames = listOf(
+            StreamOpen(7UL),
+            Bytes(7UL, byteArrayOf(1, 2, 3)),
+            Bytes(8UL, byteArrayOf()),
+            StreamClose(7UL),
+            Error(8UL, Json.parseToJsonElement("""{"code":"delivery","message":"gone"}""")),
+        )
+        val decoder = bytesCodec.newDecoder()
+        val decoded = frames.flatMap { decoder.feed(bytesCodec.encode(it)) }
+        assertEquals(frames.map { it.frameType to it.correlationOrStreamId }, decoded.map { it.frameType to it.correlationOrStreamId })
+        assertEquals(listOf<Byte>(1, 2, 3), (decoded[1] as Bytes).payload.toList())
+        assertEquals(8UL, (decoded[4] as Error).correlationOrStreamId)
+    }
+
+    @Test
+    fun bytesTetherStillRejectsFramesThatCarryAValue() {
+        val value = Json.parseToJsonElement("1")
+        for (frame in listOf(Request(1UL, "cringle.std", value), Response(1UL, "cringle.std", value), StreamItem(1UL, "cringle.std", value))) {
+            assertThrows<WireFormatException> { bytesCodec.encode(frame) }
+            assertThrows<WireFormatException> { bytesCodec.newDecoder().feed(typedCodec.encode(frame)) }
+        }
+    }
 }
 
 private fun writeUInt32BE(buffer: ByteArray, offset: Int, value: Int) {

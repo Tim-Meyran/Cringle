@@ -41,8 +41,8 @@ A tether can end at a port of a block on another engine at a fixed address: the 
 endpoint and a `remote` object (`address`, `fingerprint`, `fabric`, `block`, `port`, optional `index`) instead of the
 other endpoint; see `package-format.md`, section 5. The local endpoint is the `OUT` port (`from`) when the remote end
 receives and the `IN` port (`to`) when it sends. The remote engine is identified by the fingerprint of its key and
-trusted by it only. Of the types that may have a `remote`, **`MESSAGE`** is carried so far; an engine rejects the
-deployment of a blueprint with a remote `REQUEST_RESPONSE`, `STREAM` or `BYTE_STREAM` tether.
+trusted by it only. The types `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM` can end on another engine and
+behave as they do locally (below); `TCP` and `SERIAL` are local resources and cannot.
 
 **Transport.** Every engine serves `cringle.engine.v1.RemoteTetherService` (`proto/cringle/engine/v1/remote_tether.proto`)
 on its tether port (`<engineDir>/tether.port`, option `--tether-port`, default any free port), over mutual TLS with the
@@ -60,6 +60,11 @@ another allowed key, gets the same answer, so that a caller learns nothing about
 connects to the address and the key of its `remote` and to nothing else; a certificate that does not have this key is
 refused. There is no trust on first use.
 
+**Wire mode.** `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` tethers use the typed frames of `wire.md`; a `BYTE_STREAM`
+tether uses the `bytes` mode (`BYTES` frames, with `STREAM_OPEN`, `STREAM_CLOSE` and `ERROR` as control frames). Values
+are checked against the schema of the port at the receiving end (and, for the values a block sends, at the sending end),
+as for a local tether; bytes are not checked.
+
 **Calls.** The server answers a call it accepts with one empty message (the call is established), and a call it refuses
 with one `ERROR` frame (`cringle.std/Error`, code `unknown-target`) and the end of the call. A sender is started only
 after that: a fabric whose tether cannot connect (not reachable, wrong key, refused) fails to start with a message that
@@ -71,9 +76,32 @@ with an `ERROR` frame: code `validation` (the sender sees a `TetherValidationExc
 `TetherDeliveryException`, for example because the fabric is not running) or `unsupported`; the sender reports it as a
 delivery failure of the tether, as it does for a local tether.
 
+**Requests.** `request` writes a `REQUEST` frame with a new correlation ID and waits. The receiver validates the request,
+hands it to the block like a local request and answers with a `RESPONSE` frame of the same ID when the block responds;
+the response is validated at the sender against the schema of the port (one schema for request and response). A request
+that the receiver cannot deliver (the block is not running, the schema is violated) is answered with an `ERROR` frame of
+the same ID, and the sender gets the matching `TetherDeliveryException` or `TetherValidationException`. A response that
+does not come within the `requestTimeout` of the tether (default 30 s) ends with a `TetherTimeoutException`. Many requests
+can be waiting at once.
+
+**Streams.** `openStream` allocates a stream ID and writes `STREAM_OPEN`; the receiving block gets `StreamOpened` like a
+local one. Values flow in both directions as `STREAM_ITEM` frames of that ID, validated like `MESSAGE` values, in order. A
+full buffer suspends the writer (no thread is blocked): the receiver stops reading, the flow control of the connection
+holds the sender back, and its stream buffer fills. **Closing is for both directions**, unlike a local stream: `close()`
+writes `STREAM_CLOSE` and closes the reading end of the same side at once; the other side reads what was sent before the
+close and then sees the end of the stream, and its writes fail. (A local stream can be closed in one direction only.)
+The frames of all streams of a tether share one call, so a stream whose reader is slow holds back the others of the
+same tether.
+
+**Byte streams.** `openByteStream` allocates a stream ID and writes `STREAM_OPEN`; bytes flow in both directions as
+`BYTES` frames of that ID (a write is split into frames of at most 256 KiB), in order, with the same backpressure and
+closing rules as a stream. Bytes are not checked against a schema.
+
 **Failure.** A connection that is lost, or a call that the other engine ends, fails the waiting senders and every later send
-at once with a `TetherDeliveryException` (as a stopping fabric does). The tether is not reconnected: the fabric has to be
-restarted. Reconnecting, at-least-once delivery, resolution through the registry and failover are not part of this.
+at once with a `TetherDeliveryException` (as a stopping fabric does): so do the waiting requests and writers and the open
+streams, on both engines. A fabric that stops tells the senders first (an `ERROR` frame with the code `stopping` and the
+ID 0, then the end of the call), so that the exception names the stop and nobody waits for a timeout. The tether is not
+reconnected: the fabric has to be restarted. Reconnecting, at-least-once delivery, resolution through the registry and failover are not part of this.
 
 ## Schemas
 
@@ -103,5 +131,5 @@ Every tether has bounded buffers (default 64 entries; every stream direction has
 
 ## Not covered
 
-- `REQUEST_RESPONSE`, `STREAM` and `BYTE_STREAM` across engines (#147), reconnecting and resolution of the address (#148).
+- Reconnecting after a lost connection and the resolution of the address of a remote tether (#148).
 - The filesystem driver: issue #75.

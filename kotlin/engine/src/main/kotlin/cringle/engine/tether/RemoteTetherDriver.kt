@@ -12,7 +12,6 @@ import cringle.common.TrustStore
 import cringle.engine.v1.RemoteTetherServiceGrpcKt
 import cringle.engine.v1.WireData
 import cringle.packaging.RemoteEndpoint
-import cringle.wire.Message
 import cringle.wire.TetherMode
 import cringle.wire.WireCodec
 import cringle.wire.WireFormatException
@@ -49,15 +48,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The tethers between engines (`spec/tether.md`, "Tethers between engines"): serves [RemoteTetherServiceGrpcKt] for the
@@ -82,7 +76,8 @@ public class RemoteTetherDriver(
     requestedPort: Int = 0,
     private val connectTimeout: java.time.Duration = java.time.Duration.ofSeconds(10),
 ) : AutoCloseable {
-    private val codec = WireCodec(TetherMode.TYPED)
+    private val typedCodec = WireCodec(TetherMode.TYPED)
+    private val bytesCodec = WireCodec(TetherMode.BYTES)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
     private val receivers = HashMap<String, RemoteReceiver>()
@@ -182,62 +177,66 @@ public class RemoteTetherDriver(
     private inner class Service : RemoteTetherServiceGrpcKt.RemoteTetherServiceCoroutineImplBase() {
         override fun exchange(requests: Flow<WireData>): Flow<WireData> {
             val info = CALL.get()
-            return flow {
+            return channelFlow {
                 val receiver = info?.fabric?.let { f -> info.blockPort?.let { bp -> lookup(f, bp) } }
                 if (info == null || receiver == null || receiver.senderFingerprint != info.peer) {
-                    emit(data(errorFrame(CODE_UNKNOWN, "this engine has no tether that receives from this caller at ${info?.fabric}/${info?.blockPort}")))
-                    return@flow
+                    val refusal = RemoteErrors.value(RemoteErrors.UNKNOWN_TARGET, "this engine has no tether that receives from this caller at ${info?.fabric}/${info?.blockPort}")
+                    send(data(codecFor(TetherMode.TYPED).encode(cringle.wire.Error(0u, refusal))))
+                    return@channelFlow
                 }
-                emit(WireData.getDefaultInstance())
-                val decoder = codec.newDecoder()
-                try {
-                    requests.collect { chunk ->
-                        for (frame in decoder.feed(chunk.frame.toByteArray())) {
-                            val answer = take(receiver, frame)
-                            if (answer != null) emit(data(answer))
-                        }
+                val codec = codecFor(receiver.mode)
+                var reader: Job? = null
+                val session = object : RemoteSession {
+                    override suspend fun reply(frame: WireFrame) {
+                        send(data(codec.encode(frame)))
                     }
-                } catch (e: WireFormatException) {
-                    emit(data(errorFrame(CODE_FORMAT, "bad frame: ${e.message}")))
-                }
-            }
-        }
 
-        /** Delivers a frame; returns the ERROR frame that answers it, or `null` if it was taken. */
-        private suspend fun take(receiver: RemoteReceiver, frame: WireFrame): ByteArray? {
-            if (frame !is Message) return errorFrame(CODE_UNSUPPORTED, "tether ${receiver.tetherId}: ${frame.frameType} frames are not supported across engines yet")
-            return try {
-                receiver.deliver(frame.value)
-                null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: TetherValidationException) {
-                errorFrame(CODE_VALIDATION, e.message.orEmpty(), e.problems)
-            } catch (e: TetherDeliveryException) {
-                errorFrame(CODE_DELIVERY, e.message.orEmpty())
-            } catch (e: Exception) {
-                errorFrame(CODE_DELIVERY, "tether ${receiver.tetherId}: ${e.message}")
+                    override fun end() {
+                        close()
+                        reader?.cancel()
+                    }
+                }
+                val inbound = receiver.accept(session)
+                send(WireData.getDefaultInstance())
+                val decoder = codec.newDecoder()
+                var cause: Throwable? = null
+                reader = launch {
+                    try {
+                        requests.collect { chunk ->
+                            for (frame in decoder.feed(chunk.frame.toByteArray())) {
+                                try {
+                                    inbound.onFrame(frame)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    send(data(codec.encode(cringle.wire.Error(frame.correlationOrStreamId, RemoteErrors.value(e)))))
+                                }
+                            }
+                        }
+                    } catch (e: WireFormatException) {
+                        cause = e
+                        send(data(codec.encode(cringle.wire.Error(0u, RemoteErrors.value(RemoteErrors.FORMAT, "bad frame: ${e.message}")))))
+                    } catch (e: Throwable) {
+                        cause = e
+                        throw e
+                    } finally {
+                        inbound.onEnded(cause)
+                    }
+                }
+                reader.join()
             }
         }
     }
 
     private fun data(frame: ByteArray): WireData = WireData.newBuilder().setFrame(ByteString.copyFrom(frame)).build()
 
-    private fun errorFrame(code: String, message: String, problems: List<String> = emptyList()): ByteArray {
-        val value = JsonObject(
-            buildMap {
-                put("code", JsonPrimitive(code))
-                put("message", JsonPrimitive(message))
-                if (problems.isNotEmpty()) put("details", JsonObject(problems.withIndex().associate { (i, p) -> "problem$i" to JsonPrimitive(p) }))
-            },
-        )
-        return codec.encode(cringle.wire.Error(0u, value))
-    }
+    private fun codecFor(mode: TetherMode): WireCodec = if (mode == TetherMode.BYTES) bytesCodec else typedCodec
 
     // ---- sending ----
 
     private suspend fun connect(sender: RemoteSender): RemoteCall {
         val remote = sender.remote
+        val codec = codecFor(sender.mode)
         val where = "${remote.address} (key ${remote.fingerprint})"
         val headers = Metadata().apply {
             put(FABRIC_KEY, remote.fabric)
@@ -258,7 +257,20 @@ public class RemoteTetherDriver(
                         ready.complete(Unit)
                     } else {
                         for (frame in decoder.feed(chunk.frame.toByteArray())) {
-                            if (frame is cringle.wire.Error) answer(sender, where, frame, ready)
+                            if (!ready.isCompleted) {
+                                // the first frame of a call is the refusal
+                                val value = (frame as? cringle.wire.Error)?.value
+                                val text = if (value != null) "refused (${RemoteErrors.code(value)}): ${RemoteErrors.message(value)}" else "refused"
+                                ready.completeExceptionally(TetherWiringException("tether ${sender.tetherId}: cannot connect to $where: $text"))
+                            } else {
+                                try {
+                                    sender.inbound.onFrame(frame)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    // the network reports what it cannot take; nothing is left to do for the call
+                                }
+                            }
                         }
                     }
                 }
@@ -272,7 +284,7 @@ public class RemoteTetherDriver(
             val lost = TetherDeliveryException("tether ${sender.tetherId}: the connection to $where was lost: ${describe(failure)}", failure)
             ended.set(lost)
             outgoing.close(lost)
-            if (!closedByUs.get()) sender.onClosed(lost)
+            if (!closedByUs.get()) sender.inbound.onEnded(lost)
         }
         try {
             withTimeout(connectTimeout.toMillis()) { ready.await() }
@@ -290,9 +302,13 @@ public class RemoteTetherDriver(
             throw TetherWiringException("tether ${sender.tetherId}: cannot connect to $where: ${describe(e)}")
         }
         return object : RemoteCall {
-            override suspend fun send(value: kotlinx.serialization.json.JsonElement) {
+            override suspend fun send(frame: WireFrame) {
                 ended.get()?.let { throw it }
-                val bytes = codec.encode(Message(0u, sender.schemaNamespace, value))
+                val bytes = try {
+                    codec.encode(frame)
+                } catch (e: WireFormatException) {
+                    throw TetherDeliveryException("tether ${sender.tetherId}: a ${frame.frameType} frame cannot be sent: ${e.message}", e)
+                }
                 try {
                     outgoing.send(data(bytes))
                 } catch (e: ClosedSendChannelException) {
@@ -306,21 +322,6 @@ public class RemoteTetherDriver(
                 job.cancel()
             }
         }
-    }
-
-    /** An ERROR frame from the other engine: before the call is accepted it is the refusal, afterwards a value it could not take. */
-    private fun answer(sender: RemoteSender, where: String, frame: cringle.wire.Error, ready: CompletableDeferred<Unit>) {
-        val value = frame.value.jsonObject
-        val code = value["code"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val message = value["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (!ready.isCompleted) {
-            ready.completeExceptionally(TetherWiringException("tether ${sender.tetherId}: cannot connect to $where: refused ($code): $message"))
-            return
-        }
-        val problems = (value["details"] as? JsonObject)?.values?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
-        sender.onError(
-            if (code == CODE_VALIDATION) TetherValidationException(message, problems) else TetherDeliveryException(message),
-        )
     }
 
     private fun describe(e: Throwable?): String = when (e) {
@@ -340,11 +341,6 @@ public class RemoteTetherDriver(
     }
 
     private companion object {
-        const val CODE_UNKNOWN = "unknown-target"
-        const val CODE_VALIDATION = "validation"
-        const val CODE_DELIVERY = "delivery"
-        const val CODE_UNSUPPORTED = "unsupported"
-        const val CODE_FORMAT = "format"
         const val OUTGOING_BUFFER = 8
 
         val FABRIC_KEY: Metadata.Key<String> = Metadata.Key.of("cringle-fabric", Metadata.ASCII_STRING_MARSHALLER)

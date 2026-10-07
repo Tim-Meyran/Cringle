@@ -10,6 +10,6 @@ public enum class TetherMode {
     /** The tether carries typed frames (MESSAGE, REQUEST, RESPONSE, STREAM_OPEN, STREAM_ITEM, STREAM_CLOSE, ERROR). */
     TYPED,
 
-    /** The tether carries raw bytes (BYTES frame only). */
+    /** The tether carries raw bytes (BYTES frames, and the control frames STREAM_OPEN, STREAM_CLOSE and ERROR). */
     BYTES,
 }
