@@ -368,7 +368,7 @@ tasks.register("cringleWindowsRuntime") {
 // --- Install, update and remove a locally built Cringle on Windows (installer/install.ps1 -FromBuild) ---
 //
 // `.\gradlew.bat cringleInstallLocal` builds the distribution (cringleDist) and installs it like a release: program
-// files, the services and the PATH entry; it needs an administrative shell unless -PnoService is given.
+// files, the services and the PATH entry; install.ps1 asks for administrative rights (the Windows dialog) unless -PnoService is given.
 // `cringleUpdateLocal` builds and installs over an existing installation (it fails if there is none; the services that were
 // running are started again). `cringleUninstallLocal` removes it (data stays; -Ppurge removes it too).
 // Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot, withManagement, start, noService, purge.
@@ -398,11 +398,6 @@ fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks
         if (flag("noService")) command += "-NoService"
         command += listOf("-InstallRoot", installRoot)
         option("dataRoot")?.let { command += listOf("-DataRoot", it) }
-        // `net session` only works in an administrative shell; the script checks it too, but its message is easy to miss
-        if (!flag("noService")) {
-            val admin = ProcessBuilder("net", "session").redirectErrorStream(true).start().also { it.inputStream.readAllBytes() }.waitFor() == 0
-            if (!admin) throw GradleException("$taskName needs administrative rights to register the services: start PowerShell with \"Run as administrator\", or add -PnoService to install only the files")
-        }
         logger.lifecycle(command.joinToString(" "))
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
         val output = process.inputStream.bufferedReader().readText()

@@ -39,7 +39,7 @@ It unpacks the archive to `/opt/cringle/<version>` and points the symlink `/opt/
 
 ### Windows (service)
 
-In an administrative PowerShell (5.1 or newer):
+In a PowerShell (5.1 or newer; it asks for administrative rights when needed):
 
 ```
 Invoke-WebRequest https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.ps1 -OutFile install.ps1
@@ -51,13 +51,13 @@ Invoke-WebRequest https://github.com/Tim-Meyran/Cringle/releases/latest/download
 - `-Start`: start the services; without it they start at the next boot.
 - `-Uninstall`: stop and remove the services, the `PATH` entry and `%ProgramFiles%\Cringle`; the data in `%ProgramData%\Cringle` stays. `-Uninstall -Purge` removes it too; `-Purge` alone is an error.
 
-Without administrative rights the script stops with exit code 1 and a message. It unpacks the archive to `%ProgramFiles%\Cringle\<version>`, makes the junction `%ProgramFiles%\Cringle\current` point to it, registers the service `Cringle Daemon` (id `cringle-daemon`) with WinSW (in `%ProgramFiles%\Cringle\service\`; the pinned WinSW is a file of the release and is checked like the archive), uses `%ProgramData%\Cringle` as `CRINGLE_HOME` (the logs of the services are in `logs\` there) and adds `%ProgramFiles%\Cringle\current\bin` to the system `PATH` (open a new shell to see it). The services run as `LocalSystem`.
+In a normal PowerShell the script asks for administrative rights (the Windows confirmation dialog), runs itself again elevated with the same arguments, shows its output and ends with its exit code; `-NoElevate` stops with exit code 1 and a message instead, and declining the dialog ends with exit code 1. It unpacks the archive to `%ProgramFiles%\Cringle\<version>`, makes the junction `%ProgramFiles%\Cringle\current` point to it, registers the service `Cringle Daemon` (id `cringle-daemon`) with WinSW (in `%ProgramFiles%\Cringle\service\`; the pinned WinSW is a file of the release and is checked like the archive), uses `%ProgramData%\Cringle` as `CRINGLE_HOME` (the logs of the services are in `logs\` there) and adds `%ProgramFiles%\Cringle\current\bin` to the system `PATH` (open a new shell to see it). The services run as `LocalSystem`.
 
 Running files cannot be replaced on Windows, so an upgrade stops the services, unpacks the new version next to the old one, switches the junction and starts again the services that were running. Locked files of an old version do not matter: old versions are removed when possible and stay otherwise. Options for tests: `-BaseUrl`, `-InstallRoot`, `-DataRoot` and `-NoService` (only the files: no service, no `PATH` entry, no administrative rights needed). `installer/tests/InstallerTest.ps1` uses them; in an administrative PowerShell (as on the CI runner) it also tests the services and `PATH`, otherwise it reports them as skipped.
 
 ### A locally built Cringle (Windows)
 
-To run what you built yourself instead of a release, use Gradle in an administrative PowerShell (the checkout is the working directory; a JDK 21 has to be installed):
+To run what you built yourself instead of a release, use Gradle in a PowerShell (the checkout is the working directory; a JDK 21 has to be installed). The installer asks for administrative rights itself (the Windows confirmation dialog appears; its output is shown afterwards):
 
 ```
 .\gradlew.bat cringleInstallLocal --console=plain --no-daemon    # build cringleDist and install it
