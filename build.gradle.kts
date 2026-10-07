@@ -464,21 +464,25 @@ tasks.register("cringleMsi") {
     outputs.file(msi)
     doLast {
         val installHint = "dotnet tool install --global wix --version $wixVersion && wix extension add --global WixToolset.UI.wixext/$wixVersion"
-        val found = try {
-            val probe = ProcessBuilder("wix", "--version").redirectErrorStream(true).start()
+        // `wix` on the PATH, otherwise where `dotnet tool install --global` puts it: that folder is on the PATH only in a shell started after the install
+        val exeName = if (System.getProperty("os.name").lowercase().contains("win")) "wix.exe" else "wix"
+        val globalTools = File(System.getProperty("user.home"), ".dotnet/tools/$exeName")
+        fun runs(program: String): Boolean = try {
+            val probe = ProcessBuilder(program, "--version").redirectErrorStream(true).start()
             probe.inputStream.readAllBytes()
             probe.waitFor() == 0
         } catch (e: java.io.IOException) {
             false
         }
-        if (!found) throw GradleException("the program 'wix' (WiX Toolset $wixVersion) was not found on the PATH; install it with: $installHint")
+        val wix = listOf("wix", globalTools.path).firstOrNull { (it == "wix" || File(it).isFile) && runs(it) }
+            ?: throw GradleException("the program 'wix' (WiX Toolset $wixVersion) was not found on the PATH or in ${globalTools.parent}; install it with: $installHint (then open a new shell)")
 
         val productVersion = msiProductVersion()
         val tree = layout.buildDirectory.dir("dist-stage/windows-jre/cringle-$releaseVersion").get().asFile.toPath()
         val out = msiDir.get().asFile.toPath()
         distDir.get().asFile.mkdirs()
         val command = listOf(
-            "wix", "build", "-arch", "x64", "-pdbtype", "none", "-ext", "WixToolset.UI.wixext",
+            wix, "build", "-arch", "x64", "-pdbtype", "none", "-ext", "WixToolset.UI.wixext",
             "-d", "StageDir=$tree", "-d", "MsiDir=$out", "-d", "ProductVersion=$productVersion",
             "-o", msi.get().asFile.path,
             projectDir.toPath().resolve("installer/msi/Package.wxs").toString(), out.resolve("Files.wxs").toString(),
