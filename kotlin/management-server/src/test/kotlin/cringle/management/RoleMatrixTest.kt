@@ -2,6 +2,7 @@
 
 package cringle.management
 
+import cringle.management.test.ManagementTls
 import cringle.contract.UserRole
 import cringle.management.v1.ManagementServiceGrpc
 import cringle.router.users.AuthInterceptor
@@ -57,7 +58,7 @@ class RoleMatrixTest {
         for ((caller, role) in listOf(Caller.VIEWER to UserRole.VIEWER, Caller.OPERATOR to UserRole.OPERATOR, Caller.END_USER to UserRole.END_USER)) {
             tokens[caller] = users.createToken(users.createUser(caller.name.lowercase(), setOf(role)).user.id, "matrix", null).secret
         }
-        val core = ManagementCore(ManagementStore(dir.resolve("state.json")))
+        val core = ManagementTls(dir.resolve("tls")).core(ManagementStore(dir.resolve("state.json")))
         closeables += core
         val server = ManagementServer(core, users = users, recoverOnStart = false).start()
         closeables += server

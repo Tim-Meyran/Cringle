@@ -23,7 +23,9 @@ import cringle.engine.fabric.LocalFabricDeployer
 import cringle.engine.fabric.PluginTrust
 import cringle.common.v1.FabricStateSummary
 import cringle.common.EngineTls
+import cringle.common.TlsHelper
 import cringle.common.TrustStore
+import cringle.repository.RepositoryTls
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.ConfigureResponse
 import cringle.engine.v1.EngineManagementServiceGrpcKt
@@ -56,8 +58,9 @@ import kotlinx.coroutines.withContext
 /**
  * One engine process: its directory, config, identity and management server.
  *
- * Until trust management exists (#13) the management server is plaintext and only allowed in insecure dev mode,
- * where it listens on the loopback interface only.
+ * The management server speaks mutual TLS on the loopback interface (Architecture chapters 5 and 18): it presents the
+ * identity of the engine and accepts only peers in `<engine dir>/trust.json` (the daemon and the management server,
+ * entered by the daemon before the engine starts). The trust store is also the one the router link uses.
  */
 public class Engine private constructor(
     private val dir: Path,
@@ -66,6 +69,8 @@ public class Engine private constructor(
     requestedPort: Int,
     home: Path,
     private val heartbeatInterval: Duration,
+    /** The peers that may call the management API of this engine (and, with [tls], the router the engine trusts). */
+    public val trustStore: TrustStore,
     private val tls: EngineTls?,
     private val enrollmentSecret: ByteArray?,
 ) {
@@ -94,6 +99,7 @@ public class Engine private constructor(
 
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), requestedPort))
+        .sslContext(TlsHelper.serverCredentials(identity.common, trustStore))
         .addService(ManagementService())
         .build()
 
@@ -212,7 +218,7 @@ public class Engine private constructor(
         override suspend fun deployFabric(request: DeployFabricRequest): FabricInfo {
             if (request.hasSource()) {
                 val source = request.source
-                val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() })
+                val fetcher = RepositoryFetcher(source.repositoryAddress, source.token.takeIf { it.isNotEmpty() }, RepositoryTls(identity.common, trustStore))
                 val created = try {
                     cache.ensureForDeploy(config.id, request.fabricId.value, source.artifactsList.map(::artifactOf), fetcher)
                 } catch (e: PackageCacheException) {
@@ -367,7 +373,7 @@ public class Engine private constructor(
 
         /**
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
-         * started yet. With [EngineArgs.insecureDevMode] the router channel is plaintext (`tls` and `enrollmentSecret`
+         * started yet. The management server is always mTLS. With [EngineArgs.insecureDevMode] the router channel is plaintext (`tls` and `enrollmentSecret`
          * are `null`); otherwise the engine opens its trust store and reads the enrollment secret from the environment.
          */
         public fun create(
@@ -389,7 +395,7 @@ public class Engine private constructor(
                 tls = EngineTls(identity.common, trustStore)
                 enrollmentSecret = readEnrollmentSecret(env)
             }
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, tls, enrollmentSecret)
+            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret)
         }
 
         /**

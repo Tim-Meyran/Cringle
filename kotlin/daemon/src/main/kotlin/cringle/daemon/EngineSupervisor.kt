@@ -2,9 +2,14 @@
 
 package cringle.daemon
 
+import cringle.common.ComponentKind
+import cringle.common.Identity
+import cringle.common.TlsHelper
+import cringle.common.TrustStore
 import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.EngineManagementServiceGrpc
-import io.grpc.ManagedChannelBuilder
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
+import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -73,6 +78,18 @@ public class EngineSupervisor(
      * the router over mTLS. Called before [announce]; if it throws, the engine is not started.
      */
     private val writeTrustFile: (engine: String) -> Unit = { _ -> },
+    /**
+     * The TLS credentials of the daemon for the management API of an engine (mutual TLS): its identity, and the trust
+     * store that holds the engines. Evaluated for every connection. The default is the identity and the trust store of the
+     * daemon in [home].
+     */
+    private val engineCredentials: () -> SslContext = {
+        val dir = home.resolve("daemon")
+        TlsHelper.channelCredentials(
+            Identity.loadOrCreate(dir, ComponentKind.DAEMON.commonName("daemon")),
+            TrustStore(dir.resolve("trust.json")),
+        )
+    },
 ) : AutoCloseable {
     private class Managed(val id: String, var name: String) {
         val lock = ReentrantLock()
@@ -134,16 +151,18 @@ public class EngineSupervisor(
             m.lastError = ""
             m.exitCode = 0
             
+            // The trust file of the engine: whom its management API accepts (and the router, if there is one)
+            try {
+                writeTrustFile(m.id)
+            } catch (e: Exception) {
+                m.state = ProcessState.STOPPED
+                m.lastError = "the trust file of engine '$id' could not be written: ${e.message}"
+                throw DaemonException(DaemonError.FAILED_PRECONDITION, m.lastError, e)
+            }
+
             // One-time enrollment secret (docs/trust.md): the router learns its hash before the engine can register
             val enrollmentSecret = if (routerAddress() != null) ByteArray(32).also { secureRandom.nextBytes(it) } else null
             if (enrollmentSecret != null) {
-                try {
-                    writeTrustFile(m.id)
-                } catch (e: Exception) {
-                    m.state = ProcessState.STOPPED
-                    m.lastError = "the trust file of engine '$id' could not be written: ${e.message}"
-                    throw DaemonException(DaemonError.FAILED_PRECONDITION, m.lastError, e)
-                }
                 try {
                     announce(m.id, MessageDigest.getInstance("SHA-256").digest(enrollmentSecret))
                 } catch (e: Exception) {
@@ -250,7 +269,7 @@ public class EngineSupervisor(
 
     private fun configureRouter(m: Managed) {
         val router = routerAddress() ?: return
-        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", m.port).usePlaintext().build() // TLS to the engine: #84
+        val channel = NettyChannelBuilder.forAddress("127.0.0.1", m.port).sslContext(engineCredentials()).build()
         try {
             EngineManagementServiceGrpc.newBlockingStub(channel).withDeadlineAfter(30, TimeUnit.SECONDS)
                 .configure(ConfigureRequest.newBuilder().setRouterAddress(router).build())

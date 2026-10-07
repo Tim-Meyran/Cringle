@@ -37,12 +37,20 @@ class EngineProcessTest {
         return Running(process, line.removePrefix("management-port=").trim().toInt())
     }
 
-    private fun status(r: Running) = ManagedChannelBuilder.forAddress("127.0.0.1", r.port).usePlaintext().build().let { channel ->
+    private val client by lazy { TestClient(home.resolveSibling(home.fileName.toString() + "-client")) }
+
+    private fun status(r: Running) = client.channel(r.port).let { channel ->
         try {
             runBlocking { EngineManagementServiceCoroutineStub(channel).getStatus(GetStatusRequest.getDefaultInstance()) }
         } finally {
             channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
         }
+    }
+
+    /** Starts the engine [id] after it was made to trust the client of this test. */
+    private fun started(id: String, vararg extra: String): Running {
+        client.allow(home, id)
+        return start("--id", id, *extra, "--insecure-dev-mode")
     }
 
     private fun stop(r: Running) {
@@ -52,7 +60,7 @@ class EngineProcessTest {
 
     @Test
     fun engineProcessStartsIsQueriedAndRestartsWithSameIdentity() {
-        val first = start("--id", "proc1", "--name", "Proc", "--insecure-dev-mode")
+        val first = started("proc1", "--name", "Proc")
         val s1 = try {
             status(first)
         } finally {
@@ -66,7 +74,7 @@ class EngineProcessTest {
             assertFalse(Files.exists(home.resolve("engines/proc1/${Engine.PORT_FILE}")))
         }
 
-        val second = start("--id", "proc1", "--insecure-dev-mode")
+        val second = started("proc1")
         val s2 = try {
             status(second)
         } finally {
@@ -78,8 +86,8 @@ class EngineProcessTest {
 
     @Test
     fun twoEngineProcessesOnOneMachineDoNotInterfere() {
-        val a = start("--id", "pa", "--insecure-dev-mode")
-        val b = start("--id", "pb", "--insecure-dev-mode")
+        val a = started("pa")
+        val b = started("pb")
         try {
             assertNotEquals(a.port, b.port)
             val sa = status(a)

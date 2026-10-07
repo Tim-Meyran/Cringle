@@ -2,6 +2,9 @@
 
 package cringle.management
 
+import cringle.common.Identity
+import cringle.common.TlsHelper
+import cringle.common.TrustStore
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.daemon.v1.CreateEngineRequest
@@ -81,12 +84,17 @@ public data class LogResult(val entries: List<LogView>, val problems: List<Strin
  * the Engines and fabrics it created, so that [recover] can bring them back after a restart. The gRPC facade is
  * [ManagementServer]; a REST facade for the WebUI can use this class as well.
  *
- * The Daemon and Engine APIs are unauthenticated plaintext until mTLS is available (issue #13). An Engine management
- * API listens on the loopback interface of its machine, so only Engines on the machine of the ManagementServer are
- * reachable for now.
+ * Every channel to a Daemon, an Engine, the Repository or a Router is mutual TLS with the [identity] and the [trustStore]
+ * of the ManagementServer (`<home>/management`): a peer is only talked to if its key is in the trust store, and it has to
+ * trust the key of the ManagementServer. An Engine management API listens on the loopback interface of its machine, so
+ * only Engines on the machine of the ManagementServer are reachable for now.
  */
 public class ManagementCore(
     private val store: ManagementStore,
+    /** The identity the ManagementServer presents to Daemons, Engines, Repositories and Routers. */
+    public val identity: Identity,
+    /** The peers the ManagementServer talks to: their keys have to be in it. */
+    public val trustStore: TrustStore,
     /** Address of the Repository that is responsible for machines without their own; `null` if there is none. */
     public val defaultRepository: String? = null,
     /** Token the ManagementServer uses at the Repository. */
@@ -111,7 +119,7 @@ public class ManagementCore(
     private fun snapshot(): ManagementData = synchronized(lock) { data }
 
     private fun channel(address: String): ManagedChannel = channels.computeIfAbsent(address) {
-        io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder.forTarget(address).usePlaintext().build()
+        io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder.forTarget(address).sslContext(TlsHelper.channelCredentials(identity, trustStore)).build()
     }
 
     private fun machine(id: String): MachineRecord =
@@ -428,7 +436,7 @@ public class ManagementCore(
 
     private val repositories = ConcurrentHashMap<String, cringle.repository.RepositoryClient>()
 
-    private fun repositoryClient(address: String) = repositories.computeIfAbsent(address) { cringle.repository.RepositoryClient(it, repositoryToken) }
+    private fun repositoryClient(address: String) = repositories.computeIfAbsent(address) { cringle.repository.RepositoryClient(it, repositoryToken, cringle.repository.RepositoryTls(identity, trustStore)) }
 
     private fun repositoryOf(m: MachineRecord): String =
         m.repositoryAddress ?: defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured for machine '${m.id}'")

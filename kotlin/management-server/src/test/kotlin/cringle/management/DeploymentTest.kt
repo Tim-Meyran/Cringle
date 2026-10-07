@@ -2,6 +2,7 @@
 
 package cringle.management
 
+import cringle.management.test.ManagementTls
 import cringle.common.v1.EngineId
 import cringle.contract.BlockDefinition
 import cringle.contract.SchemaRef
@@ -125,11 +126,13 @@ class DeploymentTest {
         // the trust status comes from the repository and is passed to the engines with the deploy command
         repository.setTrust("acme-demo", cringle.repository.PluginTrust.TRUSTED)
 
-        val repositoryServer = RepositoryServer(repository).start()
-        closeables += AutoCloseable { repositoryServer.stop() }
+        val tls = ManagementTls(dir.resolve("tls"))
         val daemon = Daemon(home).start()
         closeables += daemon
-        core = ManagementCore(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}")
+        tls.trust(daemon)
+        val repositoryServer = tls.startRepository(repository)
+        closeables += AutoCloseable { repositoryServer.stop() }
+        core = tls.core(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}")
         val server = ManagementServer(core, recoverOnStart = false).start()
         closeables += server
         val channel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
