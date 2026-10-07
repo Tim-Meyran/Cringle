@@ -71,7 +71,7 @@ public class Engine private constructor(
     private val heartbeatInterval: Duration,
     /** The peers that may call the management API of this engine (and, with [tls], the router the engine trusts). */
     public val trustStore: TrustStore,
-    private val tls: EngineTls?,
+    private val tls: EngineTls,
     private val enrollmentSecret: ByteArray?,
 ) {
     /** The fabrics of this engine. */
@@ -373,8 +373,8 @@ public class Engine private constructor(
 
         /**
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
-         * started yet. The management server is always mTLS. With [EngineArgs.insecureDevMode] the router channel is plaintext (`tls` and `enrollmentSecret`
-         * are `null`); otherwise the engine opens its trust store and reads the enrollment secret from the environment.
+         * started yet. The management API and the router channel are always mTLS: the engine opens its trust store and reads
+         * the enrollment secret from the environment.
          */
         public fun create(
             args: EngineArgs,
@@ -386,15 +386,8 @@ public class Engine private constructor(
             val config = EngineConfig.loadOrCreate(dir, args.id, args.name)
             val identity = EngineIdentity.loadOrCreate(dir, args.id)
             val trustStore = TrustStore(dir.resolve("trust.json"))
-            val tls: EngineTls?
-            val enrollmentSecret: ByteArray?
-            if (args.insecureDevMode) {
-                tls = null
-                enrollmentSecret = null
-            } else {
-                tls = EngineTls(identity.common, trustStore)
-                enrollmentSecret = readEnrollmentSecret(env)
-            }
+            val tls = EngineTls(identity.common, trustStore)
+            val enrollmentSecret = readEnrollmentSecret(env)
             return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret)
         }
 

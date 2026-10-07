@@ -1,6 +1,6 @@
 # Running the Cringle daemon as a service
 
-One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with the installers (Linux with systemd, Windows) and how to set it up by hand. The daemon is a plain JVM process (`cringle.daemon.MainKt`). The daemon API is mutual TLS (see "mTLS and Enrollment"); `--insecure-dev-mode` is accepted and ignored and goes away with #5.
+One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with the installers (Linux with systemd, Windows) and how to set it up by hand. The daemon is a plain JVM process (`cringle.daemon.MainKt`). The daemon API is mutual TLS (see "mTLS and Enrollment"); there is no unencrypted mode.
 
 ## Command line
 
@@ -17,7 +17,7 @@ The daemon starts engines with the same JVM and class path it runs with. When th
 
 ## Installer
 
-The installers set up the daemon as a service from a release (`docs/releasing.md`). Both scripts are attached to every release; download the one for your system, read it if you like, and run it. They download the archive of the release, check its SHA-256 against `SHA256SUMS` and stop before anything is installed if it does not match. A JDK 21 or newer has to be on the machine (the Linux installer only warns if it finds none). Until trust management exists the services run with `--insecure-dev-mode` on the default ports (daemon 7400, management server 7500).
+The installers set up the daemon as a service from a release (`docs/releasing.md`). Both scripts are attached to every release; download the one for your system, read it if you like, and run it. They download the archive of the release, check its SHA-256 against `SHA256SUMS` and stop before anything is installed if it does not match. A JDK 21 or newer has to be on the machine (the Linux installer only warns if it finds none). The services run on the default ports (daemon 7400, management server 7500).
 
 ### Linux (systemd)
 

@@ -107,7 +107,7 @@ class ManagementTlsTest {
         assertNotNull(engine.status, "the management server has to reach the engine over mTLS")
         val enginePort = engine.process.managementPort
         val server = ManagementServer(core, recoverOnStart = false).start().also { closeables += it }
-        val plain = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        val plain = ManagementTls.channelTo(server)
             .also { closeables += AutoCloseable { it.shutdownNow() } }
         assertEquals(
             0,
@@ -131,6 +131,26 @@ class ManagementTlsTest {
             code { RepositoryServiceGrpcKt.RepositoryServiceCoroutineStub(strangerChannel(repository.port, tls.repositoryFingerprint(0))).listPackages(ListPackagesRequest.getDefaultInstance()) },
             "the repository has to refuse a peer that is not in its trust store",
         )
+    }
+
+    /** The management server speaks TLS only: a plaintext client and a client pinned to another key are refused. */
+    @Test
+    fun theManagementServerItselfIsTlsAndPinned(): Unit = runBlocking {
+        val server = ManagementServer(core, recoverOnStart = false).start().also { closeables += it }
+
+        val pinned = ManagementTls.channelTo(server).also { closeables += AutoCloseable { it.shutdownNow() } }
+        ManagementServiceCoroutineStub(pinned).listPackages(ListPackagesRequest.getDefaultInstance())
+
+        val plain = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+            .also { closeables += AutoCloseable { it.shutdownNow() } }
+        assertEquals(Status.Code.UNAVAILABLE, code { ManagementServiceCoroutineStub(plain).listPackages(ListPackagesRequest.getDefaultInstance()) })
+
+        val wrong = TestTls(dir.resolve("wrong-pin"))
+        wrong.identity("w", ComponentKind.MANAGEMENT)
+        wrong.trustStore("w").add(TrustEntry("ab".repeat(32), "not-the-server", TrustKind.SERVER))
+        val wrongPin = NettyChannelBuilder.forAddress("127.0.0.1", server.port).sslContext(wrong.clientSsl("w")).build()
+            .also { closeables += AutoCloseable { it.shutdownNow() } }
+        assertEquals(Status.Code.UNAVAILABLE, code { ManagementServiceCoroutineStub(wrongPin).listPackages(ListPackagesRequest.getDefaultInstance()) })
     }
 
     /** Daemon to engine: the daemon configures the engine over mTLS, which is how the engine learns the router and registers. */

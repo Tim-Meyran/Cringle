@@ -33,7 +33,6 @@ public fun main(args: Array<String>) {
             "--port" -> port = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--port must be 0..65535")
             "--router" -> router = value(option)
             "--combined" -> combined = true
-            "--insecure-dev-mode" -> Unit // accepted and ignored: the daemon API is always mTLS (the switch goes away with #5)
             else -> fail("unknown argument '$option'")
         }
         i += 1

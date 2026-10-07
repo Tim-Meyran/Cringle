@@ -82,12 +82,15 @@ class CliTest {
 
     private val address get() = "127.0.0.1:${server.port}"
 
+    /** The fingerprint of the key of the management server, which the CLI is pinned to. */
+    private val fingerprint get() = server.core.identity.publicKeyFingerprint
+
     private fun cli(
         vararg args: String,
         token: String? = adminToken,
         stdin: String = "",
         server: Boolean = true,
-        insecure: Boolean = true,
+        pinned: Boolean = true,
         extraEnvironment: Map<String, String> = emptyMap(),
     ): Result {
         val out = ByteArrayOutputStream()
@@ -95,10 +98,12 @@ class CliTest {
         val env = buildMap {
             put("CRINGLE_HOME", cliHome.toString())
             if (token != null) put("CRINGLE_TOKEN", token)
+            if (pinned) put("CRINGLE_FINGERPRINT", fingerprint)
             putAll(extraEnvironment)
         }
-        // the test server is not encrypted, which the CLI only accepts when it is told to
-        val list = (if (server) listOf("--server", address) else emptyList()) + (if (insecure) listOf("--insecure-dev-mode") else emptyList()) + args.toList()
+        // a login pins the server too, unless the test wants to see how it asks for the fingerprint
+        val pin = if (pinned && args.firstOrNull() == "login" && "--fingerprint" !in args && "--yes" !in args) listOf("--fingerprint", fingerprint) else emptyList()
+        val list = (if (server) listOf("--server", address) else emptyList()) + args.toList() + pin
         val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(stdin.toByteArray()), env).run(list)
         return Result(code, out.toString().trim(), err.toString().trim())
     }
@@ -180,30 +185,55 @@ class CliTest {
     }
 
     @Test
-    fun withoutTheInsecureSwitchTheCliDoesNotConnect() {
-        val refused = cli("machine", "list", insecure = false)
-        assertEquals(2, refused.code)
-        assertTrue(refused.err.contains("--insecure-dev-mode"), refused.err)
-        assertEquals(0, cli("machine", "list").code, "the switch allows it")
-        assertEquals(0, cli("machine", "list", insecure = false, extraEnvironment = mapOf("CRINGLE_INSECURE_DEV_MODE" to "1")).code, "so does the environment")
-        assertEquals(2, cli("machine", "list", insecure = false, extraEnvironment = mapOf("CRINGLE_INSECURE_DEV_MODE" to "0")).code)
-        // commands that do not connect need no switch
-        assertEquals(0, cli("--help", server = false, insecure = false).code)
-        assertEquals(0, cli("logout", server = false, token = null, insecure = false).code)
+    fun theCliConnectsOnlyPinnedToTheFingerprintOfTheServer() {
+        val noPin = cli("machine", "list", pinned = false)
+        assertEquals(2, noPin.code)
+        assertTrue(noPin.err.contains("fingerprint"), noPin.err)
+        assertEquals(0, cli("machine", "list").code, "with the fingerprint it connects")
+        val wrong = cli("machine", "list", pinned = false, extraEnvironment = mapOf("CRINGLE_FINGERPRINT" to "ab".repeat(32)))
+        assertEquals(1, wrong.code, "a server with another key is not accepted")
+        assertTrue(wrong.err.contains("cannot reach"), wrong.err)
+        val malformed = cli("machine", "list", pinned = false, extraEnvironment = mapOf("CRINGLE_FINGERPRINT" to "not-a-fingerprint"))
+        assertEquals(2, malformed.code)
+        // commands that do not connect need no fingerprint
+        assertEquals(0, cli("--help", server = false, pinned = false).code)
+        assertEquals(0, cli("logout", server = false, token = null, pinned = false).code)
+    }
 
-        // login without the switch does not connect and writes nothing
-        Files.deleteIfExists(cliHome.resolve("cli.json"))
-        val login = cli("login", token = null, stdin = "$adminToken\n", insecure = false)
-        assertEquals(2, login.code)
-        assertFalse(Files.exists(cliHome.resolve("cli.json")))
+    @Test
+    fun loginAsksForTheFingerprintAndStoresNothingWhenItDoesNotMatch() {
+        val file = cliHome.resolve("cli.json")
+        Files.deleteIfExists(file)
 
-        // login with the switch stores it; the stored profile needs no switch any more
-        assertEquals(0, cli("login", token = null, stdin = "$adminToken\n").code)
-        assertTrue(Files.readString(cliHome.resolve("cli.json")).contains("\"insecure\": true"))
-        assertEquals(0, cli("machine", "list", server = false, token = null, insecure = false).code)
-        // logging out removes the token, not the decision
-        assertEquals(0, cli("logout", server = false, token = null, insecure = false).code)
-        assertTrue(Files.readString(cliHome.resolve("cli.json")).contains("\"insecure\": true"))
+        // without --fingerprint and --yes the login shows what the server presents and stops
+        val shown = cli("login", token = null, stdin = "$adminToken\n", pinned = false)
+        assertEquals(2, shown.code)
+        assertTrue(shown.err.contains(fingerprint), "the message has to show the fingerprint of the server:\n${shown.err}")
+        assertFalse(Files.exists(file))
+
+        // another key than the one the operator expects: exit code 2, both values, nothing stored
+        val other = "cd".repeat(32)
+        val mismatch = cli("login", "--fingerprint", other, token = null, stdin = "$adminToken\n", pinned = false)
+        assertEquals(2, mismatch.code)
+        assertTrue(mismatch.err.contains(fingerprint) && mismatch.err.contains(other), mismatch.err)
+        assertFalse(Files.exists(file))
+
+        // a malformed value is a usage error as well
+        assertEquals(2, cli("login", "--fingerprint", "xyz", token = null, stdin = "$adminToken\n", pinned = false).code)
+        assertFalse(Files.exists(file))
+
+        // the right fingerprint stores server, token and fingerprint; the profile alone is enough afterwards
+        assertEquals(0, cli("login", "--fingerprint", fingerprint, token = null, stdin = "$adminToken\n", pinned = false).code)
+        assertTrue(Files.readString(file).contains("\"fingerprint\": \"$fingerprint\""))
+        assertEquals(0, cli("machine", "list", server = false, token = null, pinned = false).code)
+        // logging out removes the token, not the pin
+        assertEquals(0, cli("logout", server = false, token = null, pinned = false).code)
+        assertTrue(Files.readString(file).contains("\"fingerprint\": \"$fingerprint\""))
+
+        // --yes accepts the fingerprint the server shows
+        Files.deleteIfExists(file)
+        assertEquals(0, cli("login", "--yes", token = null, stdin = "$adminToken\n", pinned = false).code)
+        assertTrue(Files.readString(file).contains(fingerprint))
     }
 
     @Test

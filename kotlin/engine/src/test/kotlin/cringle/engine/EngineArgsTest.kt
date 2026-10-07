@@ -14,8 +14,8 @@ class EngineArgsTest {
 
     @Test
     fun parsesAllOptions() {
-        val a = EngineArgs.parse(listOf("--id", "e-1", "--name", "Edge One", "--home", "h", "--management-port", "8123", "--insecure-dev-mode"))
-        assertEquals(EngineArgs("e-1", "Edge One", Paths.get("h"), 8123, true), a)
+        val a = EngineArgs.parse(listOf("--id", "e-1", "--name", "Edge One", "--home", "h", "--management-port", "8123"))
+        assertEquals(EngineArgs("e-1", "Edge One", Paths.get("h"), 8123), a)
     }
 
     @Test
@@ -24,7 +24,6 @@ class EngineArgsTest {
         assertNull(a.name)
         assertNull(a.home)
         assertEquals(0, a.managementPort)
-        assertEquals(false, a.insecureDevMode)
     }
 
     @Test

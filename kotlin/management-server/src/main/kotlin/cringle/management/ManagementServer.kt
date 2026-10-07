@@ -2,6 +2,7 @@
 
 package cringle.management
 
+import cringle.common.TlsHelper
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.management.v1.AddMachineRequest
@@ -70,7 +71,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 /**
- * The gRPC facade of the [ManagementCore]. Without [users] the API is open (insecure dev mode); with [users] every
+ * The gRPC facade of the [ManagementCore]. The server speaks TLS 1.3 with the identity of [core]. Without [users] the API is open to everybody who can connect; with [users] every
  * method needs the permission listed in [REQUIRED_PERMISSIONS]. On [start] the recorded Engines and fabrics are
  * recovered in the background if [recoverOnStart] is set. With [users] it also serves the user management service (`cringle.user.v1.UserService`); [recovery] gives the result.
  */
@@ -90,6 +91,9 @@ public class ManagementServer(
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .maxInboundMessageSize(1024 * 1024)
+        // TLS 1.3 with the identity of the server; a client needs no certificate (the user is authenticated by the token), the
+        // CLI pins the fingerprint of the key. A client that does present a certificate is checked for validity only.
+        .sslContext(TlsHelper.serverCredentials(core.identity, core.trustStore, requireTrustedClients = false))
         .addService(
             service.bindService().let { definition ->
                 if (users == null) definition else ServerInterceptors.intercept(definition, AuthInterceptor(users, REQUIRED_PERMISSIONS, onAuthenticated = onAuthenticated))

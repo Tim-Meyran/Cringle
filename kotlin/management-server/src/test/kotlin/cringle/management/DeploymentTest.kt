@@ -135,7 +135,7 @@ class DeploymentTest {
         core = tls.core(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}")
         val server = ManagementServer(core, recoverOnStart = false).start()
         closeables += server
-        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        val channel = ManagementTls.channelTo(server)
         closeables += AutoCloseable { channel.shutdownNow() }
         s = ManagementServiceCoroutineStub(channel)
         runBlocking {

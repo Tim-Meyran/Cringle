@@ -82,7 +82,7 @@ class BootstrapTokenTest {
         val file = BootstrapTokenFile(tokenFile)
         val core = ManagementTls(dir.resolve("tls")).core(ManagementStore(dir.resolve("state.json")))
         val server = ManagementServer(core, users = manager, recoverOnStart = false, onAuthenticated = file::used).start()
-        val channel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        val channel = ManagementTls.channelTo(server)
         fun whoAmI(token: String?): String = runBlocking {
             var stub = UserServiceCoroutineStub(channel)
             if (token != null) {

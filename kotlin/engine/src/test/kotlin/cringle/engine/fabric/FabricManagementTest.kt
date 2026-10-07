@@ -118,7 +118,7 @@ class FabricManagementTest {
         val m1 = dir.resolve("m1.txt")
         val m2 = dir.resolve("m2.txt")
         installPackages(home, m1, m2)
-        val engine = Engine.create(EngineArgs("e1", null, home, 0, true)).start()
+        val engine = Engine.create(EngineArgs("e1", null, home, 0)).start()
         val channel = TestClient(dir.resolve("client-tls")).channel(engine)
         try {
             runBlocking { body(EngineManagementServiceCoroutineStub(channel), m1, m2) }

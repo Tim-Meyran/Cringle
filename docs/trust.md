@@ -36,7 +36,7 @@ Cringle has no central certificate authority. Trust comes from a manual act (Arc
 
 ## Flows
 
-All three run on a router with TLS (`RouterServer(tls = RouterTls(identity, trustStore))`). Without TLS the router has no trust: `TrustRemoteRouter`, `ListTrust` and `PrepareEngine` answer `FAILED_PRECONDITION` and `AddRemoteRouter` keeps its old behavior (#13 "insecure dev mode", removed in #86).
+All three run on a router with TLS (`RouterServer(tls = RouterTls(identity, trustStore))`). Without TLS the router has no trust: `TrustRemoteRouter`, `ListTrust` and `PrepareEngine` answer `FAILED_PRECONDITION` and `AddRemoteRouter` keeps its old behavior; the daemon, engines and the ManagementServer always run their routers with TLS.
 
 ### Trust a remote router
 
@@ -76,7 +76,7 @@ The engine-router and daemon-router channels use mTLS. The engine and the daemon
 
 ## What is missing
 
-- The CLI and the ManagementServer channel to the CLI use pinned TLS with #6. `--insecure-dev-mode` is removed in #5 (the switch is still accepted by daemon, engine and ManagementServer).
+- The trust commands of the CLI (`cringle trust add/list/revoke`) and the transitive trust of the ManagementServer in engines of another router (#6). `--insecure-dev-mode` no longer exists in any component.
 - Transitive trust of the ManagementServer in engines of another router (#6).
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.

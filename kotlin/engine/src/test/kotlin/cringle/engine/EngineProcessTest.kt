@@ -50,7 +50,7 @@ class EngineProcessTest {
     /** Starts the engine [id] after it was made to trust the client of this test. */
     private fun started(id: String, vararg extra: String): Running {
         client.allow(home, id)
-        return start("--id", id, *extra, "--insecure-dev-mode")
+        return start("--id", id, *extra)
     }
 
     private fun stop(r: Running) {

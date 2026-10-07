@@ -17,7 +17,6 @@ public fun main(args: Array<String>) {
         System.err.println(EngineArgs.USAGE)
         exitProcess(2)
     }
-    System.err.println("WARNING: INSECURE DEV MODE - management API is unauthenticated (loopback only)")
     Runtime.getRuntime().addShutdownHook(Thread({ engine.stop() }, "engine-shutdown"))
     engine.start()
     LoggerFactory.getLogger("cringle.engine").info("engine started on management port {}", engine.managementPort)

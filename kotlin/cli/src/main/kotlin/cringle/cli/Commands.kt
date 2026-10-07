@@ -56,9 +56,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 
 /**
- * What a command can use: the connection (opened on first use) and the profile. [insecure] says whether an unencrypted
- * connection is accepted (option, environment or profile); [insecureOption] is whether the option was given on this
- * command line, which `login` stores in the profile. [warn] prints a warning to the error stream.
+ * What a command can use: the connection (opened on first use, pinned to the fingerprint of the server) and the profile.
+ * [warn] prints a warning to the error stream.
  */
 internal class Env(
     val connection: () -> Connection,
@@ -66,24 +65,17 @@ internal class Env(
     val profileFile: Path,
     val readSecret: () -> String?,
     val save: (Profile) -> Unit,
-    val insecure: Boolean = true,
-    val insecureOption: Boolean = false,
     val warn: (String) -> Unit = {},
     val environment: Map<String, String> = emptyMap(),
 ) {
     val m get() = connection().management
     val users get() = connection().users
-
-    /** Fails with a usage error (exit code 2) unless an unencrypted connection was accepted explicitly. */
-    fun requireInsecure() {
-        if (!insecure) {
-            throw UsageException(
-                "the connection to the server is not encrypted (secure operation with mTLS is not available yet, issue #13); " +
-                    "accept that with --insecure-dev-mode or CRINGLE_INSECURE_DEV_MODE=1, or store it with 'cringle login --insecure-dev-mode'",
-            )
-        }
-    }
 }
+
+/** The message of a command that has to connect and has no fingerprint of the server. */
+internal const val NO_FINGERPRINT: String =
+    "no fingerprint of the server key: the connection is TLS and pinned. Run 'cringle login --server host:port --fingerprint <sha256>' " +
+        "(or with --yes to accept the fingerprint the server shows), or set CRINGLE_FINGERPRINT"
 
 /** One command: its words, arguments, options and what it does. */
 internal class Command(
@@ -214,10 +206,12 @@ private val tagOptions = listOf(
 internal val COMMANDS: List<Command> = listOf(
     // --- connection ---
     Command(
-        listOf("login"), "", "Store server address and user token in the profile; --insecure-dev-mode stores that an unencrypted connection is accepted",
+        listOf("login"), "", "Store server address, user token and the pinned fingerprint of the server key in the profile",
         listOf(
             opt("token-file", "file with the user token", "FILE"),
             opt("token", "user token (ends up in the shell history; prefer --token-file or standard input)", "TOKEN"),
+            opt("fingerprint", "SHA-256 fingerprint of the key of the server (64 hexadecimal characters); the server has to present exactly this key", "SHA256"),
+            flag("yes", "accept the fingerprint that the server shows instead of giving --fingerprint"),
         ),
         needsServer = false,
     ) { env, a ->
@@ -240,9 +234,9 @@ internal val COMMANDS: List<Command> = listOf(
             else -> env.readSecret()?.trim()?.takeIf { it.isNotEmpty() }
                 ?: throw UsageException("no token: use --token-file, or pipe it to standard input")
         }
-        env.requireInsecure()
+        val pinned = pinnedFingerprint(server, a.option("fingerprint"), a.flag("yes"))
         // the server checks the token; a server without user management does not know the call and accepts anything
-        val connection = Connection(server, token)
+        val connection = Connection(server, token, pinned)
         val who = try {
             connection.users.whoAmI(WhoAmIRequest.getDefaultInstance()).user.name
         } catch (e: io.grpc.StatusException) {
@@ -250,11 +244,11 @@ internal val COMMANDS: List<Command> = listOf(
         } finally {
             connection.close()
         }
-        env.save(Profile(server, token, insecure = env.insecureOption || env.profile.insecure))
+        env.save(Profile(server, token, pinned))
         Output.Message(if (who == null) "stored profile for $server (the server does not use logins)" else "logged in to $server as $who", mapOf("server" to server, "user" to who))
     },
     Command(listOf("logout"), "", "Remove the stored token from the profile", needsServer = false) { env, _ ->
-        env.save(Profile(env.profile.server, null, env.profile.insecure))
+        env.save(Profile(env.profile.server, null, env.profile.fingerprint))
         Output.Message("logged out")
     },
     Command(listOf("whoami"), "", "Show the user the token belongs to") { env, _ ->
@@ -558,3 +552,37 @@ internal val COMMANDS: List<Command> = listOf(
         Output.Lines(lines, lines.map { mapOf("line" to it) })
     },
 )
+
+/**
+ * The fingerprint a login pins the server to (Architecture 5.1: no trust on first use without the operator). The server is
+ * asked for the fingerprint of its key first. With [given] it has to be exactly that key, otherwise nothing is stored and
+ * the command stops with exit code 2 and both values; without it the operator has to confirm what the server shows
+ * with [accept] (`--yes`), or the command prints the fingerprint and stops, so that it can be checked first.
+ */
+private fun pinnedFingerprint(server: String, given: String?, accept: Boolean): String {
+    val host = server.substringBeforeLast(':', "")
+    val port = server.substringAfterLast(':', "").toIntOrNull()
+    if (host.isEmpty() || port == null) throw UsageException("the server address '$server' has to be host:port")
+    val actual = try {
+        cringle.common.TlsHelper.probeServerFingerprint(host, port)
+    } catch (e: java.io.IOException) {
+        throw IllegalStateException("cannot reach $server over TLS: ${e.message}")
+    } catch (e: javax.net.ssl.SSLException) {
+        throw IllegalStateException("cannot reach $server over TLS: ${e.message}")
+    }
+    val wanted = given?.trim()?.lowercase()
+    if (wanted != null) {
+        if (!cringle.common.PublicKeyFingerprint.pattern.matches(wanted)) {
+            throw UsageException("--fingerprint is not a SHA-256 fingerprint (64 hexadecimal characters): '$given'")
+        }
+        if (wanted != actual) throw UsageException("the server at $server presents the key fingerprint $actual, not the expected $wanted; nothing was stored")
+        return actual
+    }
+    if (!accept) {
+        throw UsageException(
+            "the server at $server presents the key fingerprint $actual; check it with the operator of the server and run again " +
+                "with --fingerprint $actual (or --yes to accept it); nothing was stored",
+        )
+    }
+    return actual
+}

@@ -62,7 +62,7 @@ class RoleMatrixTest {
         closeables += core
         val server = ManagementServer(core, users = users, recoverOnStart = false).start()
         closeables += server
-        channel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        channel = ManagementTls.channelTo(server)
         closeables += AutoCloseable { channel.shutdownNow() }
     }
 

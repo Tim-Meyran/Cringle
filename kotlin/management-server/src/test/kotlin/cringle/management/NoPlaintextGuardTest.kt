@@ -2,6 +2,7 @@
 
 package cringle.management
 
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -25,6 +26,8 @@ class NoPlaintextGuardTest {
         "kotlin/daemon/src/main/kotlin/cringle/daemon/EngineSupervisor.kt",
         "kotlin/engine/src/main/kotlin/cringle/engine/Engine.kt",
         "kotlin/engine/src/main/kotlin/cringle/engine/RepositoryFetcher.kt",
+        "kotlin/engine/src/main/kotlin/cringle/engine/RegistryLink.kt",
+        "kotlin/cli/src/main/kotlin/cringle/cli/Connection.kt",
     )
 
     private fun root(): Path {
@@ -46,6 +49,28 @@ class NoPlaintextGuardTest {
             assertTrue(Files.isRegularFile(path), "the guarded file $file does not exist any more: update the guard")
             assertFalse(callsUsePlaintext(Files.readString(path)), "$file calls usePlaintext(): every channel of this class has to be mutual TLS")
         }
+    }
+
+    /** The switch is gone from every start script, installer and main source: no component knows an unencrypted mode. */
+    @Test
+    fun noComponentOrInstallerKnowsTheInsecureSwitchAnyMore() {
+        val root = root()
+        val places = listOf("kotlin", "installer").map { root.resolve(it) }.filter { Files.isDirectory(it) }
+        val switch = Regex("insecure[-_ ]?dev[-_ ]?mode|INSECURE_DEV_MODE|insecureDevMode", RegexOption.IGNORE_CASE)
+        val extensions = listOf(".kt", ".kts", ".sh", ".ps1")
+        val offenders = places.flatMap { place ->
+            Files.walk(place).use { paths ->
+                paths.filter { Files.isRegularFile(it) }
+                    .filter { path ->
+                        val text = path.toString().replace(File.separatorChar, '/')
+                        "/build/" !in text && "/src/test/" !in text && "/.gradle/" !in text && extensions.any { text.endsWith(it) }
+                    }
+                    .filter { switch.containsMatchIn(Files.readString(it)) }
+                    .map { root.relativize(it).toString() }
+                    .toList()
+            }
+        }
+        assertTrue(offenders.isEmpty(), "the insecure switch is back in: $offenders")
     }
 
     @Test
