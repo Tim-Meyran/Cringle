@@ -18,6 +18,8 @@ dependencies {
     testImplementation(project(":contract"))
     testImplementation(project(":packaging"))
     testImplementation(project(":testkit"))
+    testImplementation(testFixtures(project(":common")))
+    testImplementation(testFixtures(project(":management-server")))
 }
 
 application {

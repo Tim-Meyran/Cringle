@@ -8,5 +8,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.grpc.netty.shaded)
+    testImplementation(testFixtures(project(":common")))
     testImplementation(libs.kotlinx.coroutines.test)
 }
