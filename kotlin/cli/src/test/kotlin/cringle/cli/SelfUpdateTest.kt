@@ -262,6 +262,30 @@ class SelfUpdateTest {
     }
 
     @Test
+    fun theCommandRefusesAnInstallationThatTheMsiInstalled() {
+        install("1.0.0", "1.0.0")
+        val msiHome = Files.createDirectories(temp.resolve("msi-install"))
+        Files.createFile(msiHome.resolve(Distribution.MSI_MARKER))
+        val previous = System.getProperty(Distribution.HOME_PROPERTY)
+        System.setProperty(Distribution.HOME_PROPERTY, msiHome.toString())
+        try {
+            // --install-root does not get around it, and --check is refused as well
+            for (arguments in listOf(listOf("--check"), emptyList(), listOf("--check", "--install-root", installRoot.toString()))) {
+                val out = ByteArrayOutputStream()
+                val err = ByteArrayOutputStream()
+                val code = Cli(PrintStream(out, true), PrintStream(err, true), ByteArrayInputStream(ByteArray(0)), emptyMap())
+                    .run(listOf("self-update") + arguments)
+                assertEquals(2, code, "$arguments: ${err}")
+                assertTrue(err.toString().contains("this Cringle was installed with the MSI: install a newer MSI to update it"), err.toString())
+                assertEquals("", out.toString().trim(), "nothing on standard output")
+            }
+            assertEquals("1.0.0", currentTarget(), "the other installation was not touched")
+        } finally {
+            if (previous == null) System.clearProperty(Distribution.HOME_PROPERTY) else System.setProperty(Distribution.HOME_PROPERTY, previous)
+        }
+    }
+
+    @Test
     fun theCommandExitsWithOneWhenTheChecksumIsWrong() {
         install("1.0.0", "1.0.0")
         release("1.1.0", manifestSha = "b".repeat(64))

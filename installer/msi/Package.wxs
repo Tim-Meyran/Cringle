@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The Windows installer of Cringle (docs/releasing.md, #156): WiX Toolset v5, 64-bit, per machine.
+  `./gradlew cringleMsi -PreleaseVersion=<v>` builds it. The Gradle task generates Files.wxs (the files of the staged
+  tree of `cringleWindowsRuntime`, component group CringleFiles), License.rtf and the empty file installed-by-msi, and
+  passes StageDir, MsiDir and ProductVersion (MAJOR.MINOR.PATCH of the release) as variables.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="Cringle"
+      Manufacturer="Cringle"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="7BE31096-9D73-4158-BCCB-B1608F71928C"
+      Scope="perMachine"
+      Language="1033">
+
+    <!-- a newer version replaces an older one; a pre-release and its release have the same ProductVersion, so the same version may replace itself -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Cringle is already installed. Remove it first to install an older one." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Tim-Meyran/Cringle" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Cringle" />
+    </StandardDirectory>
+
+    <!-- CRINGLE_HOME of the services (#157) and the data of the programs; it stays when Cringle is removed -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Cringle">
+        <Component Id="DataFolder" Guid="E2F27DBF-FA6D-4CDF-AD7A-717A4F2F2F04" Permanent="yes">
+          <CreateFolder />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <!-- the marker `cringle self-update` looks for: such an installation is updated with a newer MSI -->
+      <Component Id="InstalledByMsi" Guid="4921FF71-F3F4-4368-8AF6-053001CF396F">
+        <File Id="InstalledByMsiMarker" Source="$(var.MsiDir)/installed-by-msi" KeyPath="yes" />
+      </Component>
+      <!-- bin\ on the system PATH: added at the end on install, removed on uninstall -->
+      <Component Id="PathEntry" Guid="AE008AFA-D23B-4194-ADE3-2D1282389BB8">
+        <RegistryValue Root="HKLM" Key="Software\Cringle" Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <Environment Id="CringlePath" Name="PATH" Value="[INSTALLFOLDER]bin" Part="last" Action="set" System="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Core" Title="Cringle" Description="The Cringle programs and a Java runtime." Level="1" AllowAdvertise="no" AllowAbsent="no">
+      <ComponentGroupRef Id="CringleFiles" />
+      <ComponentRef Id="InstalledByMsi" />
+      <ComponentRef Id="PathEntry" />
+      <ComponentRef Id="DataFolder" />
+    </Feature>
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.MsiDir)/License.rtf" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+</Wix>

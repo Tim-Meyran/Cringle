@@ -19,6 +19,9 @@ internal object Distribution {
     /** The system property the start scripts set to the directory of the distribution. */
     const val HOME_PROPERTY: String = "cringle.home"
 
+    /** The empty file that the Windows MSI installs into `cringle.home`: such an installation is updated with a newer MSI, not by `self-update`. */
+    const val MSI_MARKER: String = "installed-by-msi"
+
     /** The version of the distribution in [home], or [LOCAL_VERSION] if there is none or its `VERSION` cannot be read. */
     fun version(home: String? = System.getProperty(HOME_PROPERTY)): String {
         if (home.isNullOrBlank()) return LOCAL_VERSION

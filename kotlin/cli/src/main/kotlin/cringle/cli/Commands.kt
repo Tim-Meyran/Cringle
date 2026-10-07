@@ -602,6 +602,11 @@ internal val COMMANDS: List<Command> = listOf(
         ),
         needsServer = false,
     ) { env, a ->
+        // an MSI installation keeps its files directly in the install folder, without versions and without a `current` link
+        val installedHome = System.getProperty(Distribution.HOME_PROPERTY)?.takeIf { it.isNotBlank() }?.let { Paths.get(it) }
+        if (installedHome != null && Files.exists(installedHome.resolve(Distribution.MSI_MARKER))) {
+            throw UsageException("this Cringle was installed with the MSI: install a newer MSI to update it")
+        }
         val root = a.option("install-root")?.let { Paths.get(it).toAbsolutePath().normalize() }
             ?: System.getProperty(Distribution.HOME_PROPERTY)?.takeIf { it.isNotBlank() }?.let { Paths.get(it).toRealPath().parent }
             ?: throw UsageException("not an installed distribution: cringle.home is not set; use --install-root <dir>")
