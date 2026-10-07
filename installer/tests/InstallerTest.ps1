@@ -160,6 +160,36 @@ try {
     Check 'uninstalling twice with -Purge exits with 0' ($res.Code -eq 0)
     Check 'data removed by -Purge' (-not (Test-Path $r.Data))
 
+    Write-Host '== a local build (-FromBuild)'
+    # a folder like build\dist: cringle-<version>-windows.zip and SHA256SUMS, no v<version> level
+    $build = Join-Path $Releases 'v1.0.0'
+    $r4 = New-Roots
+    $f4 = @('-NoService', '-FromBuild', $build, '-InstallRoot', $r4.Install, '-DataRoot', $r4.Data)
+    $res = Invoke-Installer $f4
+    Check "installing a build exits with 0 and needs no -Version ($($res.Output))" ($res.Code -eq 0)
+    Check 'the version of the build is installed' ((Get-JunctionTarget (Join-Path $r4.Install 'current')) -eq (Join-Path $r4.Install '1.0.0'))
+    Check 'cringle --version of the build' ((& (Join-Path $r4.Install 'current\bin\cringle.bat')) -eq 'cringle 1.0.0')
+    $res = Invoke-Installer $f4
+    Check 'installing the same build again exits with 0' ($res.Code -eq 0)
+    $multi = Join-Path $Work 'multi-build'
+    New-Item -ItemType Directory -Path $multi | Out-Null
+    foreach ($v in '1.0.0', '2.0.0') { Copy-Item (Join-Path $Releases "v$v\cringle-$v-windows.zip") $multi }
+    Set-Content -Path (Join-Path $multi 'SHA256SUMS') -Encoding ASCII -Value (Get-ChildItem $multi -Filter '*.zip' | ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower() + '  ' + $_.Name })
+    $r5 = New-Roots
+    $f5 = @('-NoService', '-FromBuild', $multi, '-InstallRoot', $r5.Install, '-DataRoot', $r5.Data)
+    $res = Invoke-Installer $f5
+    Check 'several versions in the build folder without -Version exit with 1' ($res.Code -eq 1 -and $res.Output -match 'several versions')
+    Check 'and install nothing' (-not (Test-Path $r5.Install))
+    $res = Invoke-Installer (@('-Version', '2.0.0') + $f5)
+    Check 'with -Version one of them is installed' ($res.Code -eq 0 -and (& (Join-Path $r5.Install 'current\bin\cringle.bat')) -eq 'cringle 2.0.0')
+    $r6 = New-Roots
+    $res = Invoke-Installer @('-NoService', '-FromBuild', $bad, '-InstallRoot', $r6.Install, '-DataRoot', $r6.Data)
+    Check 'a build with a wrong checksum exits with 1, names the checksum and installs nothing' ($res.Code -eq 1 -and $res.Output -match 'checksum' -and -not (Test-Path $r6.Install))
+    $res = Invoke-Installer @('-NoService', '-FromBuild', (Join-Path $Work 'no-such-build'), '-InstallRoot', $r6.Install, '-DataRoot', $r6.Data)
+    Check 'a missing build folder exits with 1 and names gradlew cringleDist' ($res.Code -eq 1 -and $res.Output -match 'cringleDist')
+    Check '-FromBuild with -BaseUrl exits with 1' ((Invoke-Installer (@('-BaseUrl', $Releases) + $f4)).Code -eq 1)
+    Check '-Uninstall with -FromBuild exits with 1' ((Invoke-Installer @('-Uninstall', '-NoService', '-FromBuild', $build, '-InstallRoot', $r4.Install, '-DataRoot', $r4.Data)).Code -eq 1)
+
     Write-Host '== arguments'
     $r3 = New-Roots
     $c3 = @('-NoService', '-BaseUrl', $Releases, '-InstallRoot', $r3.Install, '-DataRoot', $r3.Data)

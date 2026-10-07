@@ -364,3 +364,46 @@ tasks.register("cringleWindowsRuntime") {
         )
     }
 }
+
+// --- Install, update and remove a locally built Cringle on Windows (installer/install.ps1 -FromBuild) ---
+//
+// `.\gradlew.bat cringleInstallLocal` builds the distribution (cringleDist) and installs it like a release: program
+// files, the services and the PATH entry; it needs an administrative shell unless -PnoService is given.
+// `cringleUpdateLocal` builds and installs over an existing installation (it fails if there is none; the services that were
+// running are started again). `cringleUninstallLocal` removes it (data stays; -Ppurge removes it too).
+// Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot, withManagement, start, noService, purge.
+fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks.register(taskName) {
+    group = "distribution"
+    description = text
+    if (mode != "uninstall") dependsOn("cringleDist")
+    doLast {
+        if (!System.getProperty("os.name").lowercase().contains("win")) {
+            throw GradleException("$taskName runs the PowerShell installer and works on Windows only; on Linux use `sudo installer/install.sh` (docs/daemon-service.md)")
+        }
+        fun option(name: String): String? = providers.gradleProperty(name).orNull
+        fun flag(name: String): Boolean = providers.gradleProperty(name).isPresent
+        val installRoot = option("installRoot") ?: File(System.getenv("ProgramFiles") ?: "C:\\Program Files", "Cringle").path
+        if (mode == "update" && !File(installRoot, "current").exists()) {
+            throw GradleException("nothing is installed in $installRoot (no 'current' link): install it with `.\\gradlew.bat cringleInstallLocal`")
+        }
+        val command = mutableListOf("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", projectDir.toPath().resolve("installer/install.ps1").toString())
+        if (mode == "uninstall") {
+            command += "-Uninstall"
+            if (flag("purge")) command += "-Purge"
+        } else {
+            command += listOf("-FromBuild", distDir.get().asFile.path, "-Version", releaseVersion)
+            if (flag("withManagement")) command += "-WithManagement"
+            if (flag("start")) command += "-Start"
+        }
+        if (flag("noService")) command += "-NoService"
+        command += listOf("-InstallRoot", installRoot)
+        option("dataRoot")?.let { command += listOf("-DataRoot", it) }
+        logger.lifecycle(command.joinToString(" "))
+        val result = ProcessBuilder(command).inheritIO().start().waitFor()
+        if (result != 0) throw GradleException("install.ps1 ended with exit code $result")
+    }
+}
+
+registerLocalInstaller("cringleInstallLocal", "Builds the distribution and installs it on this Windows machine (installer/install.ps1 -FromBuild).", "install")
+registerLocalInstaller("cringleUpdateLocal", "Builds the distribution and installs it over the existing local installation (fails if there is none).", "update")
+registerLocalInstaller("cringleUninstallLocal", "Removes the Cringle that is installed on this Windows machine (the data stays unless -Ppurge).", "uninstall")
