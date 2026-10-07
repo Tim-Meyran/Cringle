@@ -6,6 +6,9 @@ import cringle.common.TlsHelper
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.management.v1.AddMachineRequest
+import cringle.management.v1.AddTrustedComponentRequest
+import cringle.management.v1.RemoveTrustRequest
+import cringle.management.v1.RemoveTrustResponse
 import cringle.management.v1.CreateEngineRequest
 import cringle.management.v1.DeleteEngineRequest
 import cringle.management.v1.DeleteEngineResponse
@@ -49,6 +52,9 @@ import cringle.router.v1.AddRemoteRouterRequest
 import cringle.router.v1.AddRemoteRouterResponse
 import cringle.router.v1.ListRemoteRoutersRequest
 import cringle.router.v1.ListRemoteRoutersResponse
+import cringle.router.v1.ListTrustRequest
+import cringle.router.v1.ListTrustResponse
+import cringle.router.v1.TrustEntryInfo
 import cringle.router.v1.RemoveRemoteRouterRequest
 import cringle.router.v1.RemoveRemoteRouterResponse
 import io.grpc.Server
@@ -257,6 +263,14 @@ public class ManagementServer(
 
         override suspend fun listRemoteRouters(request: ListRemoteRoutersRequest): ListRemoteRoutersResponse = guard { core.router().listRemoteRouters(request) }
 
+        override suspend fun listTrust(request: ListTrustRequest): ListTrustResponse = guard { ListTrustResponse.newBuilder().addAllEntries(core.listTrust()).build() }
+
+        override suspend fun addTrustedComponent(request: AddTrustedComponentRequest): TrustEntryInfo =
+            guard { core.addTrustedComponent(request.fingerprint, request.name, request.kind, request.address) }
+
+        override suspend fun removeTrust(request: RemoveTrustRequest): RemoveTrustResponse =
+            guard { RemoveTrustResponse.newBuilder().setRemovedEntries(core.removeTrust(request.fingerprint)).build() }
+
         override suspend fun publishPackage(requests: Flow<PublishRequest>): PublishResponse = guard { core.repository().publishPackage(requests) }
 
         override suspend fun listPackages(request: ListPackagesRequest): ListPackagesResponse = guard { core.repository().listPackages(request) }
@@ -310,6 +324,9 @@ public class ManagementServer(
             "AddRemoteRouter" to Permission.ADMINISTER,
             "RemoveRemoteRouter" to Permission.ADMINISTER,
             "ListRemoteRouters" to Permission.READ,
+            "ListTrust" to Permission.READ,
+            "AddTrustedComponent" to Permission.ADMINISTER,
+            "RemoveTrust" to Permission.ADMINISTER,
             "PublishPackage" to Permission.OPERATE,
             "ListPackages" to Permission.READ,
             "ListVersions" to Permission.READ,

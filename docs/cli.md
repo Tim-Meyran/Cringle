@@ -15,9 +15,19 @@ The CLI talks to the ManagementServer only (one address, also for user managemen
 | Engines | `engine create\|start\|stop\|delete\|list\|status\|tag` (roles and labels for placement) |
 | Fabrics, deployment | `fabric list\|status\|start\|stop\|remove`, `deploy <project> [--version range] [--no-start] [--relock]`, `undeploy <project>`, `cache cleanup [machine]`, `recover` |
 | Logs | `logs [machine engine] [--fabric f] [--block b] [--level l] [--since t] [--limit n]` |
-| Routers | `router add\|remove\|list` (trust and revoke follow with mTLS, issue #13) |
+| Routers | `router add\|remove\|list` |
+| Trust | `trust list`, `trust add <router-address> [--fingerprint SHA256 \| --yes]`, `trust add-component <fingerprint> --name NAME [--kind COMPONENT\|SERVER] [--address HOST:PORT]`, `trust revoke <fingerprint>` |
 | Repository | `repo publish\|list\|versions\|download\|trust` |
 | Users | `user create\|list\|delete`, `group create\|list`, `token create\|list\|revoke` |
 | Update | `self-update [--check] [--version v] [--allow-major] [--timeout s] [--install-root dir]` (see `updating.md`) |
 
 **Deploy.** `deploy` uses the lock file `<home>/management/locks/<project>-<version>.lock.json` of the version it picks; `--relock` resolves the dependencies again and overwrites it (for example to get a newer compatible plugin). A damaged lock, or one whose hashes differ from the Repository, fails the command and names `--relock`. `deploy` and `undeploy` of one project run one after the other. A deploy that cannot be placed (no running engine with the required roles and labels) fails with the requirement and leaves the running fabrics of the project untouched; a deploy that fails while starting restores the previous fabrics of the project. Details are in `management-server.md`.
+
+## Trust
+
+Trust is by fingerprint, never by first use (Architecture 5.1). `cringle trust` talks to the ManagementServer, which keeps its own trust store (`<home>/management/trust.json`) and forwards to the router of its machine.
+
+- `cringle trust list` shows every entry with `fingerprint`, `kind` (`ROUTER`, `ENGINE`, `COMPONENT`, `SERVER`), `name`, `address`, `origin` (the fingerprint of the router that vouched for the entry, empty for direct trust) and `addedAt`. It needs the right to read.
+- `cringle trust add <router-address>` asks the router for the fingerprint of its key and compares it with `--fingerprint`, which the operator of the router gave you. A different key ends with exit code 1 and both values, and nothing is added. Without `--fingerprint` the command prints the fingerprint the router presents and stops with exit code 2; `--yes` accepts it. Then the router of the ManagementServer is connected to the remote router, and the engines of that router are trusted through it.
+- `cringle trust add-component <fingerprint> --name NAME` trusts a daemon, a repository or a server by the fingerprint of its key (`--kind COMPONENT`, the default, or `SERVER`; `--address host:port` if it matters).
+- `cringle trust revoke <fingerprint>` removes the trust. For a router the router and every engine that came through it are removed; an engine of another router cannot be removed alone. `add`, `add-component` and `revoke` need the right to administer.

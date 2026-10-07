@@ -3,6 +3,9 @@
 package cringle.management
 
 import cringle.common.Identity
+import cringle.common.PublicKeyFingerprint
+import cringle.common.TrustEntry
+import cringle.common.TrustKind
 import cringle.common.TlsHelper
 import cringle.common.TrustStore
 import cringle.common.v1.EngineId
@@ -29,7 +32,10 @@ import cringle.packaging.LockFile
 import cringle.packaging.PackageFormatException
 import cringle.packaging.VersionRange
 import cringle.router.users.AuthInterceptor
+import cringle.router.v1.ListTrustRequest
 import cringle.router.v1.RegistryServiceGrpcKt.RegistryServiceCoroutineStub
+import cringle.router.v1.RevokeRemoteRouterRequest
+import cringle.router.v1.TrustEntryInfo
 import io.grpc.CallOptions
 import io.grpc.Channel
 import io.grpc.ClientCall
@@ -732,6 +738,84 @@ public class ManagementCore(
         val address = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
         val stub = RepositoryServiceCoroutineStub(channel(address))
         return if (repositoryToken == null) stub else stub.withInterceptors(Bearer(repositoryToken))
+    }
+
+    // --- Trust (Architecture 5.1, 5.3) ---
+
+    private fun trustInfo(e: TrustEntry): TrustEntryInfo = TrustEntryInfo.newBuilder()
+        .setFingerprint(e.fingerprint)
+        .setName(e.name)
+        .setKind(e.kind.name)
+        .setAddress(e.address.orEmpty())
+        .setOrigin(e.origin.orEmpty())
+        .setAddedAt(com.google.protobuf.Timestamp.newBuilder().setSeconds(e.addedAt.epochSecond).setNanos(e.addedAt.nano))
+        .build()
+
+    /** What the Router of this machine trusts; empty without a Router or if it has no TLS (it then has no trust). */
+    private suspend fun routerTrust(): List<TrustEntryInfo> {
+        if (routerAddress == null) return emptyList()
+        return try {
+            router().listTrust(ListTrustRequest.getDefaultInstance()).entriesList
+        } catch (e: StatusException) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Everything that is trusted: the trust store of the ManagementServer and the one of its Router, where the Engines that
+     * came through a remote Router carry that Router as their origin. An entry that both know is listed once.
+     */
+    public suspend fun listTrust(): List<TrustEntryInfo> {
+        val local = trustStore.list().map(::trustInfo)
+        val known = local.map { it.fingerprint }.toSet()
+        return local + routerTrust().filter { it.fingerprint !in known }
+    }
+
+    /** Trusts [fingerprint] as a `COMPONENT` or a `SERVER`; the key is given by the operator, never fetched. */
+    public fun addTrustedComponent(fingerprint: String, name: String, kind: String, address: String): TrustEntryInfo {
+        val text = fingerprint.trim().lowercase()
+        if (!PublicKeyFingerprint.pattern.matches(text)) {
+            throw ManagementException(Status.Code.INVALID_ARGUMENT, "'$fingerprint' is not a SHA-256 fingerprint (64 hexadecimal characters)")
+        }
+        if (name.isBlank()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a name for the entry is required")
+        val trustKind = when (kind.ifEmpty { "COMPONENT" }.uppercase()) {
+            "COMPONENT" -> TrustKind.COMPONENT
+            "SERVER" -> TrustKind.SERVER
+            else -> throw ManagementException(Status.Code.INVALID_ARGUMENT, "the kind of a trusted component is COMPONENT or SERVER, not '$kind'")
+        }
+        if (text == identity.publicKeyFingerprint) throw ManagementException(Status.Code.INVALID_ARGUMENT, "the ManagementServer does not trust its own key")
+        val entry = TrustEntry(text, name.trim(), trustKind, address.takeIf { it.isNotEmpty() })
+        trustStore.add(entry)
+        return trustInfo(entry)
+    }
+
+    /**
+     * Removes the trust in [fingerprint] and returns how many entries are gone. A remote Router is revoked at the Router of
+     * this machine, which drops the Router and the Engines that came through it; an entry of the own trust store is deleted
+     * together with the entries that came through it. An Engine that was trusted through a Router is not removed alone.
+     */
+    public suspend fun removeTrust(fingerprint: String): Int {
+        val text = fingerprint.trim().lowercase()
+        var removed = 0
+        val remoteRouter = routerTrust().firstOrNull { it.fingerprint == text && it.kind == TrustKind.ROUTER.name && it.origin.isEmpty() }
+        if (remoteRouter != null) {
+            removed += try {
+                router().revokeRemoteRouter(RevokeRemoteRouterRequest.newBuilder().setAddress(remoteRouter.address).build()).removedEntries
+            } catch (e: StatusException) {
+                throw ManagementException(e.status.code, "router: ${e.status.description ?: e.status.code.name}")
+            }
+        }
+        val before = trustStore.list().size
+        trustStore.remove(text)
+        removed += before - trustStore.list().size
+        if (removed == 0) {
+            val through = routerTrust().firstOrNull { it.fingerprint == text }
+            throw ManagementException(
+                Status.Code.NOT_FOUND,
+                if (through != null) "'$text' is trusted through the router ${through.origin}: revoke that router" else "'$text' is not trusted",
+            )
+        }
+        return removed
     }
 
     /** The stub of the Router of this machine. */
