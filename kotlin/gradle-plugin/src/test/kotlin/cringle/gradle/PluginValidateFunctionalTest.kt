@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.net.ServerSocket
@@ -28,6 +29,7 @@ import kotlin.io.path.writeText
  * schema that a block lists but that is not in the package. Every finding is on one line as `<path>: <message>`, with
  * the text of the `packaging` library.
  */
+@Tag("integration")
 class PluginValidateFunctionalTest {
 
     @TempDir

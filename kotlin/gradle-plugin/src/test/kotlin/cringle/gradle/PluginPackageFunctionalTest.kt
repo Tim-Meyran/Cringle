@@ -8,6 +8,7 @@ import cringle.packaging.PackageValidator
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -17,6 +18,7 @@ import java.nio.file.Path
  * AC 1: the sample applies `cringle.plugin`, `cringlePackage` succeeds, and what it writes is a plugin package that
  * the runtime reads and accepts.
  */
+@Tag("integration")
 class PluginPackageFunctionalTest {
 
     @TempDir

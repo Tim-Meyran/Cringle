@@ -79,7 +79,9 @@ val cringleTestHome = rootProject.layout.buildDirectory.dir("cringle-test-home")
 // builds are pointed at the cache of this build. The example outside this build resolves the plugin itself from a
 // folder with the layout of Maven Local, which the test passes as -Dmaven.repo.local, so no test ever touches ~/.m2.
 tasks.withType<Test> {
-    dependsOn(rootProject.tasks.named("publishToLocalRepo"), rootProject.tasks.named("publishToTestMavenLocal"))
+    if (name == "integrationTest") {
+        dependsOn(rootProject.tasks.named("publishToLocalRepo"), rootProject.tasks.named("publishToTestMavenLocal"))
+    }
     systemProperty("cringle.localRepo", localRepo.get().asFile.absolutePath)
     systemProperty("cringle.testMavenLocal", testMavenLocal.get().asFile.absolutePath)
     systemProperty("cringle.version", localPublishVersion)

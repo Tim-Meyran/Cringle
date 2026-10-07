@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
 import org.junit.jupiter.api.condition.OS
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir
  * of the machine is unpacked and started; the other one is read and checked without being started, because its start
  * scripts belong to another operating system.
  */
+@Tag("integration")
 class DistributionTest {
 
     @TempDir

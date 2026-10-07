@@ -10,6 +10,7 @@ import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -22,6 +23,7 @@ import java.nio.file.Path
  * manifest lists but the package does not carry. Every finding is on one line as `<path>: <message>`, with the text of
  * the `packaging` library.
  */
+@Tag("integration")
 class ProjectValidateFunctionalTest {
 
     @TempDir
