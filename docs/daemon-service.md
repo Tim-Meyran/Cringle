@@ -1,11 +1,11 @@
 # Running the Cringle daemon as a service
 
-One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with the installers (Linux with systemd, Windows) and how to set it up by hand. The daemon is a plain JVM process (`cringle.daemon.MainKt`); until trust management exists (#13) it must be started with `--insecure-dev-mode` and listens on the loopback interface only.
+One daemon runs per machine and starts at boot (Architecture 4.1). This page shows how to install it with the installers (Linux with systemd, Windows) and how to set it up by hand. The daemon is a plain JVM process (`cringle.daemon.MainKt`). The daemon API is mutual TLS (see "mTLS and Enrollment"); `--insecure-dev-mode` is accepted and ignored and goes away with #5.
 
 ## Command line
 
 ```
-java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined] --insecure-dev-mode
+java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined]
 ```
 
 - `--home`: Cringle home (default `~/.cringle`, or `CRINGLE_HOME`). The engine register is `<home>/daemon/engines.json`, engine process logs are `<home>/daemon/logs/<id>.out.log` and `.err.log`.
@@ -71,7 +71,7 @@ After=network.target
 [Service]
 User=cringle
 Environment=CRINGLE_HOME=/var/lib/cringle
-ExecStart=/opt/cringle/current/bin/cringle-daemon --port 7400 --combined --insecure-dev-mode
+ExecStart=/opt/cringle/current/bin/cringle-daemon --port 7400 --combined
 Restart=on-failure
 RestartSec=5
 # give engines time to stop gracefully
@@ -95,7 +95,7 @@ Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-
   <id>cringle-daemon</id>
   <name>Cringle Daemon</name>
   <executable>%SystemRoot%\System32\cmd.exe</executable>
-  <arguments>/c ""C:\Program Files\Cringle\current\bin\cringle-daemon.bat" --port 7400 --combined --insecure-dev-mode"</arguments>
+  <arguments>/c ""C:\Program Files\Cringle\current\bin\cringle-daemon.bat" --port 7400 --combined"</arguments>
   <env name="CRINGLE_HOME" value="C:\ProgramData\Cringle"/>
   <onfailure action="restart" delay="5 sec"/>
   <stoptimeout>60 sec</stoptimeout>
@@ -109,7 +109,11 @@ cringle-daemon.exe start
 
 ## mTLS and Enrollment
 
-When starting an engine with mTLS (not using `--insecure-dev-mode`), the daemon uses mTLS for the engine-router and daemon-router channels.
+The daemon API, the channel from the daemon to every engine and the engine-router and daemon-router channels use mutual TLS (#7). Nothing is plaintext any more.
+
+- **Daemon API:** the daemon presents its identity and accepts only peers in `<home>/daemon/trust.json` (`COMPONENT`: the ManagementServer, the CLI, a repository). A peer without an entry is refused at the handshake.
+- **Engine identity:** when an engine is created (or loaded from the register after an update) the daemon creates its identity in `<engineDir>/certs` with the subject `CN=engine:<id>` and enters its key as `ENGINE` into the daemon trust store. The daemon calls the engine API with its own identity; the engine accepts it because of the trust file below.
+- **Engine trust file:** before every start the daemon writes `<engineDir>/trust.json` with the daemon, every `COMPONENT` of the daemon trust store and, if there is one, the router. The engine management API accepts only those.
 
 - The daemon owns its own `Identity` (under `<home>/daemon`) and `TrustStore` (under `<home>/daemon/trust.json`).
 - In combined mode, the embedded router runs with mTLS using its own `Identity` (under `<home>/router`) and `TrustStore` (under `<home>/router/trust.json`). Mutual trust is set up automatically at start: the router trusts the daemon (`COMPONENT`) and the daemon trusts the router (`ROUTER`).

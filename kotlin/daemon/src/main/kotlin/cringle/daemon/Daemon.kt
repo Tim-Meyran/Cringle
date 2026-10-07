@@ -12,6 +12,7 @@ import cringle.common.TrustStore
 import cringle.common.v1.EngineId
 import cringle.engine.CringleHome
 import cringle.engine.EngineArgs
+import cringle.engine.EngineIdentity
 import cringle.router.RouterServer
 import cringle.router.RouterTls
 import cringle.router.v1.PrepareEngineRequest
@@ -32,7 +33,10 @@ import kotlinx.coroutines.runBlocking
  * offers this through [cringle.daemon.v1.DaemonServiceGrpcKt]. In combined mode ([router] set) it runs the router of the
  * machine in the same process and points every engine to it (Architecture 4.3); otherwise [routerAddress] is used.
  *
- * The gRPC server is plaintext on the loopback interface until trust management exists (#13).
+ * The gRPC server speaks mutual TLS on the loopback interface: it presents the identity of the daemon and accepts only
+ * peers in the trust store of the daemon (`<home>/daemon/trust.json`, kind `COMPONENT`: the management server, the CLI).
+ * Every engine the daemon creates gets its identity from the daemon and an `ENGINE` entry in that trust store, so the
+ * daemon is the only caller of the engine API that needs no entry from outside.
  */
 public class Daemon(
     private val home: Path,
@@ -46,6 +50,12 @@ public class Daemon(
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
     private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
+
+    /** The fingerprint of the key of the daemon, which the engines and the management server have to trust. */
+    public val identityFingerprint: String get() = daemonIdentity.publicKeyFingerprint
+
+    /** The peers the daemon accepts and the engines it knows. */
+    public val trustStore: TrustStore get() = daemonTrustStore
 
     /** The router that runs inside this process in combined mode, `null` otherwise. */
     public val router: RouterServer? = if (combined) {
@@ -75,10 +85,12 @@ public class Daemon(
         announce = ::announce,
         // writes the engine's trust file before the process starts so it can talk to the router over mTLS
         writeTrustFile = ::writeEngineTrustFile,
+        engineCredentials = { TlsHelper.channelCredentials(daemonIdentity, daemonTrustStore) },
     )
 
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        .sslContext(TlsHelper.serverCredentials(daemonIdentity, daemonTrustStore))
         .addService(DaemonGrpcService(this))
         .build()
 
@@ -86,6 +98,7 @@ public class Daemon(
         register.load().forEach {
             engines[it.id] = it
             supervisor.add(it.id, it.name)
+            trustEngine(it.id)
         }
     }
 
@@ -116,7 +129,17 @@ public class Daemon(
         engines[engineId] = entry
         register.save(engines.values.toList())
         supervisor.add(entry.id, entry.name)
+        trustEngine(entry.id)
         supervisor.get(entry.id)
+    }
+
+    /**
+     * Creates the identity of the engine [id] (in its directory, where the engine process loads it) and trusts its key as
+     * `ENGINE`, so the daemon can call the engine API as soon as the process is up.
+     */
+    private fun trustEngine(id: String) {
+        val identity = EngineIdentity.loadOrCreate(CringleHome.engineDir(home, id), id)
+        daemonTrustStore.add(TrustEntry(identity.publicKeyFingerprint, id, TrustKind.ENGINE))
     }
 
     private fun allocateId(): String {
@@ -158,19 +181,23 @@ public class Daemon(
     }
 
     /**
-     * Writes `<engineDir>/trust.json` with one entry: the router the engine will talk to. The router's fingerprint
-     * is looked up in the daemon's trust store by address; if the router is not trusted, the start fails.
+     * Writes `<engineDir>/trust.json` with the peers the engine accepts: the daemon, every `COMPONENT` of the daemon's
+     * trust store (the management server, the CLI) for the management API, and, if the engine talks to a router, that
+     * router. The router's fingerprint is looked up in the daemon's trust store by address; if the router is not
+     * trusted, the start fails.
      */
     private fun writeEngineTrustFile(engineId: String) {
-        val routerAddr = router?.let { "127.0.0.1:${it.port}" } ?: routerAddress
-            ?: throw DaemonException(DaemonError.FAILED_PRECONDITION, "no router configured")
-        val routerEntry = daemonTrustStore.list().firstOrNull { it.kind == TrustKind.ROUTER && it.address == routerAddr }
-            ?: throw DaemonException(
-                DaemonError.FAILED_PRECONDITION,
-                "router $routerAddr is not trusted; add it to the daemon trust store first",
-            )
-        TrustStore(CringleHome.engineDir(home, engineId).resolve("trust.json"))
-            .add(TrustEntry(routerEntry.fingerprint, routerEntry.name, TrustKind.ROUTER, address = routerAddr))
+        val routerEntry = (router?.let { "127.0.0.1:${it.port}" } ?: routerAddress)?.let { routerAddr ->
+            daemonTrustStore.list().firstOrNull { it.kind == TrustKind.ROUTER && it.address == routerAddr }
+                ?: throw DaemonException(
+                    DaemonError.FAILED_PRECONDITION,
+                    "router $routerAddr is not trusted; add it to the daemon trust store first",
+                )
+        }
+        val store = TrustStore(CringleHome.engineDir(home, engineId).resolve("trust.json"))
+        store.add(TrustEntry(daemonIdentity.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
+        daemonTrustStore.list().filter { it.kind == TrustKind.COMPONENT }.forEach { store.add(it.copy(origin = null)) }
+        routerEntry?.let { store.add(TrustEntry(it.fingerprint, it.name, TrustKind.ROUTER, address = it.address)) }
     }
 
     /** Stops an engine and removes it; also deletes its data directory if [deleteData]. */

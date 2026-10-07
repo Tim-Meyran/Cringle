@@ -3,6 +3,7 @@
 package cringle.management
 
 import com.google.protobuf.ByteString
+import cringle.management.test.ManagementTls
 import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.common.v1.PluginRef
@@ -107,10 +108,12 @@ class ManagementServerTest {
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
-    private fun startDaemon(port: Int = 0, combined: Boolean = false): Daemon = track(Daemon(home, port, combined = combined).start())
+    private val tls by lazy { ManagementTls(dir.resolve("tls")) }
+
+    private fun startDaemon(port: Int = 0, combined: Boolean = false): Daemon = track(Daemon(home, port, combined = combined).start()).also(tls::trust)
 
     private fun startManagement(users: UserManager? = null, repository: String? = null, router: String? = null, token: String? = null, recover: Boolean = false): ManagementServer =
-        track(ManagementServer(ManagementCore(ManagementStore(dir.resolve("state.json")), repository, token, router), users = users, recoverOnStart = recover).start())
+        track(ManagementServer(tls.core(ManagementStore(dir.resolve("state.json")), repository, token, router), users = users, recoverOnStart = recover).start())
 
     private fun stub(server: ManagementServer, token: String? = null): ManagementServiceCoroutineStub {
         val channel: ManagedChannel = ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
@@ -367,9 +370,9 @@ class ManagementServerTest {
 
     @Test
     fun repositoryAndRouterCallsAreProxied(): Unit = runBlocking {
-        val repository = track(AutoCloseable { }).let { RepositoryServer(PackageRepository(dir.resolve("repo"))).start() }
+        val repository = tls.startRepository(PackageRepository(dir.resolve("repo")))
         closeables += AutoCloseable { repository.stop() }
-        val router = RouterServer(dir.resolve("registry.json")).also { it.start() }
+        val router = tls.startRouter(dir.resolve("registry.json"))
         closeables += AutoCloseable { router.stop() }
         val s = stub(startManagement(repository = "127.0.0.1:${repository.port}", router = "127.0.0.1:${router.port}"))
 
@@ -388,8 +391,12 @@ class ManagementServerTest {
         assertEquals("acme-core", downloaded.first().metadata.name)
         assertEquals(bytes.size, downloaded.drop(1).sumOf { it.chunk.size() })
 
-        s.addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress("127.0.0.1:1").build())
-        assertEquals(listOf("127.0.0.1:1"), s.listRemoteRouters(ListRemoteRoutersRequest.getDefaultInstance()).routersList.map { it.address })
+        // a router with mTLS wants the fingerprint of the remote router confirmed (Architecture 5.1)
+        val remote = tls.startRouter(dir.resolve("remote-registry.json"))
+        closeables += AutoCloseable { remote.stop() }
+        val remoteAddress = "127.0.0.1:${remote.port}"
+        s.addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(remoteAddress).setExpectedFingerprint(remote.identity!!.publicKeyFingerprint).build())
+        assertEquals(listOf(remoteAddress), s.listRemoteRouters(ListRemoteRoutersRequest.getDefaultInstance()).routersList.map { it.address })
     }
 
     @Test

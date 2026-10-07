@@ -44,12 +44,15 @@ class DaemonTest {
     private lateinit var home: Path
 
     private lateinit var daemon: Daemon
+
+    private val testClient by lazy { DaemonTestClient(Files.createTempDirectory("cringle-daemon-test-tls")) }
     private lateinit var channel: ManagedChannel
     private lateinit var api: DaemonServiceGrpcKt.DaemonServiceCoroutineStub
 
     private fun startDaemon(combined: Boolean = false) {
         daemon = Daemon(home, combined = combined).start()
-        channel = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+        testClient.trustedBy(daemon)
+        channel = testClient.channel(daemon)
         api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
     }
 
@@ -84,7 +87,7 @@ class DaemonTest {
 
     private fun req(v: String) = EngineRequest.newBuilder().setEngineId(id(v)).build()
 
-    private fun engineStatus(port: Int) = ManagedChannelBuilder.forAddress("127.0.0.1", port).usePlaintext().build().let { ch ->
+    private fun engineStatus(port: Int) = testClient.engineChannel(port).let { ch ->
         try {
             EngineManagementServiceGrpc.newBlockingStub(ch).getStatus(GetStatusRequest.getDefaultInstance())
         } finally {
@@ -222,7 +225,7 @@ class DaemonTest {
     fun combinedModeRegistersStartedEnginesAtTheEmbeddedRouterOverMtls(): Unit = runBlocking {
         stopDaemon()
         startDaemon(combined = true)
-        daemon.supervisor.add("e1", "Combined")
+        daemon.createEngine("e1", "Combined")
         daemon.supervisor.start("e1")
 
         // Wait for the engine to register at the router
@@ -290,10 +293,10 @@ class DaemonTest {
             )
 
             daemon.start()
-            channel = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+            channel = testClient.channel(daemon)
             api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
 
-            daemon.supervisor.add("e1", "E1")
+            daemon.createEngine("e1", "E1")
             daemon.supervisor.start("e1")
 
             // Wait for the engine to register at the router
@@ -325,10 +328,10 @@ class DaemonTest {
 
         // Create a Daemon with routerAddress and combined = false; do NOT add any router entry to the trust store
         daemon = Daemon(home, routerAddress = "127.0.0.1:1", combined = false).start()
-        channel = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+        channel = testClient.channel(daemon)
         api = DaemonServiceGrpcKt.DaemonServiceCoroutineStub(channel)
 
-        daemon.supervisor.add("e1", "E1")
+        daemon.createEngine("e1", "E1")
 
         val exception = assertThrows<DaemonException> {
             daemon.supervisor.start("e1")
@@ -339,5 +342,45 @@ class DaemonTest {
         )
 
         assertEquals(ProcessState.STOPPED, daemon.supervisor.get("e1").state)
+    }
+    private suspend fun statusOf(body: suspend () -> Unit): Status.Code = try {
+        body()
+        Status.Code.OK
+    } catch (e: StatusException) {
+        e.status.code
+    }
+
+    /** #60: the daemon API is mutual TLS; a caller whose key is not in the trust store of the daemon is refused. */
+    @Test
+    fun theDaemonApiRefusesAClientWithoutATrustEntryAndAPlaintextClient(): Unit = runBlocking {
+        val stranger = DaemonTestClient(Files.createTempDirectory("cringle-daemon-test-stranger"))
+        val strangerChannel = stranger.channelWithoutTrustEntry(daemon)
+        try {
+            assertEquals(Status.Code.UNAVAILABLE, statusOf { DaemonServiceGrpcKt.DaemonServiceCoroutineStub(strangerChannel).listEngines(ListEnginesRequest.getDefaultInstance()) })
+        } finally {
+            strangerChannel.shutdownNow()
+        }
+        val plain = ManagedChannelBuilder.forAddress("127.0.0.1", daemon.port).usePlaintext().build()
+        try {
+            assertEquals(Status.Code.UNAVAILABLE, statusOf { DaemonServiceGrpcKt.DaemonServiceCoroutineStub(plain).listEngines(ListEnginesRequest.getDefaultInstance()) })
+        } finally {
+            plain.shutdownNow()
+        }
+    }
+
+    /** #60: the daemon makes the identity of an engine before the process starts, trusts it, and tells the engine whom to accept. */
+    @Test
+    fun theDaemonTrustsTheEngineIdentityAndWritesTheTrustFileOfTheEngine(): Unit = runBlocking {
+        api.createEngine(CreateEngineRequest.newBuilder().setEngineId("t1").build())
+        val engineDir = home.resolve("engines/t1")
+        val identity = Identity.loadOrCreate(engineDir, ComponentKind.ENGINE.commonName("t1"))
+        assertTrue(daemon.trustStore.list().any { it.kind == TrustKind.ENGINE && it.fingerprint == identity.publicKeyFingerprint && it.name == "t1" })
+        assertEquals("CN=engine:t1", identity.certificate.subjectX500Principal.name)
+
+        api.startEngine(req("t1"))
+        val accepted = TrustStore(engineDir.resolve("trust.json")).list().map { it.fingerprint }
+        assertTrue(daemon.identityFingerprint in accepted, "the engine has to accept the daemon")
+        assertTrue(testClient.fingerprint in accepted, "the engine has to accept the COMPONENTs of the daemon trust store")
+        assertEquals("t1", engineStatus(api.getEngine(req("t1")).managementPort).engineId.value)
     }
 }

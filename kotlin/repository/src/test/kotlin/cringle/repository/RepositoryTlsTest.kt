@@ -90,8 +90,14 @@ class RepositoryTlsTest {
     fun aPlaintextClientIsRefusedByATlsServer(): Unit = runBlocking {
         tls.identity("repo", ComponentKind.REPOSITORY)
         val server = RepositoryServer(PackageRepository(dir.resolve("repo")), tls = repositoryTls("repo")).start()
-        RepositoryClient("127.0.0.1:${server.port}").use { c ->
-            assertEquals(Status.Code.UNAVAILABLE, status { c.list() })
+        val plain = io.grpc.ManagedChannelBuilder.forAddress("127.0.0.1", server.port).usePlaintext().build()
+        try {
+            val e = assertThrows<io.grpc.StatusException> {
+                runBlocking { cringle.repository.v1.RepositoryServiceGrpcKt.RepositoryServiceCoroutineStub(plain).listPackages(cringle.repository.v1.ListPackagesRequest.getDefaultInstance()) }
+            }
+            assertEquals(Status.Code.UNAVAILABLE, e.status.code)
+        } finally {
+            plain.shutdownNow()
         }
         server.stop()
     }

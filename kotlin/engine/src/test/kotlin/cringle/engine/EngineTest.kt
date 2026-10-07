@@ -27,7 +27,7 @@ class EngineTest {
     private fun args(id: String, name: String? = null) = EngineArgs(id, name, home, 0, true)
 
     private fun <T> withClient(engine: Engine, body: suspend (EngineManagementServiceCoroutineStub) -> T): T {
-        val channel: ManagedChannel = ManagedChannelBuilder.forAddress("127.0.0.1", engine.managementPort).usePlaintext().build()
+        val channel: ManagedChannel = TestClient(home.resolve("client-tls")).channel(engine)
         try {
             return runBlocking { body(EngineManagementServiceCoroutineStub(channel)) }
         } finally {
@@ -50,6 +50,45 @@ class EngineTest {
         }
     }
 
+    /** #60: the management API is mutual TLS; a caller whose key is not in the trust store of the engine is refused. */
+    @Test
+    fun theManagementApiRefusesAClientWithoutATrustEntry() {
+        val engine = Engine.create(args("e1", "Edge"), emptyMap()).start()
+        try {
+            val stranger = TestClient(home.resolve("stranger-tls"))
+            val channel = stranger.channelWithoutTrustEntry(engine)
+            try {
+                val e = assertThrows<io.grpc.StatusException> {
+                    runBlocking { EngineManagementServiceCoroutineStub(channel).getStatus(GetStatusRequest.getDefaultInstance()) }
+                }
+                assertEquals(io.grpc.Status.Code.UNAVAILABLE, e.status.code)
+            } finally {
+                channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+            }
+        } finally {
+            engine.stop()
+        }
+    }
+
+    /** #60: a plaintext client cannot talk to the management API either. */
+    @Test
+    fun theManagementApiRefusesAPlaintextClient() {
+        val engine = Engine.create(args("e1", "Edge"), emptyMap()).start()
+        try {
+            val channel = ManagedChannelBuilder.forAddress("127.0.0.1", engine.managementPort).usePlaintext().build()
+            try {
+                val e = assertThrows<io.grpc.StatusException> {
+                    runBlocking { EngineManagementServiceCoroutineStub(channel).getStatus(GetStatusRequest.getDefaultInstance()) }
+                }
+                assertEquals(io.grpc.Status.Code.UNAVAILABLE, e.status.code)
+            } finally {
+                channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+            }
+        } finally {
+            engine.stop()
+        }
+    }
+
     @Test
     fun statusReportsIdentityConfigAndCertificate() {
         val engine = Engine.create(args("e1", "Edge")).start()
@@ -59,7 +98,7 @@ class EngineTest {
             assertEquals("Edge", status.name)
             assertEquals(EngineState.ENGINE_STATE_RUNNING, status.state)
             assertEquals(engine.identity.fingerprint, status.certificate.fingerprint)
-            assertEquals("CN=e1", status.certificate.subject)
+            assertEquals("CN=engine:e1", status.certificate.subject)
             assertEquals("", status.routerAddress)
             assertTrue(status.startedAt.seconds > 0)
         } finally {

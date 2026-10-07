@@ -68,7 +68,7 @@ class EngineConfigAndIdentityTest {
     fun certificateIsSelfSignedForTheEngineAndMatchesTheKey() {
         val id = EngineIdentity.loadOrCreate(dir, "e1")
         val cert = id.certificate
-        assertEquals("CN=e1", cert.subjectX500Principal.name)
+        assertEquals("CN=engine:e1", cert.subjectX500Principal.name)
         assertEquals(cert.subjectX500Principal, cert.issuerX500Principal)
         cert.verify(cert.publicKey)
         cert.checkValidity()

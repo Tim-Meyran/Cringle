@@ -2,7 +2,7 @@
 
 The ManagementServer is the central control instance: CLI and WebUI talk only to it (`proto/cringle/management/v1/management.proto`). It keeps the list of known machines (their Daemons), creates and controls Engines through the Daemons, deploys and controls fabrics through the Engine management API, proxies the Repository and the Router, and answers log queries (fan-out to the running Engines).
 
-Start: `management-server --insecure-dev-mode [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] [--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth]` (prints `management-port=N`). Without `--insecure-dev-mode` it refuses to start until mTLS (#13) exists.
+Start: `management-server --insecure-dev-mode [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] [--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth]` (prints `management-port=N`). `--insecure-dev-mode` is still needed because the API of the server itself (the CLI and WebUI channel) is plaintext until #6; it does not touch the channels described under "Channels and trust".
 
 State (`<home>/management/state.json`): machines, Engines it created (with `autostart`, default true) and fabrics it deployed (the complete deploy request and whether the fabric should run). This is what recovery uses. The stored request is the one the caller sent, unchanged: if a caller of `DeployFabric` puts a `source.token` (the Repository token) into it, that token is stored in plain text in `state.json`. `Deploy` never does that, and the token the ManagementServer was started with (`--repository-token`) is added only when a request is sent to an Engine and is not stored.
 
@@ -12,7 +12,22 @@ With `--auth` the API needs user tokens (user management #22, stored in `<home>/
 
 Permissions (user management, #22): `READ` for lists, status, logs and package downloads; `OPERATE` for Engines, fabrics, publishing and `Recover`; `ADMINISTER` for machines, remote routers and plugin trust.
 
-Limits until mTLS (#13): the APIs of Daemons and Engines are plaintext and unauthenticated, and an Engine management API listens on the loopback interface of its machine, so only Engines on the machine of the ManagementServer can be controlled. Placement and download of packages is deployment (#17); `DeployFabric` expects the packages in the Cringle home of the machine.
+An Engine management API listens on the loopback interface of its machine, so only Engines on the machine of the ManagementServer can be controlled. Placement and download of packages is deployment (#17); `DeployFabric` expects the packages in the Cringle home of the machine.
+
+## Channels and trust
+
+Every channel of the ManagementServer to a Daemon, an Engine, the Repository and a Router is mutual TLS (#7): it presents its identity and accepts a peer only if the fingerprint of its key is in its trust store. Identity and trust store are created at the first start in `<home>/management/certs` and `<home>/management/trust.json` (subject `CN=management:management`). The channel to the ManagementServer itself (CLI, WebUI) is plaintext until #6.
+
+Trust is entered by hand, with fingerprints, on both sides of every link (`cringle trust add` comes with #6; until then the entries are written into the trust files):
+
+| Link | The ManagementServer trusts | The peer trusts |
+|---|---|---|
+| to a Daemon | the daemon key (`COMPONENT`) | the ManagementServer key (`COMPONENT` in `<home>/daemon/trust.json`) |
+| to an Engine | the engine key (`ENGINE`; the daemon knows it, it creates the identity of the engine) | the ManagementServer key, which the Daemon copies from its `COMPONENT` entries into `<engineDir>/trust.json` when it starts the engine |
+| to the Repository | the repository key | the ManagementServer key (and every engine key as `ENGINE`, so the engines can download) |
+| to a Router | the router key (`ROUTER`) | the ManagementServer key (`COMPONENT`) |
+
+A peer without an entry is refused at the TLS handshake, before any token or permission is looked at (`ManagementTlsTest`). A peer that is removed from a trust store is refused on its next connection; an open connection may run on for at most 60 seconds (`TlsHelper.SESSION_TIMEOUT_SECONDS`).
 
 ## Deployment (#17)
 
