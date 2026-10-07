@@ -121,6 +121,7 @@ class RoleMatrixTest {
             "RemoveRemoteRouter" to Permission.ADMINISTER, "ListRemoteRouters" to Permission.READ, "PublishPackage" to Permission.OPERATE,
             "ListPackages" to Permission.READ, "ListVersions" to Permission.READ, "GetPackage" to Permission.READ,
             "SetPluginTrust" to Permission.ADMINISTER, "DownloadPackage" to Permission.READ, "Recover" to Permission.OPERATE,
+            "ListTrust" to Permission.READ, "AddTrustedComponent" to Permission.ADMINISTER, "RemoveTrust" to Permission.ADMINISTER,
         ).mapKeys { "cringle.management.v1.ManagementService/" + it.key }
         assertEquals(management, ManagementServer.REQUIRED_PERMISSIONS)
         val users = listOf("CreateUser", "ListUsers", "DeleteUser", "CreateGroup", "ListGroups", "CreateToken", "ListTokens", "RevokeToken")

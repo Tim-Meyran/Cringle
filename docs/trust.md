@@ -76,7 +76,5 @@ The engine-router and daemon-router channels use mTLS. The engine and the daemon
 
 ## What is missing
 
-- The trust commands of the CLI (`cringle trust add/list/revoke`) and the transitive trust of the ManagementServer in engines of another router (#6). `--insecure-dev-mode` no longer exists in any component.
-- Transitive trust of the ManagementServer in engines of another router (#6).
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.

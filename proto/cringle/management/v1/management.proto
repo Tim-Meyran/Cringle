@@ -93,6 +93,18 @@ service ManagementService {
 
   rpc ListRemoteRouters(cringle.router.v1.ListRemoteRoutersRequest) returns (cringle.router.v1.ListRemoteRoutersResponse);
 
+  // --- Trust (Architecture 5.1, 5.3) ---
+
+  // Lists what is trusted: the trust store of the ManagementServer and, if a Router is configured, the one of the Router with
+  // the Engines that are trusted through it (origin = the Router).
+  rpc ListTrust(cringle.router.v1.ListTrustRequest) returns (cringle.router.v1.ListTrustResponse);
+
+  // Trusts a component (a Daemon, a Repository, a server) by the fingerprint of its key. Only the kinds COMPONENT and SERVER.
+  rpc AddTrustedComponent(AddTrustedComponentRequest) returns (cringle.router.v1.TrustEntryInfo);
+
+  // Removes the trust in a key. For a remote Router the Router is revoked at the local Router, which drops its Engines.
+  rpc RemoveTrust(RemoveTrustRequest) returns (RemoveTrustResponse);
+
   // --- Repository (proxy to the responsible Repository) ---
 
   rpc PublishPackage(stream cringle.repository.v1.PublishRequest) returns (cringle.repository.v1.PublishResponse);
@@ -299,4 +311,24 @@ message CleanupCacheResponse {
   repeated string removed = 1;
   // Machines that could not be cleaned, with the reason.
   repeated string problems = 2;
+}
+
+message AddTrustedComponentRequest {
+  // SHA-256 of the public key as 64 lowercase hexadecimal characters.
+  string fingerprint = 1;
+  // A name for the entry; required.
+  string name = 2;
+  // COMPONENT (default) or SERVER.
+  string kind = 3;
+  // Where the component can be reached, if it matters.
+  string address = 4;
+}
+
+message RemoveTrustRequest {
+  string fingerprint = 1;
+}
+
+message RemoveTrustResponse {
+  // Number of entries removed: the key itself and, for a Router, every entry that came through it.
+  int32 removed_entries = 1;
 }

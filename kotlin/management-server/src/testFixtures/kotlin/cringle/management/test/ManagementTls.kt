@@ -90,13 +90,17 @@ public class ManagementTls(private val root: Path) {
         return RepositoryServer(repository, users = users, tls = RepositoryTls(identity, store)).start()
     }
 
-    /** Starts a router over [registryFile] with mutual TLS; it and the management server trust each other. */
-    public fun startRouter(registryFile: Path): RouterServer {
+    /**
+     * Starts a router over [registryFile] with mutual TLS; it trusts the management server. With [trustedByManagement] the
+     * management server trusts the router as well (the router of the management server); a router that is only a remote
+     * router, which an operator adds with `cringle trust add`, is not.
+     */
+    public fun startRouter(registryFile: Path, trustedByManagement: Boolean = true): RouterServer {
         val name = "router-${registryFile.hashCode()}"
         val identity = tls.identity(name, ComponentKind.ROUTER)
         val store = tls.trustStore(name)
         store.add(TrustEntry(this.identity.publicKeyFingerprint, NAME, TrustKind.COMPONENT))
-        trustStore.add(TrustEntry(identity.publicKeyFingerprint, name, TrustKind.ROUTER))
+        if (trustedByManagement) trustStore.add(TrustEntry(identity.publicKeyFingerprint, name, TrustKind.ROUTER))
         return RouterServer(registryFile, tls = RouterTls(identity, store)).also { it.start() }
     }
 

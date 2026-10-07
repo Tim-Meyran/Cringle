@@ -32,7 +32,10 @@ import cringle.repository.v1.PluginTrust
 import cringle.repository.v1.PublishHeader
 import cringle.repository.v1.PublishRequest
 import cringle.repository.v1.SetPluginTrustRequest
+import cringle.management.v1.AddTrustedComponentRequest
+import cringle.management.v1.RemoveTrustRequest
 import cringle.router.v1.AddRemoteRouterRequest
+import cringle.router.v1.ListTrustRequest
 import cringle.router.v1.ListRemoteRoutersRequest
 import cringle.router.v1.RemoveRemoteRouterRequest
 import cringle.user.v1.CreateGroupRequest
@@ -419,6 +422,68 @@ internal val COMMANDS: List<Command> = listOf(
         )
     },
 
+    // --- trust ---
+    Command(listOf("trust", "list"), "", "List what the ManagementServer and its router trust, with kind and origin") { env, _ ->
+        Output.Rows(
+            env.m.listTrust(ListTrustRequest.getDefaultInstance()).entriesList.map {
+                linkedMapOf<String, Any?>(
+                    "fingerprint" to it.fingerprint,
+                    "kind" to it.kind,
+                    "name" to it.name,
+                    "address" to it.address,
+                    "origin" to it.origin,
+                    "addedAt" to it.addedAt.iso(),
+                )
+            },
+            "nothing is trusted",
+        )
+    },
+    Command(
+        listOf("trust", "add"), "<router-address>", "Trust another router by the fingerprint of its key and connect the router of this machine to it",
+        listOf(
+            opt("fingerprint", "SHA-256 fingerprint of the key of the router, as its operator gave it to you", "SHA256"),
+            flag("yes", "accept the fingerprint that the router shows instead of giving --fingerprint"),
+        ),
+        1,
+    ) { env, a ->
+        val address = a.positional[0]
+        val actual = probeFingerprint(address, "router")
+        val given = a.option("fingerprint")?.trim()?.lowercase()
+        if (given != null) {
+            if (!cringle.common.PublicKeyFingerprint.pattern.matches(given)) {
+                throw UsageException("--fingerprint is not a SHA-256 fingerprint (64 hexadecimal characters): '${a.option("fingerprint")}'")
+            }
+            if (given != actual) throw IllegalStateException("the router at $address presents the key fingerprint $actual, not the expected $given; nothing was added")
+        } else if (!a.flag("yes")) {
+            throw UsageException(
+                "the router at $address presents the key fingerprint $actual; check it with the operator of the router and run again " +
+                    "with --fingerprint $actual (or --yes to accept it); nothing was added",
+            )
+        }
+        val r = env.m.addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(address).setExpectedFingerprint(actual).build()).router
+        Output.Detail(linkedMapOf("address" to r.address, "fingerprint" to actual, "cachedEngines" to r.cachedEngines, "lastRefresh" to r.lastRefresh.iso(), "error" to r.lastError))
+    },
+    Command(
+        listOf("trust", "add-component"), "<fingerprint>", "Trust a component (a daemon, a repository, a server) by the fingerprint of its key",
+        listOf(
+            opt("name", "name of the entry (required)", "NAME"),
+            opt("kind", "COMPONENT (default) or SERVER", "KIND"),
+            opt("address", "where the component can be reached (host:port)", "ADDRESS"),
+        ),
+        1,
+    ) { env, a ->
+        val name = a.option("name") ?: throw UsageException("--name is required")
+        val entry = env.m.addTrustedComponent(
+            AddTrustedComponentRequest.newBuilder().setFingerprint(a.positional[0]).setName(name)
+                .setKind(a.option("kind").orEmpty()).setAddress(a.option("address").orEmpty()).build(),
+        )
+        Output.Detail(linkedMapOf("fingerprint" to entry.fingerprint, "kind" to entry.kind, "name" to entry.name, "address" to entry.address))
+    },
+    Command(listOf("trust", "revoke"), "<fingerprint>", "Remove the trust in a key; for a router also the engines that came through it", minArgs = 1) { env, a ->
+        val removed = env.m.removeTrust(RemoveTrustRequest.newBuilder().setFingerprint(a.positional[0]).build()).removedEntries
+        Output.Message("revoked ${a.positional[0]} ($removed ${if (removed == 1) "entry" else "entries"} removed)", mapOf("fingerprint" to a.positional[0], "removed" to removed))
+    },
+
     // --- repository ---
     Command(listOf("repo", "publish"), "<package-file>", "Publish a project or plugin package", minArgs = 1) { env, a ->
         val file = Paths.get(a.positional[0])
@@ -560,16 +625,7 @@ internal val COMMANDS: List<Command> = listOf(
  * with [accept] (`--yes`), or the command prints the fingerprint and stops, so that it can be checked first.
  */
 private fun pinnedFingerprint(server: String, given: String?, accept: Boolean): String {
-    val host = server.substringBeforeLast(':', "")
-    val port = server.substringAfterLast(':', "").toIntOrNull()
-    if (host.isEmpty() || port == null) throw UsageException("the server address '$server' has to be host:port")
-    val actual = try {
-        cringle.common.TlsHelper.probeServerFingerprint(host, port)
-    } catch (e: java.io.IOException) {
-        throw IllegalStateException("cannot reach $server over TLS: ${e.message}")
-    } catch (e: javax.net.ssl.SSLException) {
-        throw IllegalStateException("cannot reach $server over TLS: ${e.message}")
-    }
+    val actual = probeFingerprint(server, "server")
     val wanted = given?.trim()?.lowercase()
     if (wanted != null) {
         if (!cringle.common.PublicKeyFingerprint.pattern.matches(wanted)) {
@@ -585,4 +641,17 @@ private fun pinnedFingerprint(server: String, given: String?, accept: Boolean): 
         )
     }
     return actual
+}
+
+/** The fingerprint of the key that the TLS server at [address] (`host:port`) presents; [what] names it in the messages. */
+private fun probeFingerprint(address: String, what: String): String {
+    val host = address.substringBeforeLast(':', "")
+    val port = address.substringAfterLast(':', "").toIntOrNull()
+    if (host.isEmpty() || port == null) throw UsageException("the $what address '$address' has to be host:port")
+    return try {
+        cringle.common.TlsHelper.probeServerFingerprint(host, port)
+    } catch (e: java.io.IOException) {
+        // an SSLException is an IOException as well
+        throw IllegalStateException("cannot reach the $what $address over TLS: ${e.message}")
+    }
 }
