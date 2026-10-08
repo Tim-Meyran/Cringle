@@ -647,11 +647,14 @@ public class TetherNetwork private constructor(
             fromWire.close(reason)
         }
 
-        /** `STREAM_CLOSE` from the other engine: closing is for both directions. */
+        /**
+         * `STREAM_CLOSE` from the other engine: closing is for both directions. The writing end is closed first, so that a reader that sees the
+         * end of the stream can no longer write (the other order left a moment in which a `send` after the end of `incoming` succeeded and was lost).
+         */
         fun closedByTheOtherEngine() {
             closedByWire = true
-            fromWire.close()
             toWire.close()
+            fromWire.close()
         }
     }
 
