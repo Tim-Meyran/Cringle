@@ -5,13 +5,13 @@ Every program has a Gradle task in the group `cringle`, so that the IDE can run 
 | Task | Program | Default arguments |
 |---|---|---|
 | `runDaemon` | daemon with its own router (`cringle.daemon.MainKt`) | `--port 7400 --combined` |
-| `runManagementServer` | management server (`cringle.management.MainKt`) | `--port 7500 --auth` |
+| `runManagementServer` | management server (`cringle.management.MainKt`) with the WebUI on https://127.0.0.1:8443 (`docs/webui.md`) | `--port 7500 --auth --web-port 8443` |
 | `runEngine` | one engine by itself (`cringle.engine.MainKt`); normally the daemon starts engines | `--id dev-engine` |
 | `runCli` | the `cringle` command line (`cringle.cli.MainKt`) | `--help` |
 
 ```
 ./gradlew runDaemon --console=plain --no-daemon
-./gradlew runManagementServer --args="--port 7501 --auth --machine m1=127.0.0.1:7400" --console=plain --no-daemon
+./gradlew runManagementServer --args="--port 7501 --auth --web-port 8444 --machine m1=127.0.0.1:7400" --console=plain --no-daemon
 ./gradlew runCli --args="login --server 127.0.0.1:7500 --fingerprint <sha256> --token-file token.txt" --console=plain --no-daemon
 ```
 
