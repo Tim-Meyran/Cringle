@@ -88,6 +88,13 @@ public class Daemon(
         engineCredentials = { TlsHelper.channelCredentials(daemonIdentity, daemonTrustStore) },
     )
 
+    /** The LoggingCollector of this machine (#195); it collects for the engines it is switched on for. */
+    internal val collector: LoggingCollector = LoggingCollector(
+        daemonDir,
+        { supervisor.list() },
+        LoggingCollector.overGrpc { TlsHelper.channelCredentials(daemonIdentity, daemonTrustStore) },
+    )
+
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .sslContext(TlsHelper.serverCredentials(daemonIdentity, daemonTrustStore))
@@ -114,6 +121,7 @@ public class Daemon(
             router.tls!!.trustStore.add(TrustEntry(daemonIdentity.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
         }
         server.start()
+        collector.start()
         return this
     }
 
@@ -200,6 +208,9 @@ public class Daemon(
         routerEntry?.let { store.add(TrustEntry(it.fingerprint, it.name, TrustKind.ROUTER, address = it.address)) }
     }
 
+    /** Runs one round of the LoggingCollector now instead of waiting for the next one; returns the number of entries it added. */
+    public fun collectLogsNow(): Int = collector.collectOnce()
+
     /** Stops an engine and removes it; also deletes its data directory if [deleteData]. */
     public fun deleteEngine(id: String, deleteData: Boolean) {
         synchronized(engines) {
@@ -217,6 +228,7 @@ public class Daemon(
 
     /** Stops the gRPC server, the router and all engine processes. */
     override fun close() {
+        collector.close()
         server.shutdown()
         if (!server.awaitTermination(5, TimeUnit.SECONDS)) server.shutdownNow()
         supervisor.close()

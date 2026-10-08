@@ -94,6 +94,10 @@ service ManagementService {
   // Queries the logs of one Engine, or of all running Engines (fan-out).
   rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
 
+  // Switches the LoggingCollector of the machine of an Engine on or off for that Engine. With it on, the entries of the logging driver
+  // are kept on the machine and `QueryLogs` returns them (marked `collected`) while the Engine is stopped or does not answer.
+  rpc SetLogCollection(SetLogCollectionRequest) returns (SetLogCollectionResponse);
+
   // The numbers (CPU, memory, tether throughput, errors) of one running Engine, or of all running Engines (fan-out).
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 
@@ -347,7 +351,16 @@ message ManagedLogEntry {
   string machine_id = 1;
   cringle.common.v1.EngineId engine_id = 2;
   cringle.engine.v1.LogEntry entry = 3;
+  // The entry comes from the collector of the machine, not from the running Engine.
+  bool collected = 4;
 }
+
+message SetLogCollectionRequest {
+  EngineRef engine = 1;
+  bool enabled = 2;
+}
+
+message SetLogCollectionResponse {}
 
 message QueryLogsResponse {
   // Oldest first.

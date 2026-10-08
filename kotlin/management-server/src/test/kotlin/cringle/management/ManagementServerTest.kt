@@ -341,6 +341,38 @@ class ManagementServerTest {
     }
 
     @Test
+    fun collectedLogsAreReadWhileTheEngineIsStoppedAndOnlyWhenTheCollectorIsOn(): Unit = runBlocking {
+        val daemon = startDaemon()
+        val s = stub(startManagement())
+        addMachine(s, daemon)
+        createAndStart(s, "e1")
+        createAndStart(s, "e2")
+        val t0 = Instant.parse("2026-01-01T10:00:00Z")
+        fun log(engine: String, at: Long, text: String) =
+            LoggingService(CringleHome.engineDir(home, engine)).append(LogEntry(t0.plusSeconds(at), "shop", "a", LogLevel.INFO, text))
+        log("e1", 1, "e1 one")
+        log("e2", 2, "e2 one")
+        // the collector is on for e1 only
+        s.setLogCollection(cringle.management.v1.SetLogCollectionRequest.newBuilder().setEngine(engineRef("m1", "e1")).setEnabled(true).build())
+        assertEquals(2, daemon.collectLogsNow() + 1, "one entry of e1 collected")
+        log("e1", 3, "e1 later, not collected yet")
+        s.stopEngine(engineRef("m1", "e1"))
+        s.stopEngine(engineRef("m1", "e2"))
+
+        val kept = s.queryLogs(QueryLogsRequest.newBuilder().setEngine(engineRef("m1", "e1")).build())
+        assertEquals(listOf("e1 one"), kept.entriesList.map { it.entry.message })
+        assertTrue(kept.entriesList.all { it.collected })
+        val all = s.queryLogs(QueryLogsRequest.getDefaultInstance())
+        assertEquals(listOf("e1 one"), all.entriesList.map { it.entry.message })
+        // without the collector a stopped engine can not be asked
+        assertEquals(Status.Code.FAILED_PRECONDITION, code { s.queryLogs(QueryLogsRequest.newBuilder().setEngine(engineRef("m1", "e2")).build()) })
+        // switched off: the kept entries are not offered any more
+        s.setLogCollection(cringle.management.v1.SetLogCollectionRequest.newBuilder().setEngine(engineRef("m1", "e1")).setEnabled(false).build())
+        assertEquals(Status.Code.FAILED_PRECONDITION, code { s.queryLogs(QueryLogsRequest.newBuilder().setEngine(engineRef("m1", "e1")).build()) })
+        assertEquals(Status.Code.NOT_FOUND, code { s.setLogCollection(cringle.management.v1.SetLogCollectionRequest.newBuilder().setEngine(engineRef("m1", "nope")).setEnabled(true).build()) })
+    }
+
+    @Test
     fun metricsAreReadFromOneOrFromAllRunningEngines(): Unit = runBlocking {
         val daemon = startDaemon()
         val s = stub(startManagement())

@@ -341,6 +341,11 @@ internal val COMMANDS: List<Command> = listOf(
     Command(listOf("engine", "list"), "[machine]", "List engines, of one machine or of all", minArgs = 0, maxArgs = 1) { env, a ->
         Output.Rows(env.m.listEngines(ListEnginesRequest.newBuilder().setMachineId(a.positional.firstOrNull().orEmpty()).build()).enginesList.map(::engineRow), "no engines")
     },
+    Command(listOf("engine", "collect"), "<machine> <engine> on|off", "Switch the logging collector of the machine on or off for an engine, so that its log entries are kept when it is stopped", minArgs = 3) { env, a ->
+        val on = when (a.positional[2].lowercase()) { "on" -> true; "off" -> false; else -> throw UsageException("give on or off") }
+        env.m.setLogCollection(cringle.management.v1.SetLogCollectionRequest.newBuilder().setEngine(engineRef(a.positional[0], a.positional[1])).setEnabled(on).build())
+        Output.Message("log collection of ${a.positional[0]}/${a.positional[1]} is ${if (on) "on" else "off"}")
+    },
     Command(listOf("engine", "status"), "<machine> <engine>", "Show one engine with its own status", minArgs = 2) { env, a -> Output.Detail(engineDetail(env.m.getEngine(engineRef(a.positional[0], a.positional[1])))) },
     Command(listOf("engine", "tag"), "<machine> <engine>", "Set the roles and labels of an engine (replaces the old ones)", tagOptions, 2) { env, a ->
         Output.Detail(
@@ -437,10 +442,10 @@ internal val COMMANDS: List<Command> = listOf(
         val entries = r.entriesList.map {
             linkedMapOf<String, Any?>(
                 "time" to it.entry.timestamp.iso(), "level" to it.entry.level.pretty("LOG_LEVEL_"), "machine" to it.machineId, "engine" to it.engineId.value,
-                "fabric" to it.entry.fabric, "block" to it.entry.block, "source" to it.entry.source, "message" to it.entry.message,
+                "fabric" to it.entry.fabric, "block" to it.entry.block, "source" to it.entry.source, "collected" to it.collected, "message" to it.entry.message,
             )
         }
-        val lines = entries.map { "${it["time"]} ${it["level"].toString().uppercase().padEnd(5)} ${it["machine"]}/${it["engine"]} ${it["fabric"]}/${it["block"]}${(it["source"] as String).let { s -> if (s.isEmpty()) "" else " [$s]" }}: ${it["message"]}" } +
+        val lines = entries.map { "${it["time"]} ${it["level"].toString().uppercase().padEnd(5)} ${it["machine"]}/${it["engine"]} ${it["fabric"]}/${it["block"]}${(it["source"] as String).let { s -> if (s.isEmpty()) "" else " [$s]" }}${if (it["collected"] == true) " (collected)" else ""}: ${it["message"]}" } +
             r.problemsList.map { "warning: could not read logs of $it" }
         Output.Lines(lines, entries)
     },

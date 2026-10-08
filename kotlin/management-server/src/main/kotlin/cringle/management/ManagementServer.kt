@@ -288,6 +288,11 @@ public class ManagementServer(
             cringle.management.v1.SetDwhRetentionResponse.getDefaultInstance()
         }
 
+        override suspend fun setLogCollection(request: cringle.management.v1.SetLogCollectionRequest): cringle.management.v1.SetLogCollectionResponse = guard {
+            core.setLogCollection(request.engine.machineId, request.engine.engineId.value, request.enabled)
+            cringle.management.v1.SetLogCollectionResponse.getDefaultInstance()
+        }
+
         override suspend fun getMetrics(request: cringle.management.v1.GetMetricsRequest): cringle.management.v1.GetMetricsResponse = guard {
             val result = core.getMetrics(request.engine.machineId, request.engine.engineId.value)
             cringle.management.v1.GetMetricsResponse.newBuilder()
@@ -306,7 +311,7 @@ public class ManagementServer(
             if (request.hasSince()) engineRequest.since = request.since
             val result = core.queryLogs(request.engine.machineId, request.engine.engineId.value, engineRequest.build())
             QueryLogsResponse.newBuilder()
-                .addAllEntries(result.entries.map { ManagedLogEntry.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setEntry(it.entry).build() })
+                .addAllEntries(result.entries.map { ManagedLogEntry.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setEntry(it.entry).setCollected(it.collected).build() })
                 .addAllProblems(result.problems)
                 .build()
         }
@@ -379,6 +384,7 @@ public class ManagementServer(
             "ListFabrics" to Permission.READ,
             "QueryLogs" to Permission.READ,
             "GetMetrics" to Permission.READ,
+            "SetLogCollection" to Permission.OPERATE,
             "QueryDwh" to Permission.READ,
             "ListDwhPartitions" to Permission.READ,
             "SetRecording" to Permission.OPERATE,
