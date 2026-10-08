@@ -77,7 +77,17 @@ class SharedServiceEndToEndTest : ServiceTestBase() {
             refreshRouters(port1, port2)
             Thread.sleep(500)
         }
-        assertTrue(lines(backupFile).isEmpty(), "the preferred instance gets the messages")
+        // Until the routers know each other the consumer on m2 cannot resolve the preferred instance and rightly falls back to the backup, so the backup may
+        // have seen early messages. Once both consumers reach the preferred instance they have gone back to it: from here on only the preferred instance gets messages.
+        Files.deleteIfExists(backupFile)
+        clear()
+        val settled = System.nanoTime() + 90_000_000_000L
+        fun counts(): Map<String, Int> = if (Files.exists(received)) Files.readAllLines(received).groupingBy { it }.eachCount() else emptyMap()
+        while ((counts()["from-shop"] ?: 0) < 3 || (counts()["from-remote-shop"] ?: 0) < 3) {
+            check(System.nanoTime() < settled) { "the preferred instance did not keep getting both consumers, only ${counts()}\n" + diagnostics() }
+            Thread.sleep(200)
+        }
+        assertTrue(lines(backupFile).isEmpty(), "the preferred instance gets the messages, but the backup got ${lines(backupFile)}")
 
         // the service fails (its fabric is removed): both consumers move to the backup, without being touched
         runBlocking {
