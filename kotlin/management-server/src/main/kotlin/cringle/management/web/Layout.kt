@@ -25,12 +25,12 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
         }
         val csrf = session?.csrfToken
         return html(
-            raw("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"),
+            raw("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\">"),
             // the style of htmx is not injected: the content security policy allows no inline style from scripts
             raw("<meta name=\"htmx-config\" content='{\"includeIndicatorStyles\":false}'>"),
             h("<title>{} - Cringle</title>", title),
-            raw("<link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/vendor/htmx.min.js\" defer></script>"),
-            raw("<script src=\"/static/vendor/alpine.min.js\" defer></script><script src=\"/static/app.js\" defer></script></head>"),
+            raw("<link rel=\"stylesheet\" href=\"/static/vendor/drawflow.min.css\"><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/vendor/htmx.min.js\" defer></script>"),
+            raw("<script src=\"/static/vendor/drawflow.min.js\" defer></script><script src=\"/static/vendor/alpine.min.js\" defer></script><script src=\"/static/app.js\" defer></script></head>"),
             if (csrf != null) h("<body hx-headers='{\"X-CSRF-Token\": \"{}\"}'>", csrf) else raw("<body>"),
             raw("<header><a class=\"brand\" href=\"/\">Cringle</a>"),
             nav,

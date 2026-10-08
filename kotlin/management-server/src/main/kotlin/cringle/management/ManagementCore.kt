@@ -838,6 +838,33 @@ public class ManagementCore(
         return DeployResult(project, version, lockText, deployed)
     }
 
+    /** The plugins of the default repository, each with its highest version (the web editor offers their blocks). */
+    public suspend fun latestPlugins(): List<Pair<String, String>> {
+        val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
+        return try {
+            repo.list(cringle.packaging.PackageKind.PLUGIN).groupBy { it.name }
+                .map { (name, entries) -> name to entries.maxBy { cringle.packaging.Version.parse(it.version) }.version }.sortedBy { it.first }
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "repository: ${e.message}")
+        }
+    }
+
+    /** Downloads and reads the plugin package [name] [version] of the default repository. */
+    public suspend fun readPlugin(name: String, version: String): cringle.packaging.PluginPackage {
+        val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
+        return try {
+            val file = java.nio.file.Files.createTempFile("cringle-plugin", ".cringle")
+            try {
+                repo.download(name, version, file)
+                cringle.packaging.PackageReader.readPlugin(file)
+            } finally {
+                java.nio.file.Files.deleteIfExists(file)
+            }
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "repository: ${e.message}")
+        }
+    }
+
     private suspend fun readProjectPackage(repo: cringle.repository.RepositoryClient, project: String, version: String): cringle.packaging.ProjectPackage = try {
         val entry = repo.get(project, version)
         if (entry.kind != cringle.packaging.PackageKind.PROJECT) throw ManagementException(Status.Code.INVALID_ARGUMENT, "'$project' is a plugin, not a project")
