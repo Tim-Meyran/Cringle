@@ -94,7 +94,8 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     private val entries: List<Entry>
     private val network: TetherNetwork?
     private val wiring: PortWiring
-    private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "fabric-${spec.id}").also { it.isDaemon = true } }
+    @Volatile private var thread: Thread? = null
+    private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "fabric-${spec.id}").also { it.isDaemon = true; thread = it } }
     private val dispatcher = executor.asCoroutineDispatcher()
     private val scope = CoroutineScope(dispatcher + SupervisorJob())
     private val lifecycle = Mutex()
@@ -253,6 +254,15 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     public suspend fun reportCrash(blockId: String, cause: Throwable) {
         val host = hosts.firstOrNull { it.id == blockId } ?: throw IllegalArgumentException("unknown block '$blockId'")
         withContext(dispatcher) { host.crashed(cause) }
+    }
+
+    /** The numbers of this fabric (#187): CPU time of its thread, failures of its blocks and tethers, and the counters of its tethers. */
+    public fun stats(): cringle.engine.metrics.FabricStats {
+        val tethers = network?.stats().orEmpty()
+        val blocks = hosts.map { cringle.engine.metrics.BlockStats(it.id, it.restarts.toLong() + if (it.state == BlockState.FAILED) 1 else 0) }
+        return cringle.engine.metrics.FabricStats(
+            spec.id, cringle.engine.metrics.MetricsCollector.cpuTimeOf(thread), blocks.sumOf { it.errors } + tethers.sumOf { it.errors }, blocks, tethers,
+        )
     }
 
     /** Replaces the instances of the services that the sending tethers call; see [TetherNetwork.updateServiceBindings]. */

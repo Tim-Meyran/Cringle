@@ -200,6 +200,18 @@ class FabricManagementTest {
     }
 
     @Test
+    fun metricsListTheFabricsAndTheirBlocks() = withEngine { stub, _, _ ->
+        stub.deployFabric(deploy("f1", ProtoTrust.PLUGIN_TRUST_TRUSTED))
+        stub.startFabric(fabricRequest("f1"))
+        val metrics = stub.getMetrics(cringle.engine.v1.GetMetricsRequest.getDefaultInstance()).metrics
+        val fabric = metrics.fabricsList.single()
+        assertEquals("f1", fabric.fabricId.value)
+        assertEquals(listOf("m1", "m2"), fabric.blocksList.map { it.blockId }.sorted())
+        assertEquals(0, fabric.errors)
+        assertTrue(fabric.cpuTimeNs == -1L || fabric.cpuTimeNs >= 0)
+    }
+
+    @Test
     fun invalidDeploymentsAreRejectedWithReadableErrors() = withEngine { stub, _, _ ->
         fun failure(request: DeployFabricRequest): StatusException = assertThrows { runBlocking { stub.deployFabric(request) } }
         val noProject = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, project = "ghost"))

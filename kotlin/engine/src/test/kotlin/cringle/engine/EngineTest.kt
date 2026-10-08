@@ -55,6 +55,19 @@ class EngineTest {
         }
     }
 
+    @Test
+    fun getMetricsReturnsTheEngineNumbers() {
+        val engine = Engine.create(args("e1", "Edge"), emptyMap()).start()
+        try {
+            val metrics = withClient(engine) { it.getMetrics(cringle.engine.v1.GetMetricsRequest.getDefaultInstance()) }.metrics
+            assertTrue(metrics.heapUsedBytes > 0 && metrics.heapUsedBytes <= metrics.heapMaxBytes)
+            assertTrue(metrics.threadCount >= 1)
+            assertEquals(0, metrics.fabricsCount)
+        } finally {
+            engine.stop()
+        }
+    }
+
     /** #60: the management API is mutual TLS; a caller whose key is not in the trust store of the engine is refused. */
     @Test
     fun theManagementApiRefusesAClientWithoutATrustEntry() {

@@ -334,6 +334,21 @@ public class Engine private constructor(
             RemoveFabricResponse.getDefaultInstance()
         }
 
+        override suspend fun getMetrics(request: cringle.engine.v1.GetMetricsRequest): cringle.engine.v1.GetMetricsResponse {
+            val e = cringle.engine.metrics.MetricsCollector.engine()
+            val b = cringle.engine.v1.EngineMetrics.newBuilder()
+                .setSampledAt(timestamp(Instant.now())).setProcessCpuLoad(e.processCpuLoad)
+                .setHeapUsedBytes(e.heapUsedBytes).setHeapMaxBytes(e.heapMaxBytes).setThreadCount(e.threadCount)
+            for (f in fabrics.stats()) {
+                b.addFabrics(
+                    cringle.engine.v1.FabricMetrics.newBuilder().setFabricId(FabricId.newBuilder().setValue(f.id)).setCpuTimeNs(f.cpuTimeNanos).setErrors(f.errors)
+                        .addAllBlocks(f.blocks.map { cringle.engine.v1.BlockMetrics.newBuilder().setBlockId(it.id).setErrors(it.errors).build() })
+                        .addAllTethers(f.tethers.map { cringle.engine.v1.TetherMetrics.newBuilder().setTetherId(it.id).setType(it.type.name).setMessages(it.messages).setBytes(it.bytes).setErrors(it.errors).build() }),
+                )
+            }
+            return cringle.engine.v1.GetMetricsResponse.newBuilder().setMetrics(b).build()
+        }
+
         override suspend fun listFabrics(request: ListFabricsRequest): ListFabricsResponse =
             ListFabricsResponse.newBuilder().addAllFabrics(fabrics.list().map { info(it) }).build()
 
