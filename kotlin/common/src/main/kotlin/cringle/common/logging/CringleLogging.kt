@@ -27,6 +27,35 @@ public object CringleLogging {
     private val warnedInvalidLevels = mutableSetOf<String>()
     private val warnedInvalidPropertyLines = mutableSetOf<String>()
 
+    /**
+     * Logging of the command line: only warnings and errors of the libraries (gRPC and Netty log at DEBUG to the standard output
+     * by default, which would be mixed into the output of a command and into `--json`), in the form `message`, on the standard
+     * error. [CRINGLE_LOG_LEVEL_ENV] sets another level.
+     */
+    public fun initCommandLine(env: Map<String, String> = System.getenv()) {
+        val context = LoggerFactory.getILoggerFactory() as LoggerContext
+        context.reset()
+        val encoder = PatternLayoutEncoder().apply {
+            this.context = context
+            this.pattern = "%msg%n"
+            start()
+        }
+        val maskingFilter = SecretMaskingFilter().apply {
+            this.context = context
+            start()
+        }
+        val stderr = ConsoleAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply {
+            this.context = context
+            this.target = "System.err"
+            this.encoder = encoder
+            this.addFilter(maskingFilter)
+            start()
+        }
+        val root = context.getLogger(Logger.ROOT_LOGGER_NAME)
+        root.level = parseLevel(env[CRINGLE_LOG_LEVEL_ENV], fallback = LogbackLevel.WARN)
+        root.addAppender(stderr)
+    }
+
     public fun init(home: Path, component: String, name: String, env: Map<String, String> = System.getenv()) {
         init(home, component, name, env, MAX_FILE_SIZE_BYTES, MAX_HISTORY_DAYS, TOTAL_SIZE_CAP_BYTES)
     }

@@ -117,6 +117,8 @@ public class ManagementCore(
     /** Address of the Router of the ManagementServer machine; `null` if there is none. */
     public val routerAddress: String? = null,
     private val probeTimeoutSeconds: Long = 3,
+    /** Runs before a connection is opened; the local trust (`--trust-local`) enters the keys of the components of the same home here. */
+    private val beforeConnect: (() -> Unit)? = null,
 ) : AutoCloseable {
     /** The folder of the state of the ManagementServer; the web layer keeps its drafts below it. */
     public val dataDirectory: java.nio.file.Path get() = store.directory
@@ -178,7 +180,12 @@ public class ManagementCore(
     public fun listBindings(project: String): List<BindingRecord> =
         snapshot().bindings.filter { project.isBlank() || it.consumerProject == project }.sortedWith(compareBy({ it.consumerProject }, { it.service }))
 
-    private fun channel(address: String): ManagedChannel = channels.computeIfAbsent(address) {
+    private fun channel(address: String): ManagedChannel {
+        beforeConnect?.invoke()
+        return openChannel(address)
+    }
+
+    private fun openChannel(address: String): ManagedChannel = channels.computeIfAbsent(address) {
         io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder.forTarget(address).sslContext(TlsHelper.channelCredentials(identity, trustStore)).build()
     }
 

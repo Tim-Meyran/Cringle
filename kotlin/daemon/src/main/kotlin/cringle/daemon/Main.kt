@@ -2,13 +2,14 @@
 
 package cringle.daemon
 
+import cringle.common.LocalTrust
 import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
 import java.nio.file.Paths
 import kotlin.system.exitProcess
 import org.slf4j.LoggerFactory
 
-private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined]"
+private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined] [--trust-local]"
 
 /** Entry point of the daemon process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -16,6 +17,7 @@ public fun main(args: Array<String>) {
     var port = 0
     var router: String? = null
     var combined = false
+    var trustLocal = false
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -33,13 +35,14 @@ public fun main(args: Array<String>) {
             "--port" -> port = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--port must be 0..65535")
             "--router" -> router = value(option)
             "--combined" -> combined = true
+            "--trust-local" -> trustLocal = true
             else -> fail("unknown argument '$option'")
         }
         i += 1
     }
     if (router != null && combined) fail("--router and --combined exclude each other")
     CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
-    val daemon = Daemon(CringleHome.resolve(home), port, router, combined)
+    val daemon = Daemon(CringleHome.resolve(home), port, router, combined, trustLocal = LocalTrust.enabled(trustLocal))
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))
     daemon.start()
     LoggerFactory.getLogger("cringle.daemon").info("daemon started on port {}", daemon.port)

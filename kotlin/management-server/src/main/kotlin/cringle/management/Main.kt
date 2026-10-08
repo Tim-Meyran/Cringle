@@ -4,6 +4,7 @@ package cringle.management
 
 import cringle.common.ComponentKind
 import cringle.common.Identity
+import cringle.common.LocalTrust
 import cringle.common.TrustStore
 import cringle.common.logging.CringleLogging
 import cringle.engine.CringleHome
@@ -16,7 +17,7 @@ import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>]"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>] [--trust-local]"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -28,6 +29,7 @@ public fun main(args: Array<String>) {
     val machines = ArrayList<Pair<String, String>>()
     var cacheDays: Long? = null
     var auth = false
+    var trustLocal = false
     var webPort: Int? = null
     var webHost = "127.0.0.1"
     var i = 0
@@ -55,6 +57,7 @@ public fun main(args: Array<String>) {
             }
             "--cache-max-unused-days" -> cacheDays = value(option).toLongOrNull()?.takeIf { it >= 0 } ?: fail("--cache-max-unused-days must be a number >= 0")
             "--auth" -> auth = true
+            "--trust-local" -> trustLocal = true
             "--web-port" -> webPort = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--web-port must be 0..65535")
             "--web-host" -> webHost = value(option)
             else -> fail("unknown argument '$option'")
@@ -67,7 +70,9 @@ public fun main(args: Array<String>) {
     val identity = Identity.loadOrCreate(base, ComponentKind.MANAGEMENT.commonName("management"))
     val trustStore = TrustStore(base.resolve("trust.json"))
     val certificateWatcher = cringle.common.CertificateWatcher(identity).start()
-    val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, repository, token, router)
+    // --trust-local: the daemon, its router and the engines of this home are trusted as soon as their key files exist (docs/trust.md)
+    val localSync = if (LocalTrust.enabled(trustLocal)) LocalTrustSync(CringleHome.resolve(home), trustStore).also { it.sync(force = true) } else null
+    val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, repository, token, router, beforeConnect = localSync?.let { sync -> { sync.sync() } })
     val known = kotlinx.coroutines.runBlocking { core.listMachines().map { it.record.id }.toSet() }
     for ((id, address) in machines) {
         if (id !in known) kotlinx.coroutines.runBlocking { core.addMachine(id, address, null, null) }

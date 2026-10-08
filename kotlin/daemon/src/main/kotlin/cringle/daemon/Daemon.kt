@@ -5,6 +5,7 @@ package cringle.daemon
 import com.google.protobuf.ByteString
 import cringle.common.ComponentKind
 import cringle.common.Identity
+import cringle.common.LocalTrust
 import cringle.common.TlsHelper
 import cringle.common.TrustEntry
 import cringle.common.TrustKind
@@ -46,11 +47,23 @@ public class Daemon(
     command: EngineCommand = EngineCommand(),
     startTimeout: java.time.Duration = java.time.Duration.ofSeconds(90),
     stopTimeout: java.time.Duration = java.time.Duration.ofSeconds(30),
+    /**
+     * Trust the management server of the same home (`<home>/management`): its identity is created if it is missing and its key
+     * entered as `COMPONENT`, here and in the router of combined mode, so that no fingerprint has to be copied (`LocalTrust`).
+     */
+    trustLocal: Boolean = false,
 ) : AutoCloseable {
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
     private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
     private val certificateWatchers = arrayListOf(cringle.common.CertificateWatcher(daemonIdentity))
+
+    /** The fingerprint of the management server of this home when [trustLocal] is on, `null` otherwise. */
+    private val localManagement: String? = if (trustLocal) {
+        LocalTrust.ensure(home.resolve("management"), ComponentKind.MANAGEMENT.commonName("management")).also {
+            LocalTrust.trust(daemonTrustStore, it, "management", TrustKind.COMPONENT)
+        }
+    } else null
 
     /** The fingerprint of the key of the daemon, which the engines and the management server have to trust. */
     public val identityFingerprint: String get() = daemonIdentity.publicKeyFingerprint
@@ -122,6 +135,7 @@ public class Daemon(
             val routerAddr = "127.0.0.1:${router.port}"
             daemonTrustStore.add(TrustEntry(router.identity!!.publicKeyFingerprint, "router", TrustKind.ROUTER, address = routerAddr))
             router.tls!!.trustStore.add(TrustEntry(daemonIdentity.publicKeyFingerprint, "daemon", TrustKind.COMPONENT))
+            localManagement?.let { LocalTrust.trust(router.tls!!.trustStore, it, "management", TrustKind.COMPONENT) }
         }
         server.start()
         collector.start()
