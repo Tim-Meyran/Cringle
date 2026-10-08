@@ -47,11 +47,15 @@ public data class FabricRecord(
     override fun hashCode(): Int = listOf(machine, engineId, fabricId, deploy.contentHashCode(), desiredRunning).hashCode()
 }
 
+/** A service dependency of [consumerProject] bound to the fabrics [targets] that provide [service] (#171). */
+public data class BindingRecord(val consumerProject: String, val service: String, val targets: List<String>)
+
 /** Everything the ManagementServer persists. */
 public data class ManagementData(
     val machines: List<MachineRecord> = emptyList(),
     val engines: List<EngineRecord> = emptyList(),
     val fabrics: List<FabricRecord> = emptyList(),
+    val bindings: List<BindingRecord> = emptyList(),
 )
 
 /** Thrown when the state file exists but cannot be read; the server refuses to start then instead of forgetting its machines. */
@@ -89,6 +93,10 @@ public class ManagementStore(private val file: Path) {
                         java.util.Base64.getDecoder().decode(o.text("deploy")), (o["desiredRunning"] as JsonPrimitive).boolean,
                     )
                 },
+                bindings = (root["bindings"] as? JsonArray)?.map {
+                    val o = it as JsonObject
+                    BindingRecord(o.text("consumerProject"), o.text("service"), (o["targets"] as JsonArray).map { t -> (t as JsonPrimitive).content })
+                } ?: emptyList(),
             )
         } catch (e: ManagementStoreException) {
             throw e
@@ -125,6 +133,13 @@ public class ManagementStore(private val file: Path) {
                     put("fabricId", f.fabricId)
                     put("deploy", java.util.Base64.getEncoder().encodeToString(f.deploy))
                     put("desiredRunning", f.desiredRunning)
+                })
+            }
+            putJsonArray("bindings") {
+                for (b in data.bindings) add(buildJsonObject {
+                    put("consumerProject", b.consumerProject)
+                    put("service", b.service)
+                    putJsonArray("targets") { b.targets.forEach { add(JsonPrimitive(it)) } }
                 })
             }
         }

@@ -132,6 +132,12 @@ private fun engineDetail(e: ManagedEngine): Map<String, Any?> = linkedMapOf(
     "lastError" to e.process.lastError,
 )
 
+private fun bindingRow(b: cringle.management.v1.Binding): Map<String, Any?> = linkedMapOf(
+    "project" to b.consumerProject,
+    "service" to b.service,
+    "fabric" to b.targetsList.joinToString(", "),
+)
+
 private fun fabricRow(f: ManagedFabric): Map<String, Any?> = linkedMapOf(
     "machine" to f.machineId,
     "engine" to f.engineId.value,
@@ -349,6 +355,16 @@ internal val COMMANDS: List<Command> = listOf(
         if (a.flag("relock")) b.relock = true
         val r = env.m.deploy(b.build())
         Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "fabrics" to r.fabricsList.map(::fabricRow)))
+    },
+    Command(listOf("bind"), "<project> <service> <fabric>", "Bind a service dependency of a project to the fabric that provides it", minArgs = 3) { env, a ->
+        Output.Detail(bindingRow(env.m.bind(cringle.management.v1.Binding.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).addTargets(a.positional[2]).build())))
+    },
+    Command(listOf("unbind"), "<project> <service>", "Remove the binding of a service dependency", minArgs = 2) { env, a ->
+        env.m.unbind(cringle.management.v1.UnbindRequest.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).build())
+        Output.Message("unbound ${a.positional[1]} of ${a.positional[0]}")
+    },
+    Command(listOf("bindings"), "[project]", "List the bindings of service dependencies, of one project or of all", minArgs = 0, maxArgs = 1) { env, a ->
+        Output.Rows(env.m.listBindings(cringle.management.v1.ListBindingsRequest.newBuilder().setConsumerProject(a.positional.firstOrNull().orEmpty()).build()).bindingsList.map(::bindingRow), "no bindings")
     },
     Command(listOf("undeploy"), "<project>", "Stop and remove all fabrics of a project", minArgs = 1) { env, a ->
         val removed = env.m.undeploy(UndeployRequest.newBuilder().setProject(a.positional[0]).build()).removedList

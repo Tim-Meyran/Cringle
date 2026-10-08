@@ -241,6 +241,22 @@ public class ManagementServer(
             fabricInfo(core.getFabric(request.engine.machineId, request.engine.engineId.value, request.fabricId.value))
         }
 
+        override suspend fun bind(request: cringle.management.v1.Binding): cringle.management.v1.Binding = guard {
+            bindingInfo(core.bind(request.consumerProject, request.service, request.targetsList))
+        }
+
+        override suspend fun unbind(request: cringle.management.v1.UnbindRequest): cringle.management.v1.UnbindResponse = guard {
+            core.unbind(request.consumerProject, request.service)
+            cringle.management.v1.UnbindResponse.getDefaultInstance()
+        }
+
+        override suspend fun listBindings(request: cringle.management.v1.ListBindingsRequest): cringle.management.v1.ListBindingsResponse = guard {
+            cringle.management.v1.ListBindingsResponse.newBuilder().addAllBindings(core.listBindings(request.consumerProject).map(::bindingInfo)).build()
+        }
+
+        private fun bindingInfo(b: BindingRecord): cringle.management.v1.Binding =
+            cringle.management.v1.Binding.newBuilder().setConsumerProject(b.consumerProject).setService(b.service).addAllTargets(b.targets).build()
+
         override suspend fun listFabrics(request: ListFabricsRequest): ListFabricsResponse = guard {
             val e = request.engine
             ListFabricsResponse.newBuilder().addAllFabrics(core.listFabrics(e.machineId, e.engineId.value).map(::fabricInfo)).build()
@@ -313,6 +329,9 @@ public class ManagementServer(
             "SetEngineTags" to Permission.OPERATE,
             "Deploy" to Permission.OPERATE,
             "Undeploy" to Permission.OPERATE,
+            "Bind" to Permission.OPERATE,
+            "Unbind" to Permission.OPERATE,
+            "ListBindings" to Permission.READ,
             "CleanupCache" to Permission.OPERATE,
             "DeployFabric" to Permission.OPERATE,
             "StartFabric" to Permission.OPERATE,
