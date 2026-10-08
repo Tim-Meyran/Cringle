@@ -233,7 +233,7 @@ public class LocalFabricDeployer(
                     blocks["${p.manifest.name}/${definition.name}"] = ResolvedBlock(provider, definition, p.trust)
                 }
             }
-            val paths = FabricPaths(engineDir, request.fabricId)
+            val paths = FabricPaths(engineDir, request.fabricId, dataBaseOf(request))
             val recorder = builtin?.let { cringle.engine.dwh.TetherRecorder(it.dwh, request.fabricId) { message -> paths.fileLogger().log(FabricLogger.Level.WARN, message) } }
             return FabricRuntime(
                 FabricSpec(
@@ -264,6 +264,20 @@ public class LocalFabricDeployer(
             loaders.close()
             throw if (e is FabricException) e else FabricException("cannot load plugins of ${request.blueprint}: ${e.message}", e)
         }
+    }
+
+    /**
+     * `<home>/data/<project>/<blueprint>/<n>`: where the blocks of this instance keep their data, the same for every id and version of the fabric
+     * (`n` is the number at the end of the id, without the color of a Blue-Green update). `null` if the request names no project.
+     */
+    private fun dataBaseOf(request: DeployRequest): java.nio.file.Path? {
+        val project = request.projectName
+        if (project.isEmpty()) return null
+        val instance = Regex("-(\\d+)b?$").find(request.fabricId)?.groupValues?.get(1) ?: "0"
+        val root = home.resolve("data")
+        val path = root.resolve(project).resolve(request.blueprint).resolve(instance).normalize()
+        if (!path.startsWith(root.normalize())) throw FabricException("the data folder of '$project/${request.blueprint}' would leave $root")
+        return path
     }
 
     private fun load(plugin: DeployPlugin): LoadedPlugin {

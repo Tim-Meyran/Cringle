@@ -175,7 +175,7 @@ public fun interface FabricLogger {
 }
 
 /** The directories of a fabric instance below the engine directory (Architecture 15.1). */
-public class FabricPaths(engineDir: Path, fabricId: String) {
+public class FabricPaths(engineDir: Path, fabricId: String, private val dataBase: Path? = null) {
     private val fabrics: Path = engineDir.resolve("fabrics")
 
     /** `<engine dir>/fabrics/<fabric id>`. */
@@ -193,6 +193,12 @@ public class FabricPaths(engineDir: Path, fabricId: String) {
     /** Log directory of one block. */
     public fun blockLogs(blockId: String): Path = contained(logs, logs.resolve(blockId))
 
+    /**
+     * The persistent data folder of one block (`<home>/data/<project>/<blueprint>/<n>/<block id>`), or `null` if this fabric has no data base. It does
+     * not depend on the id of the fabric, so it stays when a Blue-Green update changes the id.
+     */
+    public fun blockData(blockId: String): Path? = dataBase?.let { contained(it, it.resolve(blockId)) }
+
     /** Creates the fabric and block directories. */
     public fun create(blockIds: List<String>) {
         Files.createDirectories(working)
@@ -200,6 +206,7 @@ public class FabricPaths(engineDir: Path, fabricId: String) {
         for (id in blockIds) {
             Files.createDirectories(blockWorking(id))
             Files.createDirectories(blockLogs(id))
+            blockData(id)?.let { Files.createDirectories(it) }
         }
     }
 
