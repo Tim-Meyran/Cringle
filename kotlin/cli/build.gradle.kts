@@ -9,6 +9,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.grpc.netty.shaded)
+    implementation(libs.jline)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(project(":management-server"))
     testImplementation(project(":daemon"))
