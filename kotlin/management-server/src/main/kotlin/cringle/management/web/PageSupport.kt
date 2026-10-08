@@ -64,3 +64,24 @@ internal suspend fun publishPackage(core: cringle.management.ManagementCore, dat
     }
     return core.repository().publishPackage(requests).metadata
 }
+
+/** The tones of a [badge]. */
+internal enum class Tone { NEUTRAL, OK, WARN, BAD, INFO }
+
+/** A small label that shows a state; the tone says how good it is (the color is never the only carrier: the text says it too). */
+internal fun badge(text: String, tone: Tone = Tone.NEUTRAL): Html = h("<span class=\"badge {}\">{}</span>", tone.name.lowercase(), text)
+
+/** The badge for a state word of an engine, a fabric, a block, a machine or a trust status. Unknown words are neutral. */
+internal fun stateBadge(state: String): Html = badge(
+    state,
+    when (state.lowercase()) {
+        "running", "reachable", "trusted", "ok", "valid" -> Tone.OK
+        "starting", "stopping", "created" -> Tone.WARN
+        "failed", "crashed", "not reachable", "untrusted", "violated" -> Tone.BAD
+        else -> Tone.NEUTRAL
+    },
+)
+
+/** The content of a page for a status that is not 200 (a missing page, a refused request), shown inside the frame. */
+internal fun problemContent(title: String, text: String): Html =
+    h("<div class=\"problem\"><h1>{}</h1><p class=\"subtitle\">{}</p><p><a class=\"btn\" href=\"/\">Back to the dashboard</a></p></div>", title, text)

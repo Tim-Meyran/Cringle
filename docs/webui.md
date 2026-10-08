@@ -187,3 +187,22 @@ The lists (`#list`) refresh every 5 seconds, and an action answers with the new 
 - **Waiting while you work:** the polling is `hx-trigger="every 5s [cringleIdle()]"`. `cringleIdle()` (in `app.js`) is false while a field in the list has the focus, a `<details>` in it is open (the `Tags` panel, an engine on the metrics page, the tokens of a user), or a field differs from what it had when it was rendered (text typed, an option or a checkbox changed, a file chosen). Then the refresh is paused and a hint "Refresh paused while you edit" with a *Refresh now* link shows. When the field is empty again, closed or submitted, the refresh goes on.
 
 A page that adds a list follows the same rules: build it with `section(...)`, give every `hx-post` the target `#list` and the swap `morph:innerHTML`, and keep state of the user in the DOM (fields, `<details>`), not in Alpine state inside the swapped fragment. `WebUiRefreshTest` checks the attributes of the pages; the behaviour in the browser was checked with Playwright (typing, an open `Tags` panel and an expanded engine survive 7 seconds; an idle list still refreshes; an action updates the list).
+
+## Design system (#246)
+
+There is **one theme: dark**, minimal and carefully made. `app.css` has no light mode and no `prefers-color-scheme` rule (`color-scheme: dark`, so the browser's own controls are dark too); `ThemeTest` checks both and that every text color has at least 4.5:1 (WCAG AA) on every surface it is used on and every badge color on its tint. Everything is a token in `:root`, the components below only use tokens, so changing the look is one place.
+
+| Tokens | Meaning |
+|---|---|
+| `--bg`, `--surface`, `--surface-2`, `--surface-3` | the page, a panel, a raised or hovered row, a control |
+| `--border`, `--border-strong` | dividers, control borders |
+| `--text`, `--text-muted`, `--text-faint` | body, secondary, hints and placeholders |
+| `--accent`, `--accent-ink` | the one accent (links, the current entry, the primary button) and the text on it |
+| `--success`, `--warning`, `--danger`, `--info` (+ `-tint`) | meaning; the tints are the same colors at 14 % for badges and notices |
+| `--text-xs…--text-xl`, `--space-1…--space-6`, `--radius`, `--ring` | type scale, spacing scale, radii, the focus ring (keyboard focus is always visible) |
+
+**The shell** (`Layout`): a sidebar with the brand, the navigation in five groups — *Overview* (Dashboard), *Operate* (Machines, Engines, Fabrics, Deployments), *Observe* (Logs, Metrics, Data warehouse), *Build* (Drafts), *Administer* (Users, Groups, Trust, Packages) — and the user (name, role, *Sign out*). A group or entry the user may not open is not shown; the current page has `aria-current="page"` (the editors belong to *Drafts*). Below 900 px the sidebar becomes a bar on top. A page registers its entry with `web.navigation += NavItem(label, path, permission, group)`.
+
+**Components** (class names): `page-header` (`pageHeader(title, subtitle, actions)`), `panel`, `cards`/`card`, `data` tables (every table in a list is styled like one), `btn` (`primary`, `ghost`, `danger`, `small`, `block`), `field` (a label above a control), `badge` (`ok`, `warn`, `bad`, `info`; Kotlin: `badge(text, Tone)` and `stateBadge(state)`, the text always says the state, the color only supports it), `notice` (`error`, `info`), `empty` (an empty list says what to do next), `problem` (a page for a status other than 200), `details` for disclosure. A button with `hx-confirm` is drawn as a destructive button.
+
+**Dashboard** (`DashboardPage`): cards for machines, engines, fabrics and deployed projects, a list *Needs attention* (an unreachable machine, a crashed engine or one that should run and does not, a failed fabric or one that should run and does not, each with a link), and the machines. **Sign-in, 403, 404 and 500** are pages in the same style; the favicon is `/static/favicon.svg`.

@@ -249,6 +249,6 @@ class WebServerTest {
         closeables += open
         val response = client.send(HttpRequest.newBuilder(URI.create("https://localhost:${open.port}/")).build(), HttpResponse.BodyHandlers.ofString())
         assertEquals(200, response.statusCode())
-        assertTrue(response.body().contains("without --auth"))
+        assertTrue(response.body().contains("without <code>--auth</code>"))
     }
 }
