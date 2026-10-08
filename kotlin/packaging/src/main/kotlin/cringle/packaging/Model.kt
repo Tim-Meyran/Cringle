@@ -81,6 +81,13 @@ public data class RemoteEndpoint(
     public val block: String,
     public val port: String,
     public val index: Int? = null,
+    /**
+     * Run time only, never in a blueprint file: further instances of the same service in the order of preference, tried
+     * when this one is not reachable (#173). Each has its own [address], [fingerprint], [fabric], [block] and [port].
+     */
+    public val alternatives: List<RemoteEndpoint> = emptyList(),
+    /** Run time only: the name of the service this end was bound from (#178), or `null` for a concrete `remote` of a blueprint. */
+    public val service: String? = null,
 )
 
 /** What the engine does with a message, request or stream opening when the receiving block is not running. */

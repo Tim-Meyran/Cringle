@@ -55,6 +55,7 @@ class ServiceBindingDeployTest {
     private lateinit var s: ManagementServiceCoroutineStub
     private val closeables = ArrayList<AutoCloseable>()
     private val received get() = dir.resolve("orders.txt")
+    private val backupFile get() = dir.resolve("backup.txt")
 
     private val schema = """{"namespace":"acme.svc","types":{"CallerConfig":{"record":{"message":"cringle.std/String"}},"SinkConfig":{"record":{"file":"cringle.std/String"}}}}"""
 
@@ -160,20 +161,23 @@ class ServiceBindingDeployTest {
             .schema("svc.json", schema)
             .lib("svc.jar", TestJar.fromJavaSources(sources))
             .build(work)
-        val service = TestProjectBuilder("orders-service", "1.0.0")
+        fun serviceProject(name: String, file: Path, role: String) = TestProjectBuilder(name, "1.0.0")
             .dependency("acme-svc", "^1.0.0")
             .blueprint(
                 Blueprint(
                     "service",
-                    listOf(BlueprintBlock("s1", "acme-svc/sink", config = JsonObject(mapOf("file" to JsonPrimitive(received.toString()))))),
+                    listOf(BlueprintBlock("s1", "acme-svc/sink", config = JsonObject(mapOf("file" to JsonPrimitive(file.toString()))))),
                     emptyList(),
                     listOf(ProvidedService("orders", "s1", "in")),
                 ),
             )
-            .fabric(FabricConfig("service", 1, listOf("svc"), emptyMap()))
+            .fabric(FabricConfig("service", 1, listOf(role), emptyMap()))
             .build(work, listOf(plugin.pkg))
+        val service = serviceProject("orders-service", received, "svc")
+        val backup = serviceProject("orders-backup", backupFile, "backup")
         repository.publish(plugin.file)
         repository.publish(service.file)
+        repository.publish(backup.file)
         repository.publish(consumerProject("shop", "from-shop", "a", work, plugin.pkg).file)
         repository.publish(consumerProject("billing", "from-billing", "b", work, plugin.pkg).file)
         repository.setTrust("acme-svc", cringle.repository.PluginTrust.TRUSTED)
@@ -195,6 +199,7 @@ class ServiceBindingDeployTest {
             engine("e-svc", "svc")
             engine("e-svc2", "svc")
             engine("e-a", "a")
+            engine("e-bak", "backup")
             engine("e-b", "b")
         }
     }
@@ -215,19 +220,19 @@ class ServiceBindingDeployTest {
 
     private fun ref(id: String) = EngineRef.newBuilder().setMachineId("m1").setEngineId(EngineId.newBuilder().setValue(id)).build()
 
-    private fun bind(project: String) = runBlocking {
-        s.bind(Binding.newBuilder().setConsumerProject(project).setService("orders").addTargets("orders-service-service-1").build())
+    private fun bind(project: String, vararg targets: String): Binding = runBlocking {
+        s.bind(Binding.newBuilder().setConsumerProject(project).setService("orders").addAllTargets(targets.toList().ifEmpty { listOf("orders-service-service-1") }).build())
     }
 
     private fun deploy(project: String) = runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject(project).build()) }
 
-    private fun lines(): Set<String> = if (Files.exists(received)) Files.readAllLines(received).toSet() else emptySet()
+    private fun lines(file: Path = received): Set<String> = if (Files.exists(file)) Files.readAllLines(file).toSet() else emptySet()
 
-    /** Waits (at most 60 s) until the service block has received [expected] since the last [clear]. */
-    private fun awaitReceived(expected: Set<String>) {
+    /** Waits (at most 60 s) until the service block that writes to [file] has received [expected] since the last [clear]. */
+    private fun awaitReceived(expected: Set<String>, file: Path = received) {
         val deadline = System.nanoTime() + 60_000_000_000L
-        while (!lines().containsAll(expected)) {
-            check(System.nanoTime() < deadline) { "the service did not receive $expected, only ${lines()}\n" + diagnostics() }
+        while (!lines(file).containsAll(expected)) {
+            check(System.nanoTime() < deadline) { "the service did not receive $expected, only ${lines(file)}\n" + diagnostics() }
             Thread.sleep(100)
         }
     }
@@ -310,5 +315,34 @@ class ServiceBindingDeployTest {
         }
         clear()
         awaitReceived(setOf("from-shop", "from-billing"))
+    }
+
+    @Test
+    fun theConsumerFailsOverToTheSecondInstanceWhenTheFirstIsRemoved() {
+        deploy("orders-service")
+        deploy("orders-backup")
+        bind("shop", "orders-service-service-1", "orders-backup-service-1")
+        deploy("shop")
+        awaitReceived(setOf("from-shop"))
+        assertTrue(lines(backupFile).isEmpty(), "the preferred instance gets the messages")
+        // the first instance is removed; the consumer is not touched
+        runBlocking { s.removeFabric(cringle.management.v1.FabricRef.newBuilder().setEngine(ref("e-svc")).setFabricId(cringle.common.v1.FabricId.newBuilder().setValue("orders-service-service-1")).build()) }
+        awaitReceived(setOf("from-shop"), backupFile)
+    }
+
+    @Test
+    fun aNewBindingReachesTheRunningConsumerWithoutARedeploy() {
+        deploy("orders-service")
+        deploy("orders-backup")
+        bind("shop")
+        deploy("shop")
+        awaitReceived(setOf("from-shop"))
+        assertTrue(lines(backupFile).isEmpty())
+        val before = fabrics()
+        // the binding now names the other instance; nothing is deployed again
+        val bound = bind("shop", "orders-backup-service-1")
+        assertEquals(listOf("orders-backup-service-1"), bound.targetsList)
+        awaitReceived(setOf("from-shop"), backupFile)
+        assertEquals(before, fabrics())
     }
 }

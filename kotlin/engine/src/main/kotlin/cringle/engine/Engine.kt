@@ -302,9 +302,18 @@ public class Engine private constructor(
                 )
             }
             info(fabrics.deploy(DeployRequest(request.fabricId.value, request.project.name, request.project.version, request.blueprint, plugins, request.serviceCallersList,
-                request.serviceBindingsList.map { cringle.engine.fabric.ServiceBinding(it.service, it.fabric, it.block, it.port, it.fingerprint) },
+                request.serviceBindingsList.map(::serviceBinding),
             )))
         }
+
+        private fun serviceBinding(b: cringle.engine.v1.ServiceBinding): cringle.engine.fabric.ServiceBinding =
+            cringle.engine.fabric.ServiceBinding(b.service, b.fabric, b.block, b.port, b.fingerprint, b.fallbacksList.map { f -> cringle.engine.fabric.ServiceBinding(b.service, f.fabric, f.block, f.port, f.fingerprint) })
+
+        override suspend fun updateServiceBindings(request: cringle.engine.v1.UpdateServiceBindingsRequest): cringle.engine.v1.UpdateServiceBindingsResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                fabrics.updateServiceBindings(request.fabricId.value, request.bindingsList.map(::serviceBinding))
+                cringle.engine.v1.UpdateServiceBindingsResponse.getDefaultInstance()
+            }
 
         override suspend fun setServiceCallers(request: cringle.engine.v1.SetServiceCallersRequest): cringle.engine.v1.SetServiceCallersResponse =
             fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {

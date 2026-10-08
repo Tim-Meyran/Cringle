@@ -255,6 +255,11 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         withContext(dispatcher) { host.crashed(cause) }
     }
 
+    /** Replaces the instances of the services that the sending tethers call; see [TetherNetwork.updateServiceBindings]. */
+    public fun updateServiceBindings(remotes: Map<String, cringle.packaging.RemoteEndpoint>) {
+        network?.updateServiceBindings(remotes)
+    }
+
     /** Replaces the engines that may call the provided service ports of the blueprint; see [TetherNetwork.setServiceCallers]. */
     public fun setServiceCallers(fingerprints: List<String>) {
         val n = network ?: throw FabricException("fabric '${spec.id}' has no tethers")

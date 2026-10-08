@@ -45,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
@@ -52,6 +53,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -245,59 +247,125 @@ public class RemoteTetherDriver(
 
     private suspend fun connect(sender: RemoteSender): RemoteCall {
         val address = sender.remote.address
-        if (address != null) return connectFixed(sender, address)
+        if (address != null && sender.remote.alternatives.isEmpty() && sender.remote.service == null) return connectFixed(sender, address)
         return ResolvingCall(sender).also { it.start() }
     }
 
     /**
-     * A tether whose target is resolved at run time: finds the engine of the fabric in the registry, connects, and when the
-     * connection ends or fails its health check, forgets the address and starts again with a growing wait. The first
-     * connection is made in the background too: a target that is not there yet is no reason to fail the fabric.
+     * A tether whose target is resolved at run time: finds the engine of the fabric in the registry (or uses the address
+     * of the candidate), connects, and when the connection ends or fails its health check, forgets the address and starts
+     * again with a growing wait. The first connection is made in the background too: a target that is not there yet is no
+     * reason to fail the fabric.
+     *
+     * With several candidates (#173, the instances of a service in the order of preference) it connects to the first one
+     * that answers. While it is connected to one that is not the first, it looks at the better ones every health interval and
+     * goes back to the best one that answers; a new list of candidates ([updateRemote]) makes it connect again at once.
+     * Calls that were in flight on a connection that is left fail like those of a connection that was lost.
      */
     private inner class ResolvingCall(private val sender: RemoteSender) : RemoteCall {
         @Volatile private var current: RemoteCall? = null
         private val closed = AtomicBoolean(false)
         private var job: Job? = null
+        @Volatile private var remote: RemoteEndpoint = sender.remote
+        private val changed = Channel<Unit>(Channel.CONFLATED)
+
+        private inner class Link(val rank: Int, val candidate: RemoteEndpoint, val bound: String, val call: RemoteCall, val ended: CompletableDeferred<Throwable?>)
 
         fun start() {
             job = scope.launch { supervise() }
         }
 
-        private suspend fun supervise() {
-            val cache = checkNotNull(addressCache) { "tether ${sender.tetherId}: this engine has no way to resolve a fabric" }
-            val binding = bindings.bind(sender.tetherId, sender.remote.fabric)
-            var failed = 0
-            while (true) {
-                try {
-                    val address = cache.resolve(binding.bound)
-                    val ended = CompletableDeferred<Throwable?>()
-                    val toTarget = RemoteSender(sender.tetherId, sender.remote.copy(address = address, fabric = binding.bound), sender.schemaNamespace, sender.mode, object : RemoteInbound {
-                        override suspend fun onFrame(frame: WireFrame) = sender.inbound.onFrame(frame)
+        override fun updateRemote(remote: RemoteEndpoint) {
+            if (remote == this.remote) return
+            this.remote = remote
+            changed.trySend(Unit)
+        }
 
-                        override fun onEnded(cause: Throwable?) {
-                            ended.complete(cause)
-                        }
-                    })
-                    current = connectFixed(toTarget, address)
-                    failed = 0
-                    val cause = ended.await()
-                    current = null
-                    cache.invalidate(binding.bound)
-                    sender.inbound.onInterrupted(cause)
+        private fun candidates(): List<RemoteEndpoint> = listOf(remote.copy(alternatives = emptyList())) + remote.alternatives
+
+        private suspend fun open(rank: Int, candidate: RemoteEndpoint): Link {
+            val bound = bindings.bind(sender.tetherId, candidate.fabric).bound
+            val address = candidate.address
+                ?: checkNotNull(addressCache) { "tether ${sender.tetherId}: this engine has no way to resolve a fabric" }.resolve(bound)
+            val ended = CompletableDeferred<Throwable?>()
+            val toTarget = RemoteSender(sender.tetherId, candidate.copy(address = address, fabric = bound, alternatives = emptyList()), sender.schemaNamespace, sender.mode, object : RemoteInbound {
+                override suspend fun onFrame(frame: WireFrame) = sender.inbound.onFrame(frame)
+
+                override fun onEnded(cause: Throwable?) {
+                    ended.complete(cause)
+                }
+            })
+            return try {
+                Link(rank, candidate, bound, connectFixed(toTarget, address), ended)
+            } catch (e: Throwable) {
+                if (e !is CancellationException) forget(bound)
+                throw e
+            }
+        }
+
+        private fun forget(bound: String) {
+            addressCache?.invalidate(bound)
+        }
+
+        /** Opens the first candidate of [from] until (excluding) [until] that answers, or returns `null`. */
+        private suspend fun openFirst(list: List<RemoteEndpoint>, from: Int, until: Int): Link? {
+            for (rank in from until minOf(until, list.size)) {
+                try {
+                    return open(rank, list[rank])
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
-                    // not found in the registry, not reachable, refused: ask again later
-                    current = null
-                    cache.invalidate(binding.bound)
-                    failed++
+                    // not found in the registry, not reachable, refused: the next one
                 }
-                options.clock.delay(options.backoff(maxOf(failed - 1, 0)))
+            }
+            return null
+        }
+
+        private suspend fun supervise() {
+            var failed = 0
+            while (true) {
+                val first = openFirst(candidates(), 0, Int.MAX_VALUE)
+                if (first == null) {
+                    failed++
+                    options.clock.delay(options.backoff(failed - 1))
+                    continue
+                }
+                failed = 0
+                var active: Link = first
+                current = active.call
+                while (true) {
+                    val tick = if (active.rank > 0) scope.async { options.clock.delay(options.healthInterval.toMillis()) } else null
+                    val event = select<Int> {
+                        active.ended.onAwait { 0 }
+                        changed.onReceive { 1 }
+                        if (tick != null) tick.onAwait { 2 }
+                    }
+                    tick?.cancel()
+                    if (event == 2) {
+                        val better = openFirst(candidates(), 0, active.rank) ?: continue
+                        val old = active
+                        active = better
+                        current = better.call
+                        old.call.close()
+                        sender.inbound.onInterrupted(TetherDeliveryException("tether ${sender.tetherId}: the connection to '${old.bound}' was left for '${better.bound}', which answers again"))
+                        continue
+                    }
+                    current = null
+                    forget(active.bound)
+                    if (event == 0) {
+                        sender.inbound.onInterrupted(active.ended.getCompleted())
+                        options.clock.delay(options.backoff(0))
+                    } else {
+                        active.call.close()
+                        sender.inbound.onInterrupted(TetherDeliveryException("tether ${sender.tetherId}: the instances of the service were changed"))
+                    }
+                    break
+                }
             }
         }
 
         override suspend fun send(frame: WireFrame) {
-            val call = current ?: throw RemoteUnavailableException("tether ${sender.tetherId}: the fabric '${sender.remote.fabric}' is not connected (it is being looked up again)")
+            val call = current ?: throw RemoteUnavailableException("tether ${sender.tetherId}: the fabric '${remote.fabric}' is not connected (it is being looked up again)")
             try {
                 call.send(frame)
             } catch (e: TetherDeliveryException) {
@@ -308,6 +376,7 @@ public class RemoteTetherDriver(
         override fun close() {
             if (closed.compareAndSet(false, true)) {
                 job?.cancel()
+                changed.close()
                 current?.close()
                 current = null
             }
