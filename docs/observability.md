@@ -16,7 +16,7 @@ created, a reader computes rates.
 
 Memory is measured per engine only, CPU per engine and per fabric: the JVM cannot attribute either to a block that shares the
 thread and heap of its fabric. Per-block CPU and memory would need isolated blocks (#18). The ManagementServer reads the numbers
-(`GetMetrics`, `cringle metrics`, #191) and the heartbeat carries a few of them to the router (#190).
+(`GetMetrics`, `cringle metrics`, #191: one row per engine, `--fabrics`, `--tethers`) and the heartbeat carries a few of them to the router (#190).
 
 ## Data warehouse store (#188)
 

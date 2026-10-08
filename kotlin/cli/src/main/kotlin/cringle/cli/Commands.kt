@@ -417,6 +417,52 @@ internal val COMMANDS: List<Command> = listOf(
         Output.Lines(lines, entries)
     },
 
+    // --- metrics ---
+    Command(
+        listOf("metrics"), "[machine engine]", "Show the numbers of one engine or of all running engines: CPU, memory, errors, and per fabric or tether",
+        listOf(
+            flag("fabrics", "one row per fabric (CPU time, errors, blocks)"), flag("tethers", "one row per tether (messages, bytes, errors)"),
+            opt("fabric", "only this fabric (with --fabrics or --tethers)", "FABRIC"),
+        ),
+        minArgs = 0, maxArgs = 2,
+    ) { env, a ->
+        if (a.positional.size == 1) throw UsageException("give machine and engine, or neither")
+        if (a.flag("fabrics") && a.flag("tethers")) throw UsageException("give --fabrics or --tethers, not both")
+        val b = cringle.management.v1.GetMetricsRequest.newBuilder()
+        if (a.positional.size == 2) b.engine = engineRef(a.positional[0], a.positional[1])
+        val r = env.m.getMetrics(b.build())
+        val only = a.option("fabric")
+        val rows = ArrayList<Map<String, Any?>>()
+        for (m in r.metricsList) {
+            val e = m.metrics
+            val origin = linkedMapOf<String, Any?>("machine" to m.machineId, "engine" to m.engineId.value)
+            val fabrics = e.fabricsList.filter { only == null || it.fabricId.value == only }
+            when {
+                a.flag("fabrics") -> fabrics.forEach { f ->
+                    rows += LinkedHashMap(origin).apply {
+                        put("fabric", f.fabricId.value); put("cpuMs", if (f.cpuTimeNs < 0) -1 else f.cpuTimeNs / 1_000_000)
+                        put("errors", f.errors); put("blocks", f.blocksList.joinToString(", ") { "${it.blockId}:${it.errors}" })
+                    }
+                }
+                a.flag("tethers") -> fabrics.forEach { f ->
+                    f.tethersList.forEach { t ->
+                        rows += LinkedHashMap(origin).apply {
+                            put("fabric", f.fabricId.value); put("tether", t.tetherId); put("type", t.type)
+                            put("messages", t.messages); put("bytes", t.bytes); put("errors", t.errors)
+                        }
+                    }
+                }
+                else -> rows += LinkedHashMap(origin).apply {
+                    put("cpu", if (e.processCpuLoad < 0) "n/a" else "%.0f%%".format(e.processCpuLoad * 100))
+                    put("heapUsedMb", e.heapUsedBytes / (1024 * 1024)); put("heapMaxMb", e.heapMaxBytes / (1024 * 1024))
+                    put("threads", e.threadCount); put("fabrics", e.fabricsCount); put("errors", e.fabricsList.sumOf { it.errors })
+                }
+            }
+        }
+        r.problemsList.forEach { env.warn("could not read metrics of $it") }
+        Output.Rows(rows, "no running engines")
+    },
+
     // --- routers ---
     Command(
         listOf("router", "add"), "<address>", "Connect the router of the ManagementServer machine to another router",

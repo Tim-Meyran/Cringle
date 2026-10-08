@@ -13,6 +13,7 @@ The CLI talks to the ManagementServer only (one address, also for user managemen
 | Session | `login`, `logout`, `whoami` |
 | Machines | `machine add\|list\|remove` |
 | Engines | `engine create\|start\|stop\|delete\|list\|status\|tag` (roles and labels for placement) |
+| Metrics | `metrics [machine engine] [--fabrics] [--tethers] [--fabric id]`: engine numbers (CPU, heap, threads, errors); with `--fabrics` one row per fabric, with `--tethers` one row per tether |
 | Bindings of service dependencies | `bind <project> <service> <fabric>...` (the preferred fabric first; more than one gives failover), `unbind <project> <service>`, `bindings [project]` |
 | Fabrics, deployment | `fabric list\|status\|start\|stop\|remove`, `deploy <project> [--version range] [--no-start] [--relock]`, `undeploy <project>`, `cache cleanup [machine]`, `recover` |
 | Logs | `logs [machine engine] [--fabric f] [--block b] [--level l] [--since t] [--limit n]` |

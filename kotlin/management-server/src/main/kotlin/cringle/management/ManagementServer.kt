@@ -262,6 +262,18 @@ public class ManagementServer(
             ListFabricsResponse.newBuilder().addAllFabrics(core.listFabrics(e.machineId, e.engineId.value).map(::fabricInfo)).build()
         }
 
+        override suspend fun getMetrics(request: cringle.management.v1.GetMetricsRequest): cringle.management.v1.GetMetricsResponse = guard {
+            val result = core.getMetrics(request.engine.machineId, request.engine.engineId.value)
+            cringle.management.v1.GetMetricsResponse.newBuilder()
+                .addAllMetrics(
+                    result.metrics.map {
+                        cringle.management.v1.ManagedMetrics.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setMetrics(it.metrics).build()
+                    },
+                )
+                .addAllProblems(result.problems)
+                .build()
+        }
+
         override suspend fun queryLogs(request: QueryLogsRequest): QueryLogsResponse = guard {
             val engineRequest = cringle.engine.v1.QueryLogsRequest.newBuilder()
                 .setFabric(request.fabric).setBlock(request.block).setMinLevel(request.minLevel).setLimit(request.limit)
@@ -340,6 +352,7 @@ public class ManagementServer(
             "GetFabric" to Permission.READ,
             "ListFabrics" to Permission.READ,
             "QueryLogs" to Permission.READ,
+            "GetMetrics" to Permission.READ,
             "AddRemoteRouter" to Permission.ADMINISTER,
             "RemoveRemoteRouter" to Permission.ADMINISTER,
             "ListRemoteRouters" to Permission.READ,

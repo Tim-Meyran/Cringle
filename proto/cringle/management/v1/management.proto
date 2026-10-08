@@ -94,6 +94,9 @@ service ManagementService {
   // Queries the logs of one Engine, or of all running Engines (fan-out).
   rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse);
 
+  // The numbers (CPU, memory, tether throughput, errors) of one running Engine, or of all running Engines (fan-out).
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+
   // --- Routers ---
 
   // Points the local Router at another Router (federation of Routers).
@@ -257,6 +260,23 @@ message QueryLogsRequest {
   google.protobuf.Timestamp since = 5;
   // At most this many entries (the newest ones); 0 means the default of 1000.
   int32 limit = 6;
+}
+
+message GetMetricsRequest {
+  // Unset machine and Engine: all running Engines of all machines.
+  EngineRef engine = 1;
+}
+
+message ManagedMetrics {
+  string machine_id = 1;
+  cringle.common.v1.EngineId engine_id = 2;
+  cringle.engine.v1.EngineMetrics metrics = 3;
+}
+
+message GetMetricsResponse {
+  repeated ManagedMetrics metrics = 1;
+  // Engines that could not be asked, as `<machine>/<engine>: reason`; the rest is returned.
+  repeated string problems = 2;
 }
 
 message ManagedLogEntry {

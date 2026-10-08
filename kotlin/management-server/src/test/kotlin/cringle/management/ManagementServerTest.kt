@@ -341,6 +341,26 @@ class ManagementServerTest {
     }
 
     @Test
+    fun metricsAreReadFromOneOrFromAllRunningEngines(): Unit = runBlocking {
+        val daemon = startDaemon()
+        val s = stub(startManagement())
+        addMachine(s, daemon)
+        createAndStart(s, "e1")
+        createAndStart(s, "e2")
+        val all = s.getMetrics(cringle.management.v1.GetMetricsRequest.getDefaultInstance())
+        assertEquals(listOf("e1", "e2"), all.metricsList.map { it.engineId.value })
+        assertEquals(emptyList<String>(), all.problemsList)
+        assertTrue(all.metricsList.all { it.metrics.heapUsedBytes > 0 && it.metrics.threadCount >= 1 })
+        val one = s.getMetrics(cringle.management.v1.GetMetricsRequest.newBuilder().setEngine(engineRef("m1", "e2")).build())
+        assertEquals(listOf("e2"), one.metricsList.map { it.engineId.value })
+        // a stopped engine is not listed and does not fail the call
+        s.stopEngine(engineRef("m1", "e2"))
+        assertEquals(listOf("e1"), s.getMetrics(cringle.management.v1.GetMetricsRequest.getDefaultInstance()).metricsList.map { it.engineId.value })
+        assertEquals(Status.Code.FAILED_PRECONDITION, code { s.getMetrics(cringle.management.v1.GetMetricsRequest.newBuilder().setEngine(engineRef("m1", "e2")).build()) })
+        assertEquals(Status.Code.NOT_FOUND, code { s.getMetrics(cringle.management.v1.GetMetricsRequest.newBuilder().setEngine(engineRef("m1", "nope")).build()) })
+    }
+
+    @Test
     fun logsAreQueriedFromEnginesAndFilteredByFabricAndBlock(): Unit = runBlocking {
         val daemon = startDaemon()
         val s = stub(startManagement())
