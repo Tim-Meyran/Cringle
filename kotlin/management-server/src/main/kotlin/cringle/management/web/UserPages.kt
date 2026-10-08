@@ -15,7 +15,7 @@ import java.time.Duration
 internal class UserPages(private val users: UserManager) {
     fun register(web: WebServer) {
         val r = web.router
-        web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS), NavItem("Groups", "/groups", Permission.MANAGE_USERS))
+        web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS, "Administer"), NavItem("Groups", "/groups", Permission.MANAGE_USERS, "Administer"))
 
         r.get("/users", Permission.MANAGE_USERS) { web.render("Users", it, section("Users", "users", usersList(null, null))) }
         r.get("/users/list", Permission.MANAGE_USERS) { fragment(usersList(null, null)) }

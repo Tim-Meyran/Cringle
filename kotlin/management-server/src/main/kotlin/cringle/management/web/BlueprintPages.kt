@@ -51,7 +51,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             } catch (e: DraftException) {
                 null
             }
-            if (draft == null) WebResponse(404, "No such project draft".toByteArray(), "text/plain; charset=utf-8") else web.render("Blueprint $name", req, editor(req.session!!, draft))
+            if (draft == null) web.problem(404, "Not found", "There is no such draft.", req) else web.render("Blueprint $name", req, editor(req.session!!, draft))
         }
         r.post("/blueprints/{name}/check", Permission.READ) { req -> json(check(req.form)) }
         r.post("/blueprints/{name}/save", Permission.OPERATE) { req ->

@@ -49,7 +49,7 @@ public class WebServer(
     public val router: Router = Router()
 
     /** The entries of the navigation. */
-    public val navigation: MutableList<NavItem> = arrayListOf(NavItem("Dashboard", "/"))
+    public val navigation: MutableList<NavItem> = arrayListOf(NavItem("Dashboard", "/", group = "Overview"))
 
     private val fingerprint = core.identity.publicKeyFingerprint
     private val layout = Layout(navigation, version(), fingerprint)
@@ -122,32 +122,29 @@ public class WebServer(
             r.session?.let { sessions.end(it.id) }
             WebResponse(200, ByteArray(0), headers = mapOf("HX-Redirect" to "/login"), cookies = listOf(sessionCookie("", 0)))
         }
-        router.get("/", Permission.READ) { r ->
-            val machines = core.listMachines()
-            val engines = core.listEngines(null)
-            val content = html(
-                raw("<h1>Dashboard</h1>"),
-                h("<p>{} machines, {} engines.</p>", machines.size, engines.size),
-                raw("<ul>"),
-                machines.map { h("<li>{} ({})</li>", it.record.id, if (it.reachable) "reachable" else "not reachable") },
-                raw("</ul>"),
-            )
-            WebResponse.page(200, layout.page("Dashboard", r.session, content, openMode = users == null))
-        }
+        val dashboard = DashboardPage(core)
+        router.get("/", Permission.READ) { r -> render("Dashboard", r, dashboard.content()) }
     }
 
     /** A full page for [request] with [content] in the frame. */
     public fun render(title: String, request: WebRequest, content: Html): WebResponse =
-        WebResponse.page(200, layout.page(title, request.session, content, openMode = users == null))
+        WebResponse.page(200, layout.page(title, request.session, content, openMode = users == null, path = request.path))
+
+    /** A page in the frame for a status other than 200: [title] and [text] say what happened. */
+    public fun problem(status: Int, title: String, text: String, request: WebRequest): WebResponse =
+        WebResponse.page(status, layout.page(title, request.session, problemContent(title, text), openMode = users == null, path = request.path))
 
     private fun loginPage(error: String?): Html {
-        val content = html(
-            raw("<h1>Login</h1>"),
-            if (error != null) h("<p class=\"error\">{}</p>", error) else Html(""),
-            raw("<form method=\"post\" action=\"/login\"><label>Token <input type=\"password\" name=\"token\" autocomplete=\"off\" autofocus></label> <button>Login</button></form>"),
-            h("<p>Check that this server shows the key <code>{}</code>.</p>", fingerprint),
+        val content = h(
+            "<div class=\"auth\"><div class=\"auth-brand\"><svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"3.2\" fill=\"currentColor\"/></svg>Cringle</div>" +
+                "<form class=\"panel auth-card\" method=\"post\" action=\"/login\"><h1>Sign in</h1><p class=\"subtitle\">{}</p>{}" +
+                "<label class=\"field\"><span>Access token</span><input type=\"password\" name=\"token\" autocomplete=\"off\" autofocus required></label><button class=\"btn primary block\">Sign in</button></form>" +
+                "<p class=\"auth-key\">Check that this server shows the key<br><code>{}</code></p></div>",
+            if (users == null) "This server runs without user management: everybody gets in." else "Use the token of your user.",
+            if (error != null) h("<p class=\"notice error\" role=\"alert\">{}</p>", error) else Html(""),
+            fingerprint,
         )
-        return layout.page("Login", null, content, openMode = users == null)
+        return layout.page("Sign in", null, content, openMode = users == null)
     }
 
     private fun sessionCookie(value: String, maxAge: Int? = null): String =
@@ -169,9 +166,15 @@ public class WebServer(
         exchange.requestHeaders.forEach { (k, v) -> headers[k.lowercase()] = v.firstOrNull().orEmpty() }
         headers["x-remote"] = exchange.remoteAddress.address.hostAddress
         val found = router.find(method, path)
-        if (found == null) return if (router.knows(path)) status(405) else notFound()
-        val (route, params) = found
         var session = sessions.find(cookie(headers["cookie"], "cringle_session"))
+        if (found == null) {
+            return when {
+                router.knows(path) -> status(405)
+                method == "GET" -> WebResponse.page(404, layout.page("Not found", session, problemContent("Not found", "There is no page at this address."), openMode = users == null, path = path))
+                else -> notFound()
+            }
+        }
+        val (route, params) = found
         var newCookie: List<String> = emptyList()
         if (session == null && !sessions.loginRequired) {
             session = sessions.open()
@@ -179,10 +182,10 @@ public class WebServer(
         }
         if (route.permission != null) {
             if (session == null) return unauthenticated(headers)
-            if (!session.can(route.permission)) return forbidden(session)
+            if (!session.can(route.permission)) return forbidden(session, path)
         }
         if (method == "POST" && session != null && route.pattern != "/login" && !csrfOk(session, headers["x-csrf-token"])) {
-            return WebResponse.page(403, layout.page("Refused", session, raw("<h1>Refused</h1><p>The request has no valid CSRF token.</p>"), openMode = users == null))
+            return WebResponse.page(403, layout.page("Refused", session, problemContent("Refused", "The request has no valid CSRF token. Reload the page and try again."), openMode = users == null, path = path))
         }
         val body = readBody(exchange, route.maxBodyBytes ?: maxBodyBytes)
         val form = if (headers["content-type"]?.startsWith("application/x-www-form-urlencoded") == true) parseQuery(String(body)) else emptyMap()
@@ -197,8 +200,8 @@ public class WebServer(
     private fun unauthenticated(headers: Map<String, String>): WebResponse =
         if (headers["hx-request"] == "true") WebResponse(401, ByteArray(0), headers = mapOf("HX-Redirect" to "/login")) else WebResponse.redirect("/login")
 
-    private fun forbidden(session: Session): WebResponse =
-        WebResponse.page(403, layout.page("Forbidden", session, raw("<h1>Forbidden</h1><p>Your user may not do this.</p>"), openMode = users == null))
+    private fun forbidden(session: Session, path: String): WebResponse =
+        WebResponse.page(403, layout.page("Forbidden", session, problemContent("Forbidden", "Your user may not do this."), openMode = users == null, path = path))
 
     private fun notFound(): WebResponse = WebResponse(404, "Not found".toByteArray(), "text/plain; charset=utf-8")
 
@@ -274,7 +277,8 @@ public class WebServer(
     private fun fail(exchange: HttpExchange, e: Throwable) {
         val code = if (e is IllegalArgumentException) 400 else 500
         if (code == 500) log.error("web request failed", e)
-        runCatching { send(exchange, WebResponse(code, (if (code == 400) "Bad request" else "Internal error").toByteArray(), "text/plain; charset=utf-8"), false) }
+        val page = if (code == 400) problemContent("Bad request", "The request could not be understood.") else problemContent("Something went wrong", "The server could not answer this request. Details are in its log.")
+        runCatching { send(exchange, WebResponse.page(code, layout.page(if (code == 400) "Bad request" else "Error", null, page)), false) }
     }
 
     private fun version(): String = WebServer::class.java.`package`?.implementationVersion ?: "dev"

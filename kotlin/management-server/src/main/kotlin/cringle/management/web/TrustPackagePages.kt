@@ -21,7 +21,7 @@ import cringle.router.v1.RemoveRemoteRouterRequest
 internal class TrustPackagePages(private val core: ManagementCore) {
     fun register(web: WebServer) {
         val r = web.router
-        web.navigation += listOf(NavItem("Trust", "/trust"), NavItem("Packages", "/packages"))
+        web.navigation += listOf(NavItem("Trust", "/trust", group = "Administer"), NavItem("Packages", "/packages", group = "Administer"))
 
         r.get("/trust", Permission.READ) { web.render("Trust", it, section("Trust", "trust", trust(it.session!!, null, null))) }
         r.get("/trust/list", Permission.READ) { fragment(trust(it.session!!, null, null)) }

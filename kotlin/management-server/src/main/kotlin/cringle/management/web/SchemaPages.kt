@@ -27,7 +27,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
 
     fun register(web: WebServer) {
         val r = web.router
-        web.navigation += NavItem("Drafts", "/drafts")
+        web.navigation += NavItem("Drafts", "/drafts", group = "Build")
 
         r.get("/drafts", Permission.READ) { web.render("Drafts", it, section("Drafts", "drafts", list(it.session!!, null, null))) }
         r.get("/drafts/list", Permission.READ) { fragment(list(it.session!!, null, null)) }
@@ -57,7 +57,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
                 null
             }
             if (draft == null) {
-                WebResponse(404, "No such schema draft".toByteArray(), "text/plain; charset=utf-8")
+                web.problem(404, "Not found", "There is no such draft.", req)
             } else {
                 web.render("Schema $name", req, editor(req.session!!, draft))
             }

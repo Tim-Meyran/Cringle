@@ -21,7 +21,7 @@ import java.time.Instant
 internal class DeploymentPages(private val core: ManagementCore) {
     fun register(web: WebServer) {
         val r = web.router
-        web.navigation += listOf(NavItem("Deployments", "/deployments"), NavItem("Logs", "/logs"), NavItem("Metrics", "/metrics"), NavItem("Data warehouse", "/dwh"))
+        web.navigation += listOf(NavItem("Deployments", "/deployments", group = "Operate"), NavItem("Logs", "/logs", group = "Observe"), NavItem("Metrics", "/metrics", group = "Observe"), NavItem("Data warehouse", "/dwh", group = "Observe"))
 
         r.get("/deployments", Permission.READ) { web.render("Deployments", it, section("Deployments", "deployments", deployments(it.session!!, null, null))) }
         r.get("/deployments/list", Permission.READ) { fragment(deployments(it.session!!, null, null)) }
