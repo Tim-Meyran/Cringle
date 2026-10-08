@@ -92,7 +92,7 @@ A fabric config entry is `{"blueprint": <name>, "instances": <n>, "roles": [...]
 (default 1, at least 1) copies of the blueprint on engines that have all listed logical roles and labels.
 Fabric configs never name concrete engines. This is the **only** place where placement is expressed.
 
-A blueprint is `{"name", "blocks", "tethers"}`; its `name` uses the package-name grammar of section 3. It has no
+A blueprint is `{"name", "blocks", "tethers"}` and optionally `"provides"` (see "Services" below); its `name` uses the package-name grammar of section 3. It has no
 version of its own and no engine, role or label fields, so it always runs entirely inside one engine
 (chapter 9.1); any such key is rejected as unknown.
 
@@ -136,6 +136,25 @@ version of its own and no engine, role or label fields, so it always runs entire
     } }
   ```
 
+### Services (shared services, Architecture chapter 13)
+
+A blueprint can offer ports to the tethers of other projects as **services**, and a tether can name such a service
+instead of a concrete engine:
+
+- `"provides": [{"service": <name>, "block": <id>, "port": <name>}, ...]` (optional, default none) at the top of
+  the blueprint. `service` follows the package-name grammar of section 3 and is unique within the blueprint; `block`
+  and `port` name an `IN` port of a block of this blueprint.
+- An **abstract** `remote` is `{"service": <name>}` and nothing else (no `address`, `fingerprint`, `fabric`,
+  `block`, `port`). It replaces the concrete `remote`; a tether has one of the two forms, never both. The local
+  endpoint and the rules for the tether type are the same as for a concrete `remote`.
+
+The abstract form is design time only: a deploy binds it to a concrete instance (ManagementServer, chapter 13.2). An
+engine refuses a fabric that still has an unbound service tether.
+
+  ```json
+  { "type": "MESSAGE", "from": { "block": "source", "port": "out" }, "remote": { "service": "orders" } }
+  ```
+
 ## 6. Semantic validation
 
 Validators return a list of problems, each with a path and a message, and never stop at the first one. Plugin
@@ -164,7 +183,9 @@ blueprint:
     given, is `host:port` with a port from 1 to 65535, its `fingerprint` is 64 lowercase hex characters, `fabric`, `block` and
     `port` follow the identifier grammar and `index` is not negative. The local port of such a tether is checked as
     for a local tether (existence, direction, tether type, `index`); the schema of the remote port cannot be checked
-    here and is checked when the tether connects.
+    here and is checked when the tether connects;
+14. a `remote` with a `service` has a name in the package-name grammar and no other key; every `provides` entry has
+    a valid service name that is unique in the blueprint and names an existing `IN` port of an existing block.
 
 Validation reports all of these together; reading a package reports the first violation it meets, because parsing
 stops there.
