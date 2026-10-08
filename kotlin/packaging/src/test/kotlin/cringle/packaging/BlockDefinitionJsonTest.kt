@@ -3,6 +3,8 @@
 package cringle.packaging
 
 import cringle.contract.BlockDefinition
+import cringle.contract.ExclusiveKind
+import cringle.contract.ExclusiveResource
 import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
@@ -48,5 +50,19 @@ class BlockDefinitionJsonTest {
         assertEquals("$.ports[0].varArg", bad("""{"name":"x","ports":[{"name":"p","direction":"IN","tetherTypes":["MESSAGE"],"schema":"a/B","varArg":"yes"}]}""").path)
         assertTrue(bad("""{"name":"x","requiredDrivers":["a","a"]}""").message!!.contains("more than once"))
         assertTrue(bad("""{"name":"x","ports":[{"name":"p","direction":"IN","tetherTypes":["MESSAGE"],"schema":"a/B"},{"name":"p","direction":"IN","tetherTypes":["MESSAGE"],"schema":"a/B"}]}""").message!!.contains("more than one port"))
+    }
+
+    @Test
+    fun exclusiveResourcesRoundTripAndAreChecked() {
+        val withResources = BlockDefinition("modbus", emptyList(), emptyList(), emptyList(), null, listOf(ExclusiveResource(ExclusiveKind.SERIAL, "COM3"), ExclusiveResource(ExclusiveKind.PORT, "http")))
+        val text = BlockDefinitionJson.encode(withResources)
+        assertTrue(text.contains("\"exclusiveResources\""))
+        assertEquals(withResources, BlockDefinitionJson.parse(text))
+        assertTrue(!BlockDefinitionJson.encode(definition).contains("exclusiveResources"), "nothing is written for a block without any")
+        fun bad(json: String) = assertThrows<PackageFormatException> { BlockDefinitionJson.parse(json) }
+        assertEquals("$.exclusiveResources[0].kind", bad("""{"name":"x","exclusiveResources":[{"kind":"FILE","label":"a"}]}""").path)
+        assertTrue(bad("""{"name":"x","exclusiveResources":[{"kind":"PORT","label":" "}]}""").message!!.contains("needs a label"))
+        assertTrue(bad("""{"name":"x","exclusiveResources":[{"kind":"PORT","label":"a","extra":1}]}""").message!!.contains("unknown key 'extra'"))
+        assertTrue(bad("""{"name":"x","exclusiveResources":[{"kind":"PORT","label":"a"},{"kind":"PORT","label":"a"}]}""").message!!.contains("more than once"))
     }
 }

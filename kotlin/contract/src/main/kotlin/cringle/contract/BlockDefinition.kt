@@ -103,14 +103,19 @@ public class PortDefinition(
  * @property ports the ports of the block; their names are unique.
  * @property requiredDrivers the ids ([DriverType.id]) of the drivers the block needs; no duplicates.
  * @property configSchema the schema of the block configuration, or `null` if the block has none.
+ * @property exclusiveResources what the block holds that only one instance can have at a time (a fixed port, a serial line); a fabric with such a block
+ * is updated by stopping the old one before the new one starts, not side by side. No duplicates.
  */
-public class BlockDefinition(
+public class BlockDefinition @JvmOverloads constructor(
     public val name: String,
     schemas: List<SchemaRef>,
     ports: List<PortDefinition>,
     requiredDrivers: List<String>,
     public val configSchema: SchemaRef? = null,
+    exclusiveResources: List<ExclusiveResource> = emptyList(),
 ) {
+    public val exclusiveResources: List<ExclusiveResource> = Collections.unmodifiableList(ArrayList(exclusiveResources))
+
     public val schemas: List<SchemaRef> = Collections.unmodifiableList(ArrayList(schemas))
     public val ports: List<PortDefinition> = Collections.unmodifiableList(ArrayList(ports))
     public val requiredDrivers: List<String> = Collections.unmodifiableList(ArrayList(requiredDrivers))
@@ -122,15 +127,38 @@ public class BlockDefinition(
         require(requiredDrivers.none { it.isBlank() }) { "Block '$name' lists a blank driver id" }
         val duplicateDriver = requiredDrivers.groupingBy { it }.eachCount().entries.firstOrNull { it.value > 1 }
         require(duplicateDriver == null) { "Block '$name' requires driver '${duplicateDriver?.key}' more than once" }
+        val duplicateResource = exclusiveResources.groupingBy { it }.eachCount().entries.firstOrNull { it.value > 1 }
+        require(duplicateResource == null) { "Block '$name' declares the exclusive resource ${duplicateResource?.key} more than once" }
     }
 
     override fun equals(other: Any?): Boolean =
         other is BlockDefinition && name == other.name && schemas == other.schemas && ports == other.ports &&
-            requiredDrivers == other.requiredDrivers && configSchema == other.configSchema
+            requiredDrivers == other.requiredDrivers && configSchema == other.configSchema && exclusiveResources == other.exclusiveResources
 
-    override fun hashCode(): Int = listOf(name, schemas, ports, requiredDrivers, configSchema).hashCode()
+    override fun hashCode(): Int = listOf(name, schemas, ports, requiredDrivers, configSchema, exclusiveResources).hashCode()
 
     override fun toString(): String =
         "BlockDefinition(name=$name, schemas=$schemas, ports=$ports, requiredDrivers=$requiredDrivers, " +
-            "configSchema=$configSchema)"
+            "configSchema=$configSchema, exclusiveResources=$exclusiveResources)"
+}
+
+/** The kinds of exclusive resource a block can declare. */
+public enum class ExclusiveKind {
+    /** A fixed network port. */
+    PORT,
+
+    /** A serial line. */
+    SERIAL,
+
+    /** Any other resource that only one holder can have. */
+    OTHER,
+}
+
+/** A resource that only one instance of a block can hold at a time; [label] says which (for example `http` or `COM3`), it is not blank. */
+public data class ExclusiveResource(public val kind: ExclusiveKind, public val label: String) {
+    init {
+        require(label.isNotBlank()) { "An exclusive resource needs a label" }
+    }
+
+    override fun toString(): String = "$kind '$label'"
 }

@@ -83,7 +83,9 @@ Object with keys `name` (block name, same grammar as package names), `schemas` (
 uses, `namespace/Name`), `ports`, `requiredDrivers` (driver ids, unique) and optional `configSchema`. A port has
 `name` (identifier grammar of section 3, unique per block), `direction` (`IN` or `OUT`), `tetherTypes` (non-empty,
 values `REQUEST_RESPONSE`, `MESSAGE`, `STREAM`, `BYTE_STREAM`), `schema` and optional `varArg` (boolean, default
-`false`). This is exactly the model of `cringle.contract.BlockDefinition`. Within a project a block is addressed as
+`false`). Optional `exclusiveResources` lists what the block holds that only one instance can have at a time: objects with `kind` (`PORT`, `SERIAL` or
+`OTHER`) and `label` (not blank, for example `http` or `COM3`), no duplicates. A fabric with such a block, or with a `TCP` or `SERIAL` tether (section 5), is updated by
+stopping the old fabric before the new one starts instead of side by side (Architecture 14.2). This is exactly the model of `cringle.contract.BlockDefinition`. Within a project a block is addressed as
 `<pluginName>/<blockName>`.
 
 ## 5. Fabric config and blueprint
