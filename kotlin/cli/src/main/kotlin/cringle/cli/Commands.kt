@@ -409,10 +409,10 @@ internal val COMMANDS: List<Command> = listOf(
         val entries = r.entriesList.map {
             linkedMapOf<String, Any?>(
                 "time" to it.entry.timestamp.iso(), "level" to it.entry.level.pretty("LOG_LEVEL_"), "machine" to it.machineId, "engine" to it.engineId.value,
-                "fabric" to it.entry.fabric, "block" to it.entry.block, "message" to it.entry.message,
+                "fabric" to it.entry.fabric, "block" to it.entry.block, "source" to it.entry.source, "message" to it.entry.message,
             )
         }
-        val lines = entries.map { "${it["time"]} ${it["level"].toString().uppercase().padEnd(5)} ${it["machine"]}/${it["engine"]} ${it["fabric"]}/${it["block"]}: ${it["message"]}" } +
+        val lines = entries.map { "${it["time"]} ${it["level"].toString().uppercase().padEnd(5)} ${it["machine"]}/${it["engine"]} ${it["fabric"]}/${it["block"]}${(it["source"] as String).let { s -> if (s.isEmpty()) "" else " [$s]" }}: ${it["message"]}" } +
             r.problemsList.map { "warning: could not read logs of $it" }
         Output.Lines(lines, entries)
     },

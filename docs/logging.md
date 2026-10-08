@@ -27,6 +27,17 @@ The root log level is `INFO` by default. Two mechanisms override it:
 
    Invalid level values are ignored with a warning.
 
+## Log files of foreign processes (#189)
+
+A block that starts a process with its own log files lets it write `*.log` files into the log folder of the block,
+`BlockContext.logDirectory` (`<engine dir>/fabrics/<fabric>/logs/<block>/`). The engine reads these files when logs are queried
+(`QueryLogs`, `cringle logs`): every line becomes an entry of that fabric and block with the file name as `source`. A line that starts
+with an ISO-8601 instant (`2026-10-01T10:00:00Z`) has that time, any other line the modification time of the file; a line that starts
+with `DEBUG`, `INFO`, `WARN` or `ERROR` (after the time, case-insensitive, optionally in brackets) has that level, any other line
+`INFO`. The message is the whole line. `block.log` (the mirror of the entries of the logging driver) is not read again; at most 20
+files per block and the last megabyte of each are read; file names outside `[A-Za-z0-9._-]+.log` and symbolic links are skipped.
+`cringle logs` shows the source in brackets after fabric and block.
+
 ## Rotation
 
 Log files are rotated by size and time:
