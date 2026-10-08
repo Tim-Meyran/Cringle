@@ -241,6 +241,7 @@ class ManagementServerTest {
         assertEquals(cringle.daemon.v1.EngineProcessState.ENGINE_PROCESS_STATE_RUNNING, started.process.state)
         assertEquals("First", started.status.name)
         assertEquals("e1", s.getEngine(engineRef("m1", "e1")).status.engineId.value)
+        assertEquals(64, s.getEngine(engineRef("m1", "e1")).status.publicKeyFingerprint.length)
 
         s.stopEngine(engineRef("m1", "e1"))
         assertFalse(s.getEngine(engineRef("m1", "e1")).hasStatus())

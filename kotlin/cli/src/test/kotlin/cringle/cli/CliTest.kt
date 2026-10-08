@@ -329,6 +329,7 @@ class CliTest {
         ok("engine", "start", "m1", "e1")
         val status = ok("engine", "status", "m1", "e1")
         assertTrue(status.out.contains("state") && status.out.contains("running"))
+        assertTrue(Regex("fingerprint\\W+[0-9a-f]{64}").containsMatchIn(status.out), status.out)
         assertTrue(ok("engine", "list", "m1").out.contains("e1"))
         assertTrue(ok("engine", "list").out.contains("First"))
         ok("engine", "tag", "m1", "e1", "--role", "db")

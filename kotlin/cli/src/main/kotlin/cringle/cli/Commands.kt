@@ -129,6 +129,7 @@ private fun engineDetail(e: ManagedEngine): Map<String, Any?> = linkedMapOf(
     "labels" to e.labelsMap.toSortedMap(),
     "router" to e.status.routerAddress,
     "certificate" to e.status.certificate.fingerprint,
+    "fingerprint" to e.status.publicKeyFingerprint,
     "lastError" to e.process.lastError,
 )
 
