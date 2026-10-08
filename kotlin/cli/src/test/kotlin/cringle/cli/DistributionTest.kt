@@ -257,14 +257,21 @@ class DistributionTest {
     @EnabledOnOs(OS.WINDOWS)
     fun theWindowsStartScriptPrefersTheJreOfTheInstallation() {
         val home = unpack()
-        val junction = ProcessBuilder("cmd", "/c", "mklink", "/J", home.resolve("jre").toString(), System.getProperty("java.home")).redirectErrorStream(true).start()
+        val link = home.resolve("jre")
+        val junction = ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), System.getProperty("java.home")).redirectErrorStream(true).start()
         val made = junction.inputStream.bufferedReader().readText()
-        assertTrue(junction.waitFor(60, TimeUnit.SECONDS) && junction.exitValue() == 0, "mklink failed: $made")
-        val system32 = System.getenv("SystemRoot") + "\\System32"
-        val environment = mapOf("JAVA_HOME" to temp.resolve("no-such-jdk").toString(), "PATH" to system32)
-        val version = run(script(home, "cringle"), "--version", environment = environment)
-        assertEquals(0, version.code, version.error)
-        assertEquals("cringle ${this.version}", version.output.trim())
+        try {
+            assertTrue(junction.waitFor(60, TimeUnit.SECONDS) && junction.exitValue() == 0, "mklink failed: $made")
+            val system32 = System.getenv("SystemRoot") + "\\System32"
+            val environment = mapOf("JAVA_HOME" to temp.resolve("no-such-jdk").toString(), "PATH" to system32)
+            val version = run(script(home, "cringle"), "--version", environment = environment)
+            assertEquals(0, version.code, version.error)
+            assertEquals("cringle ${this.version}", version.output.trim())
+        } finally {
+            // Remove the junction itself, never what it points to: the cleanup of the temporary folder follows a junction into the
+            // JDK of the machine and deletes files of it (this test once emptied a JDK that way).
+            Files.deleteIfExists(link)
+        }
     }
 
     /**
