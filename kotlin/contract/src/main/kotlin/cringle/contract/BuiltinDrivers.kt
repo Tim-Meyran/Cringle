@@ -190,6 +190,8 @@ public data class LogEntry(
     public val block: String,
     public val level: LogLevel,
     public val message: String,
+    /** The file a line comes from when a foreign process wrote it into the log folder of its block (#189); empty for entries of the driver. */
+    public val source: String = "",
 )
 
 /** The roles of the first version of user management. Roles apply globally; scopes can be added later. */

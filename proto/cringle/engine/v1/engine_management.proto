@@ -298,6 +298,8 @@ message LogEntry {
   string block = 3;
   LogLevel level = 4;
   string message = 5;
+  // The file in the log folder of the block that the line comes from; empty for entries of the logging driver.
+  string source = 6;
 }
 
 message QueryLogsRequest {

@@ -66,6 +66,13 @@ public interface BlockContext {
 
     /** Access to the tethers of this block's ports. */
     public val ports: BlockPorts
+
+    /**
+     * The log folder of this block (`<fabric>/logs/<block>`), or `null` if the engine gives none. A block that starts a
+     * foreign process with its own log files lets that process write `*.log` files here; the engine reads them into its
+     * log query (Architecture 16.1).
+     */
+    public val logDirectory: java.nio.file.Path? get() = null
 }
 
 /**

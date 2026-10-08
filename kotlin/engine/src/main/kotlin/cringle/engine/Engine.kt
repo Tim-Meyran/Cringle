@@ -381,7 +381,7 @@ public class Engine private constructor(
             return cringle.engine.v1.QueryLogsResponse.newBuilder().addAllEntries(
                 entries.map {
                     cringle.engine.v1.LogEntry.newBuilder()
-                        .setTimestamp(timestamp(it.timestamp)).setFabric(it.fabric).setBlock(it.block).setMessage(it.message)
+                        .setTimestamp(timestamp(it.timestamp)).setFabric(it.fabric).setBlock(it.block).setMessage(it.message).setSource(it.source)
                         .setLevel(
                             when (it.level) {
                                 LogLevel.DEBUG -> cringle.engine.v1.LogLevel.LOG_LEVEL_DEBUG

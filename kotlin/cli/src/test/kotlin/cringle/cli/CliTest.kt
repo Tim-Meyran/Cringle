@@ -444,4 +444,17 @@ class CliTest {
         assertTrue(ok("undeploy", "nothing").out.contains("removed"))
         assertTrue(ok("recover").out.contains("enginesStarted"))
     }
+
+    @Test
+    fun logFilesOfForeignProcessesShowTheirSource() {
+        machine()
+        ok("engine", "create", "m1", "--id", "e1")
+        ok("engine", "start", "m1", "e1")
+        val folder = Files.createDirectories(CringleHome.engineDir(home, "e1").resolve("fabrics/shop/logs/a"))
+        Files.writeString(folder.resolve("proc.log"), "2026-01-01T00:00:00Z WARN from a process\n")
+        val out = ok("logs", "--fabric", "shop").out
+        assertTrue(out.contains("WARN  m1/e1 shop/a [proc.log]: 2026-01-01T00:00:00Z WARN from a process"), out)
+        val entry = (json(ok("logs", "--json")) as JsonArray).single() as JsonObject
+        assertEquals("proc.log", field(entry, "source"))
+    }
 }

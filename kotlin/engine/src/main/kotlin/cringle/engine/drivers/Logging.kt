@@ -8,10 +8,13 @@ import cringle.contract.LogEntry
 import cringle.contract.LogLevel
 import cringle.contract.LoggingDriver
 import cringle.contract.BuiltinDriverTypes
+import cringle.engine.fabric.FabricPaths
 import java.io.PrintWriter
+import java.io.RandomAccessFile
 import java.io.StringWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.Instant
@@ -37,7 +40,7 @@ public data class LogQuery(
  * line (tab separated, control characters escaped). Every block gets a [LoggingDriver] bound to its fabric and block
  * through [driverFor]; entries can optionally be mirrored into a per-block log directory.
  */
-public class LoggingService(engineDir: Path) {
+public class LoggingService(private val engineDir: Path) {
     private val file: Path = engineDir.resolve("logs").resolve("engine.log")
     private val lock = Any()
 
@@ -58,14 +61,71 @@ public class LoggingService(engineDir: Path) {
     /** Returns the entries that match [query], oldest first. */
     public fun query(query: LogQuery = LogQuery()): List<LogEntry> {
         val all = synchronized(lock) { if (Files.exists(file)) Files.readAllLines(file, StandardCharsets.UTF_8) else emptyList() }
-        return all.asSequence()
-            .mapNotNull { decode(it) }
+        return (all.asSequence().mapNotNull { decode(it) } + foreignEntries(query).asSequence())
+            .sortedBy { it.timestamp }
             .filter { query.fabric == null || it.fabric == query.fabric }
             .filter { query.block == null || it.block == query.block }
             .filter { it.level >= query.minLevel }
             .filter { query.since == null || !it.timestamp.isBefore(query.since) }
             .toList()
             .takeLast(query.limit)
+    }
+
+    /**
+     * The lines of the `*.log` files that foreign processes wrote into the log folders of blocks (#189): every file in
+     * `<fabric>/logs/<block>/` except `block.log` (which only mirrors the store). At most [MAX_FOREIGN_FILES] files per block and the
+     * last [MAX_FOREIGN_BYTES] of each are read; names outside `[A-Za-z0-9._-]+` and symbolic links are skipped.
+     */
+    private fun foreignEntries(query: LogQuery): List<LogEntry> {
+        val fabricsDir = engineDir.resolve("fabrics")
+        if (!Files.isDirectory(fabricsDir)) return emptyList()
+        val result = ArrayList<LogEntry>()
+        for (fabric in query.fabric?.let { listOf(it) } ?: subdirectories(fabricsDir)) {
+            val logs = try {
+                FabricPaths(engineDir, fabric).logs
+            } catch (_: RuntimeException) {
+                continue
+            }
+            if (!Files.isDirectory(logs, LinkOption.NOFOLLOW_LINKS)) continue
+            for (block in query.block?.let { listOf(it) } ?: subdirectories(logs)) {
+                val dir = try {
+                    FabricPaths(engineDir, fabric).blockLogs(block)
+                } catch (_: RuntimeException) {
+                    continue
+                }
+                if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) continue
+                val files = Files.list(dir).use { s ->
+                    s.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && FOREIGN_NAME.matches(it.fileName.toString()) && it.fileName.toString() != "block.log" }
+                        .sorted().limit(MAX_FOREIGN_FILES.toLong()).toList()
+                }
+                for (file in files) result += readForeign(file, fabric, block)
+            }
+        }
+        return result
+    }
+
+    private fun subdirectories(dir: Path): List<String> =
+        Files.list(dir).use { s -> s.filter { Files.isDirectory(it, LinkOption.NOFOLLOW_LINKS) }.map { it.fileName.toString() }.sorted().toList() }
+
+    private fun readForeign(file: Path, fabric: String, block: String): List<LogEntry> {
+        val modified = Files.getLastModifiedTime(file).toInstant()
+        val size = Files.size(file)
+        val text = RandomAccessFile(file.toFile(), "r").use { f ->
+            val start = maxOf(0L, size - MAX_FOREIGN_BYTES)
+            f.seek(start)
+            val bytes = ByteArray((size - start).toInt())
+            f.readFully(bytes)
+            String(bytes, StandardCharsets.UTF_8).let { if (start > 0) it.substringAfter('\n', "") else it }
+        }
+        return text.lineSequence().filter { it.isNotBlank() }.map { parseForeign(it, fabric, block, file.fileName.toString(), modified) }.toList()
+    }
+
+    private fun parseForeign(line: String, fabric: String, block: String, source: String, modified: Instant): LogEntry {
+        val stamped = TIMESTAMP.matchEntire(line)
+        val time = stamped?.let { runCatching { Instant.parse(it.groupValues[1]) }.getOrNull() }
+        val rest = if (time != null) stamped!!.groupValues[2] else line
+        val level = LEVEL.find(rest)?.let { LogLevel.valueOf(it.groupValues[1].uppercase()) } ?: LogLevel.INFO
+        return LogEntry(time ?: modified, fabric, block, level, line, source)
     }
 
     /** A driver whose entries are tagged with [fabric] and [block]. */
@@ -118,5 +178,12 @@ public class LoggingService(engineDir: Path) {
             null
         }
     }
-}
 
+    private companion object {
+        const val MAX_FOREIGN_FILES = 20
+        const val MAX_FOREIGN_BYTES = 1024L * 1024L
+        val FOREIGN_NAME = Regex("[A-Za-z0-9._-]+\\.log")
+        val TIMESTAMP = Regex("^(\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z)\\s+(.*)$")
+        val LEVEL = Regex("^\\s*\\[?(DEBUG|INFO|WARN|ERROR)\\b", RegexOption.IGNORE_CASE)
+    }
+}
