@@ -12,6 +12,7 @@
 | [gradle-plugin.md](gradle-plugin.md) | Gradle-Plugins `cringle.plugin` und `cringle.project`, `cringlePublish`. Englisch. |
 | [releasing.md](releasing.md) | Release-Archive und Installer. Englisch. |
 | [logging.md](logging.md) | Einheitliches Logging der Kotlin-Prozesse (Daemon, Engine, Management-Server). |
+| [observability.md](observability.md) | Logs, metrics, heartbeat, data warehouse, recording and retention. Englisch. |
 | [shared-services.md](shared-services.md) | Shared services: `provides`, service tethers, `cringle bind`, failover, two machines. Englisch. |
 | [updating.md](updating.md) | Self-update of an installed Cringle: `cringle self-update`, rollback, `--allow-major`. Englisch. |
 
