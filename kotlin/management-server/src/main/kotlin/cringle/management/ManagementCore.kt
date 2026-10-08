@@ -557,7 +557,9 @@ public class ManagementCore(
     public suspend fun deploy(project: String, range: String, start: Boolean, relock: Boolean = false): DeployResult {
         val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
         val repo = repositoryClient(defaultAddress)
-        return projectLock(project).withLock { deployLocked(project, range, start, relock, repo) }
+        val result = projectLock(project).withLock { deployLocked(project, range, start, relock, repo) }
+        afterChange(project, "deployed")
+        return result
     }
 
     private suspend fun deployLocked(project: String, range: String, start: Boolean, relock: Boolean, repo: cringle.repository.RepositoryClient): DeployResult {
@@ -583,19 +585,7 @@ public class ManagementCore(
         val lockText = lock.encode()
         val rootHash = lock.packages.getValue(project).hash
 
-        val projectPackage = try {
-            val entry = repo.get(project, version)
-            if (entry.kind != cringle.packaging.PackageKind.PROJECT) throw ManagementException(Status.Code.INVALID_ARGUMENT, "'$project' is a plugin, not a project")
-            val file = java.nio.file.Files.createTempFile("cringle-deploy", ".cringle")
-            try {
-                repo.download(project, version, file)
-                cringle.packaging.PackageReader.readProject(file)
-            } finally {
-                java.nio.file.Files.deleteIfExists(file)
-            }
-        } catch (e: cringle.repository.RepositoryClientException) {
-            throw ManagementException(e.status, "repository: ${e.message}")
-        }
+        val projectPackage = readProjectPackage(repo, project, version)
         val configs = projectPackage.manifest.fabrics
         if (configs.isEmpty()) throw ManagementException(Status.Code.FAILED_PRECONDITION, "project $project@$version has no fabric configuration")
         for (c in configs) {
@@ -628,7 +618,10 @@ public class ManagementCore(
 
         val plugins = lock.packages.filterKeys { it != project }.toSortedMap()
         val requests = ArrayList<Triple<EngineView, String, DeployFabricRequest>>()
-        for ((engine, fabricId, blueprint) in plan) {
+        val planned = plan.associate { (engine, fabricId, blueprint) -> fabricId to (engine to projectPackage.blueprints.first { it.name == blueprint }) }
+        // services before the fabrics that use them (#179)
+        val ordered = plan.sortedBy { (_, _, blueprint) -> if (projectPackage.blueprints.first { it.name == blueprint }.provides.isEmpty()) 1 else 0 }
+        for ((engine, fabricId, blueprint) in ordered) {
             val machine = machine(engine.machine)
             val address = repositoryOf(machine)
             val client = repositoryClient(address)
@@ -636,6 +629,11 @@ public class ManagementCore(
                 .setFabricId(FabricId.newBuilder().setValue(fabricId))
                 .setProject(cringle.common.v1.ProjectRef.newBuilder().setName(project).setVersion(version))
                 .setBlueprint(blueprint)
+            val bp = planned.getValue(fabricId).second
+            for (service in bp.tethers.mapNotNull { it.service }.distinct()) {
+                builder.addServiceBindings(resolveBinding(project, service, planned, repo))
+            }
+            if (bp.provides.isNotEmpty()) builder.addAllServiceCallers(callersOf(fabricId, project, planned))
             val source = cringle.engine.v1.PackageSource.newBuilder().setRepositoryAddress(address)
             source.addArtifacts(artifact(cringle.engine.v1.ArtifactKind.ARTIFACT_KIND_PROJECT, project, version, rootHash))
             for ((name, locked) in plugins) {
@@ -685,6 +683,136 @@ public class ManagementCore(
         return DeployResult(project, version, lockText, deployed)
     }
 
+    private suspend fun readProjectPackage(repo: cringle.repository.RepositoryClient, project: String, version: String): cringle.packaging.ProjectPackage = try {
+        val entry = repo.get(project, version)
+        if (entry.kind != cringle.packaging.PackageKind.PROJECT) throw ManagementException(Status.Code.INVALID_ARGUMENT, "'$project' is a plugin, not a project")
+        val file = java.nio.file.Files.createTempFile("cringle-deploy", ".cringle")
+        try {
+            repo.download(project, version, file)
+            cringle.packaging.PackageReader.readProject(file)
+        } finally {
+            java.nio.file.Files.deleteIfExists(file)
+        }
+    } catch (e: cringle.repository.RepositoryClientException) {
+        throw ManagementException(e.status, "repository: ${e.message}")
+    }
+
+    /** The public key fingerprint that the running Engine [machineId]/[engineId] reports. */
+    private suspend fun fingerprintOf(machineId: String, engineId: String): String {
+        val fingerprint = runningEngine(machineId, engineId).getStatus(GetStatusRequest.getDefaultInstance()).publicKeyFingerprint
+        if (fingerprint.isEmpty()) throw ManagementException(Status.Code.FAILED_PRECONDITION, "engine '$engineId' on machine '$machineId' does not report its key")
+        return fingerprint
+    }
+
+    /**
+     * The binding of the service [service] for a fabric of [project] (#179): the fabric that the binding of #171 names,
+     * the block and port it provides the service on, and the key of the Engine that runs it. [planned] are the fabrics
+     * of the deploy in progress; the others are looked up in the recorded state. Fails before anything is touched.
+     */
+    private suspend fun resolveBinding(
+        project: String,
+        service: String,
+        planned: Map<String, Pair<EngineView, cringle.packaging.Blueprint>>,
+        repo: cringle.repository.RepositoryClient,
+    ): cringle.engine.v1.ServiceBinding {
+        val binding = snapshot().bindings.firstOrNull { it.consumerProject == project && it.service == service }
+            ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "project '$project' uses the service '$service', but it is not bound (cringle bind $project $service <fabric>)")
+        val target = binding.targets.first()
+        val fingerprint: String
+        val blueprint: cringle.packaging.Blueprint
+        val inPlan = planned[target]
+        if (inPlan != null) {
+            fingerprint = inPlan.first.status?.publicKeyFingerprint.orEmpty()
+            blueprint = inPlan.second
+            if (fingerprint.isEmpty()) throw ManagementException(Status.Code.FAILED_PRECONDITION, "engine ${inPlan.first.machine}/${inPlan.first.process.engineId.value} does not report its key")
+        } else {
+            val record = snapshot().fabrics.firstOrNull { it.fabricId == target }
+                ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "the fabric '$target' that '$service' of project '$project' is bound to is not deployed")
+            fingerprint = fingerprintOf(record.machine, record.engineId)
+            val request = DeployFabricRequest.parseFrom(record.deploy)
+            blueprint = readProjectPackage(repo, request.project.name, request.project.version).blueprints.first { it.name == request.blueprint }
+        }
+        val provided = blueprint.provides.firstOrNull { it.service == service }
+            ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "the fabric '$target' does not provide the service '$service'")
+        return cringle.engine.v1.ServiceBinding.newBuilder()
+            .setService(service).setFabric(target).setBlock(provided.block).setPort(provided.port).setFingerprint(fingerprint).build()
+    }
+
+    /**
+     * The keys of the Engines that may call the service fabric [serviceFabric]: those that run fabrics of the projects whose
+     * bindings name it. [project] with its [planned] fabrics is the deploy in progress, whose fabrics are not recorded yet.
+     */
+    private suspend fun callersOf(serviceFabric: String, project: String?, planned: Map<String, Pair<EngineView, cringle.packaging.Blueprint>>): List<String> {
+        val consumers = snapshot().bindings.filter { serviceFabric in it.targets }.map { it.consumerProject }.toSet()
+        val keys = LinkedHashSet<String>()
+        for (consumer in consumers) {
+            if (consumer == project) planned.values.forEach { (engine, _) -> engine.status?.publicKeyFingerprint?.takeIf { it.isNotEmpty() }?.let { keys += it } }
+            else snapshot().fabrics.filter { projectOf(it) == consumer }.map { it.machine to it.engineId }.distinct().forEach { (m, e) -> keys += fingerprintOf(m, e) }
+        }
+        return keys.toList()
+    }
+
+    /**
+     * After a deploy or undeploy of [project] (#179): the allow-lists of the service fabrics it uses or provides are updated,
+     * and the consumers of the service fabrics of [project] are deployed again if a service now runs on another Engine.
+     * Called without the lock of the project; what fails is reported after the rest was tried.
+     */
+    private suspend fun afterChange(project: String, what: String) {
+        val problems = ArrayList<String>()
+        val services = LinkedHashSet<String>()
+        snapshot().bindings.filter { it.consumerProject == project }.forEach { services += it.targets }
+        snapshot().fabrics.filter { projectOf(it) == project }.map { it.fabricId }.forEach { services += it }
+        for (fabricId in services) {
+            try {
+                syncCallers(fabricId)
+            } catch (e: StatusException) {
+                problems += "allow-list of $fabricId: ${e.status.description ?: e.status.code.name}"
+            } catch (e: ManagementException) {
+                problems += "allow-list of $fabricId: ${e.message}"
+            }
+        }
+        val mine = snapshot().fabrics.filter { projectOf(it) == project }.map { it.fabricId }.toSet()
+        val consumers = snapshot().bindings.filter { b -> b.targets.any { it in mine } }.map { it.consumerProject }.filter { it != project }.toSet()
+        for (consumer in consumers) {
+            try {
+                projectLock(consumer).withLock { rebind(consumer) }
+            } catch (e: StatusException) {
+                problems += "consumer $consumer: ${e.status.description ?: e.status.code.name}"
+            } catch (e: ManagementException) {
+                problems += "consumer $consumer: ${e.message}"
+            }
+        }
+        if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "$project is $what, but its services could not all be updated: ${problems.joinToString("; ")}")
+    }
+
+    /** Sets the allowed callers of the service fabric [fabricId] on its Engine and in its recorded request, if they changed. */
+    private suspend fun syncCallers(fabricId: String) {
+        val record = snapshot().fabrics.firstOrNull { it.fabricId == fabricId } ?: return
+        val request = DeployFabricRequest.parseFrom(record.deploy)
+        val callers = callersOf(fabricId, null, emptyMap())
+        if (callers.toSet() == request.serviceCallersList.toSet()) return
+        runningEngine(record.machine, record.engineId).setServiceCallers(
+            cringle.engine.v1.SetServiceCallersRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabricId)).addAllFingerprints(callers).build(),
+        )
+        val changed = request.toBuilder().clearServiceCallers().addAllServiceCallers(callers).build().toByteArray()
+        update { d -> d.copy(fabrics = d.fabrics.map { if (it.fabricId == fabricId) it.copy(deploy = changed) else it }) to Unit }
+    }
+
+    /** Deploys the fabrics of [consumer] again whose bound service now has another fabric, port or key. */
+    private suspend fun rebind(consumer: String) {
+        val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
+        val repo = repositoryClient(defaultAddress)
+        for (record in snapshot().fabrics.filter { projectOf(it) == consumer }) {
+            val request = DeployFabricRequest.parseFrom(record.deploy)
+            if (request.serviceBindingsCount == 0) continue
+            val fresh = request.serviceBindingsList.map { resolveBinding(consumer, it.service, emptyMap(), repo) }
+            if (fresh == request.serviceBindingsList) continue
+            val next = request.toBuilder().clearServiceBindings().addAllServiceBindings(fresh).build()
+            removeFabricQuietly(record.machine, record.engineId, record.fabricId)
+            deployFabric(record.machine, record.engineId, next, record.desiredRunning)
+        }
+    }
+
     /** Deploys [previous] again on their Engines from the recorded requests; returns the ones that could not be restored. */
     private suspend fun restore(previous: List<FabricRecord>): List<String> {
         val failed = ArrayList<String>()
@@ -716,7 +844,11 @@ public class ManagementCore(
     }
 
     /** Stops and removes all fabrics of [project]; returns them as `<machine>/<engine>/<fabric>`. */
-    public suspend fun undeploy(project: String): List<String> = projectLock(project).withLock { undeployLocked(project) }
+    public suspend fun undeploy(project: String): List<String> {
+        val removed = projectLock(project).withLock { undeployLocked(project) }
+        afterChange(project, "undeployed")
+        return removed
+    }
 
     private suspend fun undeployLocked(project: String): List<String> {
         val fabrics = snapshot().fabrics.filter { projectOf(it) == project }
