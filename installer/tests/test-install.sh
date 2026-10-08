@@ -85,7 +85,8 @@ eq "current points to the version" "1.0.0" "$(readlink "$P/opt/cringle/current")
 ok "config file" test -f "$P/etc/cringle/cringle.env"
 ok "data dir" test -d "$P/var/lib/cringle"
 ok "daemon unit" test -f "$P/etc/systemd/system/cringle-daemon.service"
-not "no management unit without the switch" test -e "$P/etc/systemd/system/cringle-management.service"
+not "no unit of its own for the management server" test -e "$P/etc/systemd/system/cringle-management.service"
+ok "the daemon runs management server and repository" grep -q '^ExecStart=.* --with-management 7500 --web-port 8443 --with-repository 7600$' "$P/etc/systemd/system/cringle-daemon.service"
 ok "unit starts current/bin" grep -q '^ExecStart=/opt/cringle/current/bin/cringle-daemon ' "$P/etc/systemd/system/cringle-daemon.service"
 ok "unit sets CRINGLE_HOME" grep -q '^Environment=CRINGLE_HOME=/var/lib/cringle$' "$P/etc/systemd/system/cringle-daemon.service"
 ok "unit enabled" test -L "$P/etc/systemd/system/multi-user.target.wants/cringle-daemon.service"
@@ -130,11 +131,13 @@ eq "pre-release" "3.0.0-rc.1" "$(readlink "$P/opt/cringle/current")"
 
 echo "== management server"
 new_root
-run --release 1.0.0 --with-management > /dev/null 2>&1 || fail "install with management failed"
-ok "management unit" grep -q '^ExecStart=/opt/cringle/current/bin/cringle-management-server ' "$P/etc/systemd/system/cringle-management.service"
-ok "management unit enabled" test -L "$P/etc/systemd/system/multi-user.target.wants/cringle-management.service"
-run --release 2.0.0 > /dev/null 2>&1 || fail "upgrade without the switch failed"
-ok "management unit survives an upgrade" test -f "$P/etc/systemd/system/cringle-management.service"
+run --release 1.0.0 --daemon-only > /dev/null 2>&1 || fail "install daemon-only failed"
+not "daemon-only has no management" grep -q -e --with-management "$P/etc/systemd/system/cringle-daemon.service"
+# an older installation with a unit for the management server
+printf '[Unit]\nDescription=old\n' > "$P/etc/systemd/system/cringle-management.service"
+run --release 2.0.0 > /dev/null 2>&1 || fail "upgrade failed"
+not "old management unit removed on upgrade" test -e "$P/etc/systemd/system/cringle-management.service"
+ok "upgraded daemon runs the management server" grep -q -e --with-management "$P/etc/systemd/system/cringle-daemon.service"
 
 echo "== uninstall"
 echo "keep" > "$P/var/lib/cringle/state"

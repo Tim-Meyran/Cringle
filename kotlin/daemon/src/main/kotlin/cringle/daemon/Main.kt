@@ -9,7 +9,9 @@ import java.nio.file.Paths
 import kotlin.system.exitProcess
 import org.slf4j.LoggerFactory
 
-private const val USAGE = "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined] [--trust-local]"
+private const val USAGE =
+    "usage: daemon [--home <dir>] [--port <port>] [--router <host:port> | --combined] [--trust-local]\n" +
+        "              [--with-management [<port>]] [--web-port <port>] [--with-repository [<port>]]"
 
 /** Entry point of the daemon process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -18,6 +20,9 @@ public fun main(args: Array<String>) {
     var router: String? = null
     var combined = false
     var trustLocal = false
+    var managementPort: Int? = null
+    var webPort: Int? = null
+    var repositoryPort: Int? = null
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -29,6 +34,8 @@ public fun main(args: Array<String>) {
         i += 1
         return args[i]
     }
+    fun optionalPort(option: String, default: Int): Int =
+        args.getOrNull(i + 1)?.takeIf { !it.startsWith("--") }?.let { i += 1; it.toIntOrNull()?.takeIf { p -> p in 1..65535 } ?: fail("$option must be 1..65535") } ?: default
     while (i < args.size) {
         when (val option = args[i]) {
             "--home" -> home = Paths.get(value(option))
@@ -36,13 +43,17 @@ public fun main(args: Array<String>) {
             "--router" -> router = value(option)
             "--combined" -> combined = true
             "--trust-local" -> trustLocal = true
+            "--with-management" -> managementPort = optionalPort(option, 7500)
+            "--web-port" -> webPort = value(option).toIntOrNull()?.takeIf { it in 1..65535 } ?: fail("--web-port must be 1..65535")
+            "--with-repository" -> repositoryPort = optionalPort(option, 7600)
             else -> fail("unknown argument '$option'")
         }
         i += 1
     }
     if (router != null && combined) fail("--router and --combined exclude each other")
+    if (webPort != null && managementPort == null) fail("--web-port needs --with-management")
     CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
-    val daemon = Daemon(CringleHome.resolve(home), port, router, combined, trustLocal = LocalTrust.enabled(trustLocal))
+    val daemon = Daemon(CringleHome.resolve(home), port, router, combined, trustLocal = LocalTrust.enabled(trustLocal), companions = Companions(managementPort, webPort, repositoryPort))
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))
     daemon.start()
     LoggerFactory.getLogger("cringle.daemon").info("daemon started on port {}", daemon.port)

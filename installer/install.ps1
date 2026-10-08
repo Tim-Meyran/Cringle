@@ -2,8 +2,8 @@
 #
 # Installer of Cringle for Windows (docs/daemon-service.md). Run it in an administrative PowerShell:
 #
-#   .\install.ps1 [-Version <version>] [-WithManagement] [-Start]
-#   .\install.ps1 -FromBuild <dir> [-Version <version>] [-WithManagement] [-Start]
+#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Start]
+#   .\install.ps1 -FromBuild <dir> [-Version <version>] [-DaemonOnly] [-Start]
 #   .\install.ps1 -Uninstall [-Purge]
 #
 #   -Version <version>  install this version (default: the latest release)
@@ -12,7 +12,9 @@
 #                       version is the one of the archive (give -Version if there are several). winsw.exe is taken from <dir>
 #                       if it is there and downloaded otherwise (pinned version and checksum, as in a release).
 #                       `.\gradlew.bat cringleInstallLocal` builds and runs this.
-#   -WithManagement     also register the service "Cringle Management Server"
+#   -DaemonOnly         run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
+#                       user logins) and the repository (port 7600) as programs it supervises
+#   -WithManagement     no longer needed (the default); accepted for old scripts
 #   -Start              start the registered services (default: they start at the next boot only)
 #   -Uninstall          stop and remove the services, the PATH entry and the program files; the data stays
 #   -Purge              with -Uninstall: also remove the data in %ProgramData%\Cringle
@@ -30,6 +32,7 @@
 param(
     [string]$Version,
     [switch]$WithManagement,
+    [switch]$DaemonOnly,
     [switch]$Start,
     [switch]$Uninstall,
     [switch]$Purge,
@@ -55,9 +58,13 @@ $WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4
 $WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
 $DaemonPort = 7400
 $ManagementPort = 7500
+$WebPort = 8443
+$RepositoryPort = 7600
+$DaemonArguments = "--port $DaemonPort --combined"
+if (-not $DaemonOnly) { $DaemonArguments += " --with-management $ManagementPort --web-port $WebPort --with-repository $RepositoryPort" }
 $Services = @(
     @{ Id = 'cringle-daemon'; Name = 'Cringle Daemon'; Script = 'cringle-daemon.bat'
-       Arguments = "--port $DaemonPort --combined"; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
+       Arguments = $DaemonArguments; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
     @{ Id = 'cringle-management'; Name = 'Cringle Management Server'; Script = 'cringle-management-server.bat'
        Arguments = "--port $ManagementPort"; Description = 'Cringle management server' }
 )
@@ -286,6 +293,15 @@ function Install-CringleService($Service, [string]$WinSW) {
     }
 }
 
+# stops and unregisters a service
+function Remove-CringleService($Service) {
+    Stop-CringleService $Service.Id
+    $exe = Join-Path (Join-Path $InstallRoot 'service') "$($Service.Id).exe"
+    if (Get-CringleService $Service.Id) {
+        if (Test-Path -LiteralPath $exe) { Invoke-WinSW $exe 'uninstall' } else { & sc.exe delete $Service.Id | Out-Null }
+    }
+}
+
 # ---- install and uninstall ----
 
 # removes a junction or directory link without touching what it points to
@@ -369,9 +385,10 @@ function Invoke-Install {
         New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
         if (-not $NoService) {
             Install-CringleService $Services[0] (Join-Path $downloads 'winsw.exe')
-            $managementInstalled = [bool](Get-CringleService $Services[1].Id)
-            if ($WithManagement -or $managementInstalled) {
-                Install-CringleService $Services[1] (Join-Path $downloads 'winsw.exe')
+            # an older installation ran the management server as a service of its own; the daemon runs it now
+            if (Get-CringleService $Services[1].Id) {
+                Write-Info "removing the service $($Services[1].Name): the daemon runs the management server"
+                Remove-CringleService $Services[1]
             }
             $binDir = Join-Path $current 'bin'
             Update-MachinePath { param($old) Add-PathEntry $old $binDir }
@@ -400,13 +417,7 @@ function Invoke-Install {
 
 function Invoke-Uninstall {
     Write-Info 'removing the Cringle services and program files'
-    foreach ($service in $Services) {
-        Stop-CringleService $service.Id
-        $exe = Join-Path (Join-Path $InstallRoot 'service') "$($service.Id).exe"
-        if (Get-CringleService $service.Id) {
-            if (Test-Path -LiteralPath $exe) { Invoke-WinSW $exe 'uninstall' } else { & sc.exe delete $service.Id | Out-Null }
-        }
-    }
+    foreach ($service in $Services) { Remove-CringleService $service }
     if (-not $NoService) {
         $binDir = Join-Path (Join-Path $InstallRoot 'current') 'bin'
         Update-MachinePath { param($old) Remove-PathEntry $old $binDir }
@@ -425,7 +436,7 @@ function Invoke-Uninstall {
 
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
-    if ($Uninstall -and ($Version -or $WithManagement -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -WithManagement, -Start or -FromBuild' }
+    if ($Uninstall -and ($Version -or $WithManagement -or $DaemonOnly -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -DaemonOnly, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     if (-not $NoService -and -not (Test-Admin)) {
         if ($NoElevate) {
