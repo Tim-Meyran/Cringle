@@ -3,6 +3,8 @@
 package cringle.packaging
 
 import cringle.contract.BlockDefinition
+import cringle.contract.ExclusiveKind
+import cringle.contract.ExclusiveResource
 import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
@@ -19,7 +21,8 @@ import kotlinx.serialization.json.put
 
 /** JSON form of [BlockDefinition] as used in plugin manifests (see `spec/package-format.md`, section 4). */
 public object BlockDefinitionJson {
-    private val nameKeys = setOf("name", "schemas", "ports", "requiredDrivers", "configSchema")
+    private val nameKeys = setOf("name", "schemas", "ports", "requiredDrivers", "configSchema", "exclusiveResources")
+    private val resourceKeys = setOf("kind", "label")
     private val portKeys = setOf("name", "direction", "tetherTypes", "schema", "varArg")
 
     /** Parses a block definition from text. */
@@ -44,6 +47,7 @@ public object BlockDefinitionJson {
                 ports,
                 JsonReading.stringList(o, "requiredDrivers", path),
                 configSchema,
+                JsonReading.objectList(o, "exclusiveResources", path).mapIndexed { i, r -> resource(r, "$path.exclusiveResources[$i]") },
             )
         }
     }
@@ -66,6 +70,11 @@ public object BlockDefinitionJson {
                 varArg,
             )
         }
+    }
+
+    private fun resource(o: JsonObject, path: String): ExclusiveResource {
+        JsonReading.keys(o, path, resourceKeys)
+        return construct(path) { ExclusiveResource(enumValue<ExclusiveKind>(JsonReading.string(o, "kind", path), "$path.kind"), JsonReading.string(o, "label", path)) }
     }
 
     private fun ref(text: String, path: String): SchemaRef = construct(path) { SchemaRef.parse(text) }
@@ -95,5 +104,8 @@ public object BlockDefinitionJson {
         )
         put("requiredDrivers", buildJsonArray { d.requiredDrivers.forEach { add(JsonPrimitive(it)) } })
         d.configSchema?.let { put("configSchema", it.toString()) }
+        if (d.exclusiveResources.isNotEmpty()) {
+            put("exclusiveResources", JsonArray(d.exclusiveResources.map { r -> buildJsonObject { put("kind", r.kind.name); put("label", r.label) } }))
+        }
     }
 }
