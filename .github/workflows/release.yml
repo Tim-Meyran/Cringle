@@ -38,7 +38,7 @@ jobs:
 
       # the tests run against the version of the release, so DistributionTest checks the archives that are published
       - name: Build and test
-        run: ./gradlew build --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
+        run: ./gradlew build integrationTest --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}
 
       - name: Build the distribution
         run: ./gradlew cringleDist --no-daemon -PreleaseVersion=${{ steps.version.outputs.version }}

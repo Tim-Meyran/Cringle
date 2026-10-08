@@ -4,7 +4,7 @@ Closes #<!-- issue number -->
 <!-- Short summary of the change. -->
 
 ## Checklist
-- [ ] `./gradlew build` passes locally
+- [ ] `./gradlew build` and `integrationTest` of the touched modules pass locally
 - [ ] All acceptance criteria of the issue are met (tick them in the issue)
 - [ ] No changes outside the issue's scope
 - [ ] `docs/Architecture.md` and `docs/decisions.md` untouched

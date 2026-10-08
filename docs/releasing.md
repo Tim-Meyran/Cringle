@@ -66,7 +66,7 @@ The version of a release is the Git tag without the leading `v`: the tag `v1.2.3
 
 > **Note:** GitHub does not start Actions for this repository at the moment (billing), so `.github/workflows/release.yml` has never run and is **not verified**. Make releases by hand as described below. Do not push test tags.
 
-1. Make sure `master` is what should be released and `./gradlew build` (all modules, all tests) is green.
+1. Make sure `master` is what should be released and `./gradlew build integrationTest` (all modules, both test suites) is green.
 2. Build the distribution with a concrete version number, for example:
 
    ```bash
