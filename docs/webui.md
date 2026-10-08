@@ -108,3 +108,69 @@ The editor is a form: Alpine.js (`x-data`) holds the rows (types, fields with a 
 - Not drawn, but **kept as they are** when the blueprint is saved: tethers to another engine (`remote`) or to a service (`service`). Not yet possible in the editor: blocks with VarArg ports, `isolation`, tether options other than delivery and record (buffer size, timeouts, retry), schemas of the project (use the schema editor and a plugin).
 
 Manual check (the browser part is not covered by the integration tests, which test the server; it was run in headless Chromium with Playwright for #213): start the ManagementServer with `--web-port`, create a project draft, add `src` and `sink` blocks of a plugin, drag from an output to an input: a compatible pair connects and says the tether type; an incompatible one (other schema or no common tether type) disappears with the reason; save shows `Saved as revision n` and `The blueprint is valid`; reload shows the graph again.
+
+
+## CLI and WebUI side by side (#214)
+
+Every command of the CLI either has a route of the web layer or is named below with the reason. `WebParityTest` reads the commands from the source of the CLI and fails for a new command that is in neither table, and for a route that does not exist.
+
+| CLI | WebUI route (an entry of a page or an action) |
+|---|---|
+| `cringle login` | `POST /login` |
+| `cringle logout` | `POST /logout` |
+| `cringle whoami` | `GET /` |
+| `cringle machine add` | `POST /machines` |
+| `cringle machine list` | `GET /machines` |
+| `cringle machine remove` | `POST /machines/m1/remove` |
+| `cringle engine create` | `POST /engines` |
+| `cringle engine start` | `POST /engines/m1/e1/start` |
+| `cringle engine stop` | `POST /engines/m1/e1/stop` |
+| `cringle engine delete` | `POST /engines/m1/e1/delete` |
+| `cringle engine list` | `GET /engines` |
+| `cringle engine status` | `GET /engines/list` |
+| `cringle engine tag` | `POST /engines/m1/e1/tags` |
+| `cringle fabric list` | `GET /fabrics` |
+| `cringle fabric status` | `GET /fabrics/m1/e1/f1` |
+| `cringle fabric start` | `POST /fabrics/m1/e1/f1/start` |
+| `cringle fabric stop` | `POST /fabrics/m1/e1/f1/stop` |
+| `cringle fabric remove` | `POST /fabrics/m1/e1/f1/remove` |
+| `cringle deploy` | `POST /deployments` |
+| `cringle undeploy` | `POST /deployments/p/undeploy` |
+| `cringle bind` | `POST /bindings` |
+| `cringle unbind` | `POST /bindings/p/s/unbind` |
+| `cringle bindings` | `GET /deployments/list` |
+| `cringle logs` | `GET /logs/list` |
+| `cringle metrics` | `GET /metrics/list` |
+| `cringle dwh list` | `GET /dwh/list` |
+| `cringle dwh query` | `GET /dwh/records` |
+| `cringle dwh record` | `POST /dwh/recording` |
+| `cringle dwh retention` | `POST /dwh/retention` |
+| `cringle router add` | `POST /trust/routers` |
+| `cringle router remove` | `POST /trust/routers/remove` |
+| `cringle router list` | `GET /trust` |
+| `cringle trust list` | `GET /trust/list` |
+| `cringle trust add` | `POST /trust/probe` |
+| `cringle trust add-component` | `POST /trust/components` |
+| `cringle trust revoke` | `POST /trust/revoke` |
+| `cringle repo publish` | `POST /packages/upload` |
+| `cringle repo list` | `GET /packages` |
+| `cringle repo versions` | `GET /packages/list` |
+| `cringle repo trust` | `POST /packages/p/trust` |
+| `cringle user create` | `POST /users` |
+| `cringle user list` | `GET /users` |
+| `cringle user delete` | `POST /users/u1/delete` |
+| `cringle group create` | `POST /groups` |
+| `cringle group list` | `GET /groups` |
+| `cringle token create` | `POST /users/u1/tokens` |
+| `cringle token list` | `GET /users/list` |
+| `cringle token revoke` | `POST /tokens/t1/revoke` |
+
+Without a page:
+
+| CLI | Why |
+|---|---|
+| `cringle engine collect` | switches the log collection of a daemon; an operator task of a machine |
+| `cringle cache cleanup` | maintenance of the package cache, run by the ManagementServer on a schedule (--cache-max-unused-days) |
+| `cringle recover` | runs at the start of the ManagementServer |
+| `cringle repo download` | downloads a file; the browser has no use for it |
+| `cringle self-update` | updates the installation of the command line tool |
