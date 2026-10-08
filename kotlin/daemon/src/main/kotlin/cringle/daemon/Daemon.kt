@@ -51,7 +51,7 @@ public class Daemon(
      * Trust the management server of the same home (`<home>/management`): its identity is created if it is missing and its key
      * entered as `COMPONENT`, here and in the router of combined mode, so that no fingerprint has to be copied (`LocalTrust`).
      */
-    trustLocal: Boolean = false,
+    private val trustLocal: Boolean = false,
 ) : AutoCloseable {
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
@@ -212,6 +212,10 @@ public class Daemon(
      * trusted, the start fails.
      */
     private fun writeEngineTrustFile(engineId: String) {
+        // the local trust: a repository of this home (its key file exists once it has run) is trusted by the engines, which download from it
+        if (trustLocal) {
+            LocalTrust.fingerprintOf(home.resolve("repository"))?.let { LocalTrust.trust(daemonTrustStore, it, "repository", TrustKind.COMPONENT) }
+        }
         val routerEntry = (router?.let { "127.0.0.1:${it.port}" } ?: routerAddress)?.let { routerAddr ->
             daemonTrustStore.list().firstOrNull { it.kind == TrustKind.ROUTER && it.address == routerAddr }
                 ?: throw DaemonException(

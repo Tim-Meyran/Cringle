@@ -23,7 +23,7 @@ public object CringleLogging {
     public const val CRINGLE_LOG_LEVEL_ENV: String = "CRINGLE_LOG_LEVEL"
     public const val LOGGING_PROPERTIES: String = "logging.properties"
 
-    private val VALID_COMPONENTS = setOf("daemon", "engine", "management")
+    private val VALID_COMPONENTS = setOf("daemon", "engine", "management", "repository")
     private val warnedInvalidLevels = mutableSetOf<String>()
     private val warnedInvalidPropertyLines = mutableSetOf<String>()
 

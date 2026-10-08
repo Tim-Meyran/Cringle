@@ -11,6 +11,7 @@ import cringle.management.LocalTrustSync
 import cringle.management.ManagementCore
 import cringle.management.ManagementServer
 import cringle.management.ManagementStore
+import cringle.repository.RepositoryProgram
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
@@ -37,13 +38,16 @@ import org.junit.jupiter.api.Test
 class LocalTrustTest {
     private lateinit var home: Path
     private lateinit var daemon: Daemon
+    private lateinit var repository: RepositoryProgram
     private lateinit var server: ManagementServer
     private val closeables = ArrayList<AutoCloseable>()
 
     @BeforeEach
     fun setUp() {
         home = Files.createTempDirectory("cringle-local-trust-test")
-        // the daemon starts first and creates the identity of the management server of the home
+        // the repository and the daemon start first; the daemon creates the identity of the management server of the home
+        repository = RepositoryProgram(home, trustLocal = true).start()
+        closeables += repository
         daemon = Daemon(home, combined = true, trustLocal = true).start()
         closeables += daemon
         // the management server: identity and trust store of its folder, the local trust, no users (no login)
@@ -52,9 +56,15 @@ class LocalTrustTest {
         val trustStore = TrustStore(base.resolve("trust.json"))
         val sync = LocalTrustSync(home, trustStore)
         sync.sync(force = true)
-        val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, null, null, "127.0.0.1:${daemon.router!!.port}", beforeConnect = { sync.sync() })
+        val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, "127.0.0.1:${repository.port}", null, "127.0.0.1:${daemon.router!!.port}", beforeConnect = { sync.sync() })
         server = ManagementServer(core, recoverOnStart = false).start()
         closeables += server
+        // the repository looks for new keys once a second: wait until it trusts the management server
+        val end = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        while (!repository.trustStore.isTrusted(identity.publicKeyFingerprint)) {
+            check(System.nanoTime() < end) { "the repository did not trust the management server within 10 s" }
+            Thread.sleep(50)
+        }
     }
 
     @AfterEach
@@ -108,5 +118,9 @@ class LocalTrustTest {
         assertTrue("ENGINE" to "e1" in kinds, kinds.toString())
         assertTrue(listed.any { field(it as JsonObject, "kind") == "ROUTER" }, "the router of the daemon is trusted: $kinds")
         assertFalse(Files.exists(home.resolve("cli.json")), "nothing was stored: no login")
+
+        // the repository: the management server reaches it, and the engine trusts it (it downloads from it)
+        assertEquals(0, cli("repo", "list").code, "the management server reaches the repository over mutual TLS")
+        assertTrue(TrustStore(home.resolve("engines/e1/trust.json")).isTrusted(repository.identity.publicKeyFingerprint), "the engine trusts the repository")
     }
 }
