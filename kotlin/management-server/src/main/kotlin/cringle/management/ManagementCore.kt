@@ -118,6 +118,9 @@ public class ManagementCore(
     public val routerAddress: String? = null,
     private val probeTimeoutSeconds: Long = 3,
 ) : AutoCloseable {
+    /** The folder of the state of the ManagementServer; the web layer keeps its drafts below it. */
+    public val dataDirectory: java.nio.file.Path get() = store.directory
+
     private val lock = Any()
     private var data: ManagementData = store.load()
     private val channels = ConcurrentHashMap<String, ManagedChannel>()

@@ -47,3 +47,18 @@ internal fun section(title: String, name: String, initial: Html): Html = html(
     initial,
     raw("</div>"),
 )
+
+/** Publishes the package [data] in the repository of [core] (the repository checks the package and the hash). */
+internal suspend fun publishPackage(core: cringle.management.ManagementCore, data: ByteArray): cringle.repository.v1.PackageMetadata {
+    val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+    val requests = kotlinx.coroutines.flow.flow {
+        emit(cringle.repository.v1.PublishRequest.newBuilder().setHeader(cringle.repository.v1.PublishHeader.newBuilder().setExpectedSha256(hash)).build())
+        var offset = 0
+        while (offset < data.size) {
+            val n = minOf(64 * 1024, data.size - offset)
+            emit(cringle.repository.v1.PublishRequest.newBuilder().setChunk(com.google.protobuf.ByteString.copyFrom(data, offset, n)).build())
+            offset += n
+        }
+    }
+    return core.repository().publishPackage(requests).metadata
+}

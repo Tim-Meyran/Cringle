@@ -2,22 +2,17 @@
 
 package cringle.management.web
 
-import com.google.protobuf.ByteString
 import cringle.common.PublicKeyFingerprint
 import cringle.common.TlsHelper
 import cringle.management.ManagementCore
 import cringle.management.ManagementException
 import cringle.repository.v1.PackageKind
 import cringle.repository.v1.PluginTrust
-import cringle.repository.v1.PublishHeader
-import cringle.repository.v1.PublishRequest
 import cringle.repository.v1.SetPluginTrustRequest
 import cringle.router.users.Permission
 import cringle.router.v1.AddRemoteRouterRequest
 import cringle.router.v1.ListRemoteRoutersRequest
 import cringle.router.v1.RemoveRemoteRouterRequest
-import java.security.MessageDigest
-import kotlinx.coroutines.flow.flow
 
 /**
  * The pages for trust (#211, `cringle trust|router`) and for the packages of the repository (`cringle repo`). Trusting a router is two steps as in the CLI:
@@ -73,17 +68,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             val error = attempt {
                 val file = Multipart.parse(req.headers["content-type"], req.body).firstOrNull { it.name == "file" && !it.filename.isNullOrEmpty() }
                     ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "choose a package file")
-                val hash = MessageDigest.getInstance("SHA-256").digest(file.data).joinToString("") { "%02x".format(it) }
-                val requests = flow {
-                    emit(PublishRequest.newBuilder().setHeader(PublishHeader.newBuilder().setExpectedSha256(hash)).build())
-                    var offset = 0
-                    while (offset < file.data.size) {
-                        val n = minOf(CHUNK, file.data.size - offset)
-                        emit(PublishRequest.newBuilder().setChunk(ByteString.copyFrom(file.data, offset, n)).build())
-                        offset += n
-                    }
-                }
-                val m = core.repository().publishPackage(requests).metadata
+                val m = publishPackage(core, file.data)
                 done = "Published ${m.name} ${m.version}"
             }
             fragment(packages(req.session!!, error, done))
@@ -174,6 +159,5 @@ internal class TrustPackagePages(private val core: ManagementCore) {
 
     private companion object {
         const val UPLOAD_LIMIT = 64 * 1024 * 1024
-        const val CHUNK = 64 * 1024
     }
 }
