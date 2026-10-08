@@ -229,7 +229,7 @@ public class TetherNetwork private constructor(
     }
 
     /** A sender is allowed for [c]: what it sends is queued like the traffic of a local tether. */
-    private inner class ReceiverInbound(private val c: Connection, private val session: RemoteSession) : RemoteInbound {
+    private inner class ReceiverInbound(private val c: Connection, private val session: RemoteSession, val caller: String? = null) : RemoteInbound {
         private val streams = ConcurrentHashMap<Long, RemoteStream>()
         private val ns get() = c.toPort.schema.namespace
 
@@ -484,6 +484,51 @@ public class TetherNetwork private constructor(
         close()
         registration?.close()
         registration = null
+        synchronized(serviceRegistrations) {
+            serviceRegistrations.values.forEach { it.close() }
+            serviceRegistrations.clear()
+        }
+    }
+
+    /** The registrations at the remote driver of the callers of the provided service ports, by public key fingerprint. */
+    private val serviceRegistrations = HashMap<String, AutoCloseable>()
+
+    /**
+     * Lets exactly the engines with the public key fingerprints [fingerprints] call the provided service ports of the
+     * blueprint (#177). A new caller is accepted from now on. A caller that is no longer in the list is refused at its next
+     * call, and its open calls are ended (the sender is told). Callers that stay are not touched. Without provided service
+     * ports this does nothing.
+     */
+    public fun setServiceCallers(fingerprints: Collection<String>) {
+        val services = connections.values.filter { it.serviceName != null }.distinctBy { it.info.id }
+        if (services.isEmpty()) return
+        val wanted = fingerprints.toSet()
+        val driver = config.remote ?: throw TetherWiringException("this engine cannot run tethers to other engines")
+        val removed = ArrayList<String>()
+        synchronized(serviceRegistrations) {
+            for (fingerprint in serviceRegistrations.keys.toList()) {
+                if (fingerprint !in wanted) {
+                    serviceRegistrations.remove(fingerprint)?.close()
+                    removed += fingerprint
+                }
+            }
+            for (fingerprint in wanted) {
+                if (fingerprint in serviceRegistrations) continue
+                serviceRegistrations[fingerprint] = driver.register(
+                    services.map { c ->
+                        val local = c.info.to
+                        RemoteReceiver(c.info.id, local.block, local.port, local.index, fingerprint, c.wireMode) { session ->
+                            ReceiverInbound(c, session, fingerprint).also { c.sessions += it }
+                        }
+                    },
+                )
+            }
+        }
+        for (c in services) {
+            for (session in c.sessions.toList()) {
+                if (session.caller in removed) session.stop("tether ${c.info.id}: this engine is no longer allowed to call the service")
+            }
+        }
     }
 
     /** The reason a sender gets when the network stops under it. */
@@ -533,6 +578,8 @@ public class TetherNetwork private constructor(
         /** Set for a tether that ends on another engine; [remoteSends] says whether the local end is the sending one. */
         val remote: RemoteEndpoint? = null,
         val remoteSends: Boolean = false,
+        /** Set for the receiving end of a provided service port: the name of the service (#177). */
+        val serviceName: String? = null,
     ) {
         /** The open call of a tether whose local end sends to another engine. */
         @Volatile var call: RemoteCall? = null
@@ -886,6 +933,32 @@ public class TetherNetwork private constructor(
             }
 
             val receivers = ArrayList<Pair<Connection, RemoteEndpoint>>()
+            for (p in blueprint.provides) {
+                val label = "service ${p.service}"
+                val local = Endpoint(p.block, p.port)
+                val port = endpoint(local, PortDirection.IN, label) ?: continue
+                val type = p.type ?: port.tetherTypes.filter { it in remoteTypes }.singleOrNull()
+                if (type == null || type !in port.tetherTypes || type !in remoteTypes) {
+                    problems += "$label: port '${p.block}.${p.port}' needs a tether type from ${remoteTypes.joinToString()} that it supports"
+                    continue
+                }
+                if (config.remote == null) problems += "$label: this engine cannot run tethers to other engines"
+                val c = Connection(
+                    TetherInfo(label, type, Endpoint("service", p.service), local),
+                    port,
+                    port,
+                    DeliveryPolicy.DROP,
+                    null,
+                    config.bufferCapacity,
+                    config.requestTimeout,
+                    RetryConfig(),
+                    null,
+                    RemoteEndpoint(null, "", "(service)", p.block, p.port),
+                    false,
+                    p.service,
+                )
+                if (connections.put(key(local.block, local.port, null), c) != null) problems += "$label: port '${p.block}.${p.port}' is already connected"
+            }
             for (t in blueprint.tethers) {
                 val remote = t.remote
                 val localFrom = t.from
@@ -977,7 +1050,10 @@ public class TetherNetwork private constructor(
                     },
                 )
             }
+            if (config.serviceCallers.isNotEmpty()) network.setServiceCallers(config.serviceCallers)
             return network
         }
+
+        private val remoteTypes = setOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.STREAM, TetherType.BYTE_STREAM)
     }
 }

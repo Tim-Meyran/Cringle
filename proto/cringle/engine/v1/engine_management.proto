@@ -22,6 +22,10 @@ service EngineManagementService {
   // Creates a fabric instance of a blueprint from unpacked packages in the Cringle home. The fabric is not started.
   rpc DeployFabric(DeployFabricRequest) returns (FabricInfo);
 
+  // Replaces the Engines that may call the provided service ports of a fabric. Callers that stay are not touched, new
+  // ones are accepted from now on, removed ones are refused and their open calls are ended.
+  rpc SetServiceCallers(SetServiceCallersRequest) returns (SetServiceCallersResponse);
+
   // Starts a deployed fabric.
   rpc StartFabric(FabricRequest) returns (FabricInfo);
 
@@ -103,7 +107,17 @@ message DeployFabricRequest {
   repeated DeployedPlugin plugins = 4;
   // Where to download packages that are not yet in the machine cache. Unset: the packages must already be unpacked.
   PackageSource source = 5;
+  // Public key fingerprints (64 lower case hex characters) of the Engines that may call the provided service ports of the
+  // blueprint, see SetServiceCallers.
+  repeated string service_callers = 6;
 }
+
+message SetServiceCallersRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  repeated string fingerprints = 2;
+}
+
+message SetServiceCallersResponse {}
 
 // What a package in the cache is.
 enum ArtifactKind {

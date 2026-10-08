@@ -84,6 +84,8 @@ public class TetherConfig(
     public val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     /** Runs the tethers that end on another engine (bound to the fabric); `null` means this engine cannot run them. */
     public val remote: RemoteTetherPorts? = null,
+    /** Public key fingerprints of the engines that may call the provided service ports of the blueprint (#177); see [TetherNetwork.setServiceCallers]. */
+    public val serviceCallers: List<String> = emptyList(),
 ) {
     init {
         require(bufferCapacity >= 1) { "bufferCapacity must be at least 1" }

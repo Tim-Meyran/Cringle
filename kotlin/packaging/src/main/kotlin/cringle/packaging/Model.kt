@@ -165,7 +165,16 @@ public data class TetherDef(
  * A port that a blueprint offers to the tethers of other projects under the name [service] (Architecture chapter
  * 13.1): the `IN` port [port] of the block [block] of this blueprint.
  */
-public data class ProvidedService(public val service: String, public val block: String, public val port: String)
+public data class ProvidedService(
+    public val service: String,
+    public val block: String,
+    public val port: String,
+    /**
+     * The tether type of the calls to the port: `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` or `BYTE_STREAM`. `null` means the
+     * one remote-capable type that the port supports; a port that supports several needs it (#177).
+     */
+    public val type: TetherType? = null,
+)
 
 /**
  * A block instance in a blueprint. [block] is `pluginName/blockName`; [varArgCounts] gives the fixed size of every

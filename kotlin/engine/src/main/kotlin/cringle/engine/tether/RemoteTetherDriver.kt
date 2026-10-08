@@ -132,10 +132,10 @@ public class RemoteTetherDriver(
     // ---- receiving ----
 
     private fun register(fabricId: String, list: List<RemoteReceiver>): AutoCloseable {
-        val keys = list.map { key(fabricId, it.block, it.port, it.index) }
+        val keys = list.map { key(fabricId, it.block, it.port, it.index, it.senderFingerprint) }
         synchronized(lock) {
             for ((i, r) in list.withIndex()) {
-                check(keys[i] !in receivers) { "tether ${r.tetherId}: the port '${r.block}.${r.port}' of fabric '$fabricId' already receives from another engine" }
+                check(keys[i] !in receivers) { "tether ${r.tetherId}: the port '${r.block}.${r.port}' of fabric '$fabricId' already receives from this engine" }
             }
             for ((i, r) in list.withIndex()) {
                 receivers[keys[i]] = r
@@ -160,11 +160,12 @@ public class RemoteTetherDriver(
         }
     }
 
-    private fun lookup(fabric: String, blockPort: String): RemoteReceiver? {
+    private fun lookup(fabric: String, blockPort: String, peer: String?): RemoteReceiver? {
+        peer ?: return null
         val parts = blockPort.split('/')
         if (parts.size !in 2..3) return null
         val index = if (parts.size == 3) (parts[2].toIntOrNull() ?: return null) else null
-        return synchronized(lock) { receivers[key(fabric, parts[0], parts[1], index)] }
+        return synchronized(lock) { receivers[key(fabric, parts[0], parts[1], index, peer)] }
     }
 
     private class CallInfo(val peer: String?, val fabric: String?, val blockPort: String?)
@@ -186,7 +187,7 @@ public class RemoteTetherDriver(
         override fun exchange(requests: Flow<WireData>): Flow<WireData> {
             val info = CALL.get()
             return channelFlow {
-                val receiver = info?.fabric?.let { f -> info.blockPort?.let { bp -> lookup(f, bp) } }
+                val receiver = info?.fabric?.let { f -> info.blockPort?.let { bp -> lookup(f, bp, info.peer) } }
                 if (info == null || receiver == null || receiver.senderFingerprint != info.peer) {
                     val refusal = RemoteErrors.value(RemoteErrors.UNKNOWN_TARGET, "this engine has no tether that receives from this caller at ${info?.fabric}/${info?.blockPort}")
                     send(data(codecFor(TetherMode.TYPED).encode(cringle.wire.Error(0u, refusal))))
@@ -457,6 +458,6 @@ public class RemoteTetherDriver(
         val BLOCK_PORT_KEY: Metadata.Key<String> = Metadata.Key.of("cringle-block-port", Metadata.ASCII_STRING_MARSHALLER)
         val CALL: Context.Key<CallInfo> = Context.key("cringle-remote-tether-call")
 
-        fun key(fabric: String, block: String, port: String, index: Int?) = "$fabric|$block|$port|${index ?: "-"}"
+        fun key(fabric: String, block: String, port: String, index: Int?, sender: String) = "$fabric|$block|$port|${index ?: "-"}|$sender"
     }
 }
