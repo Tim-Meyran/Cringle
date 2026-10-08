@@ -1,0 +1,14 @@
+{
+  "name": "app",
+  "blocks": [
+    { "id": "checkout", "block": "acme-shop/checkout" }
+  ],
+  "tethers": [
+    {
+      "type": "MESSAGE",
+      "from": { "block": "checkout", "port": "orders" },
+      "remote": { "service": "orders" },
+      "delivery": "BUFFER"
+    }
+  ]
+}
