@@ -28,8 +28,8 @@ internal class DeploymentPages(private val core: ManagementCore) {
         r.post("/deployments", Permission.OPERATE) { req ->
             var done: String? = null
             val error = attempt {
-                val result = core.deploy(req.form["project"].orEmpty().trim(), req.form["version"].orEmpty().trim(), req.form["start"] == "on", req.form["relock"] == "on")
-                done = "Deployed ${result.project} ${result.version} as " + result.fabrics.joinToString(", ") { "${it.info.fabricId.value} on ${it.machine}/${it.engineId}" }
+                val result = core.deploy(req.form["project"].orEmpty().trim(), req.form["version"].orEmpty().trim(), req.form["start"] == "on", req.form["relock"] == "on", req.form["stopFirst"] != "on")
+                done = "Deployed ${result.project} ${result.version} as " + result.fabrics.joinToString(", ") { "${it.info.fabricId.value} on ${it.machine}/${it.engineId}" } + " (${result.strategy})"
             }
             fragment(deployments(req.session!!, error, done))
         }
@@ -96,7 +96,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
                 raw("<p class=\"empty\">The repository has no project yet. Build one in the blueprint editor (Drafts) or publish a package (Packages).</p>")
             } else {
                 h(
-                    "<form class=\"form-row\" hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"start\" checked> Start</label><label class=\"check\"><input type=\"checkbox\" name=\"relock\"> Resolve again (relock)</label><button class=\"btn primary\">Deploy</button></form>",
+                    "<form class=\"form-row\" hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"start\" checked> Start</label><label class=\"check\"><input type=\"checkbox\" name=\"relock\"> Resolve again (relock)</label><label class=\"check\" title=\"Stop the running fabrics of the project first instead of starting the new ones next to them\"><input type=\"checkbox\" name=\"stopFirst\"> Stop the old ones first</label><button class=\"btn primary\">Deploy</button></form>",
                     field("Project", html(raw("<select name=\"project\">"), projects.map { h("<option>{}</option>", it) }, raw("</select>"))),
                     field("Version range", raw("<input name=\"version\" placeholder=\"highest\">"), "empty: the highest release"),
                 )

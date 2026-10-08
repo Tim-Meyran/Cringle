@@ -172,7 +172,7 @@ class DeploymentTest {
 
     @Test
     fun deployingAProjectPlacesFabricsOnTheRightEnginesAndTheyRun(): Unit = runBlocking {
-        val result = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        val result = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         assertEquals("0.1.0", result.version)
         assertEquals(mapOf("demo-one-1" to "e3", "demo-two-1" to "e1"), result.fabricsList.associate { it.info.fabricId.value to it.engineId.value })
         assertTrue(result.lock.contains("acme-demo"))
@@ -187,7 +187,7 @@ class DeploymentTest {
         assertTrue(Files.exists(home.resolve("plugins/acme-demo/1.0.0/.cringle-installed")))
 
         // deploying again replaces the fabrics instead of duplicating them
-        val again = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").setVersionRange("^0.1.0").build())
+        val again = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").setVersionRange("^0.1.0").build())
         assertEquals(2, again.fabricsCount)
         assertEquals(2, s.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsCount)
 
@@ -224,49 +224,49 @@ class DeploymentTest {
 
     @Test
     fun theLockFileOfAVersionIsUsedAgainAndRelockResolvesAgain(): Unit = runBlocking {
-        val first = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        val first = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         assertTrue(first.lock.contains("1.0.0") && !first.lock.contains("1.1.0"), first.lock)
 
         // a newer compatible release appears; the lock keeps the old one
         buildPlugin("1.1.0", Files.createDirectories(dir.resolve("build-1-1"))).let { repository.publish(it.file) }
-        val second = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        val second = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         assertEquals(first.lock, second.lock)
         assertEquals(listOf("acme-demo/1.0.0"), versionDirs("plugins"))
         assertEquals(first.lock, Files.readString(lockFile))
 
         // --relock resolves again and writes the lock again
-        val relocked = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").setRelock(true).build())
+        val relocked = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").setRelock(true).build())
         assertTrue(relocked.lock.contains("1.1.0"), relocked.lock)
         assertEquals(relocked.lock, Files.readString(lockFile))
         assertEquals(listOf("acme-demo/1.0.0", "acme-demo/1.1.0"), versionDirs("plugins"))
-        assertEquals(relocked.lock, s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()).lock)
+        assertEquals(relocked.lock, s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()).lock)
         assertEquals(previous, fabricIds())
     }
 
     @Test
     fun aLockWhoseHashDiffersFromTheRepositoryIsAnErrorAndChangesNothing(): Unit = runBlocking {
-        s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         val lock = cringle.packaging.LockFile.parse(Files.readString(lockFile))
         val bad = lock.copy(packages = lock.packages + ("acme-demo" to lock.packages.getValue("acme-demo").copy(hash = "a".repeat(64))))
         Files.writeString(lockFile, bad.encode())
-        val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()) } }
+        val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()) } }
         assertEquals(Status.Code.FAILED_PRECONDITION, e.status.code)
         assertTrue(e.status.description!!.contains("--relock"), e.status.description)
         assertEquals(previous, fabricIds())
         // relocking repairs it
-        s.deploy(DeployProjectRequest.newBuilder().setProject("demo").setRelock(true).build())
+        s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").setRelock(true).build())
         assertEquals(lock.encode(), Files.readString(lockFile))
     }
 
     @Test
     fun whenNoEngineMatchesThePreviousFabricsKeepRunning(): Unit = runBlocking {
-        s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         // the only engine with the role 'db' loses it
         s.setEngineTags(
             cringle.management.v1.SetEngineTagsRequest.newBuilder()
                 .setEngine(EngineRef.newBuilder().setMachineId("m1").setEngineId(EngineId.newBuilder().setValue("e3"))).build(),
         )
-        val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()) } }
+        val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()) } }
         assertEquals(Status.Code.FAILED_PRECONDITION, e.status.code)
         assertTrue(e.status.description!!.contains("needs 1 running engine(s) with roles [db]"), e.status.description)
         assertEquals(previous, fabricIds())
@@ -277,10 +277,10 @@ class DeploymentTest {
 
     @Test
     fun whenAFabricCannotBeStartedThePreviousFabricsAreBack(): Unit = runBlocking {
-        s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         core.beforeFabricDeploy = { if (it == "demo-two-1") throw ManagementException(Status.Code.UNAVAILABLE, "injected failure") }
         try {
-            val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()) } }
+            val e = assertThrows<StatusException> { runBlocking { s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()) } }
             assertEquals(Status.Code.UNAVAILABLE, e.status.code)
             assertTrue(e.status.description!!.contains("injected failure"), e.status.description)
         } finally {
@@ -293,12 +293,12 @@ class DeploymentTest {
         assertEquals("started", Files.readString(markerOne))
         assertEquals("started", Files.readString(markerTwo))
         // and a later deploy works
-        assertEquals(2, s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()).fabricsCount)
+        assertEquals(2, s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()).fabricsCount)
     }
 
     @Test
     fun twoParallelDeploysOfOneProjectEndWithOneConsistentResult(): Unit = runBlocking {
-        val results = (1..2).map { async { s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()) } }.awaitAll()
+        val results = (1..2).map { async { s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()) } }.awaitAll()
         assertTrue(results.all { it.fabricsCount == 2 })
         assertEquals(previous, fabricIds())
         assertEquals(2, s.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsCount)
@@ -352,7 +352,7 @@ class DeploymentTest {
      */
     @Test
     fun twoEnginesOfOneMachineShareOneInstalledVersionOfAPackage(): Unit = runBlocking {
-        val result = s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build())
+        val result = s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build())
         assertEquals(setOf("e1", "e3"), result.fabricsList.map { it.engineId.value }.toSet())
 
         assertEquals(listOf("acme-demo/1.0.0"), versionDirs("plugins"))
@@ -370,7 +370,7 @@ class DeploymentTest {
     @Test
     fun aCorruptDownloadIsRejectedAndNothingIsLeftInTheCache(): Unit = runBlocking {
         Files.write(repository.file("acme-demo", "1.0.0"), byteArrayOf(1, 2, 3))
-        assertEquals(Status.Code.DATA_LOSS, code { s.deploy(DeployProjectRequest.newBuilder().setProject("demo").build()) })
+        assertEquals(Status.Code.DATA_LOSS, code { s.deploy(DeployProjectRequest.newBuilder().setNoBlueGreen(true).setProject("demo").build()) })
         assertEquals(emptyList<String>(), versionDirs("plugins"))
         assertEquals(0, s.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsCount)
         val leftovers = if (Files.isDirectory(home.resolve("cache/downloads"))) Files.list(home.resolve("cache/downloads")).use { it.toList() } else emptyList()

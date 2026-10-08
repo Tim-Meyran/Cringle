@@ -387,6 +387,8 @@ message DeployProjectRequest {
   // Resolve again and overwrite the lock file. Without it, an existing lock file of the resolved
   // project version is used and nothing is resolved.
   bool relock = 4;
+  // Replace the running fabrics of the project by stopping them first instead of running the new ones next to them (Blue-Green is the default).
+  bool no_blue_green = 5;
 }
 
 message DeployProjectResponse {
@@ -396,6 +398,8 @@ message DeployProjectResponse {
   // The lock file that was written (also stored by the ManagementServer).
   string lock = 3;
   repeated ManagedFabric fabrics = 4;
+  // How the fabrics were put in place: "first deploy", "blue-green", or "stop-then-start (<reason>)".
+  string strategy = 5;
 }
 
 // A service dependency of a project bound to the fabric that provides the service.
