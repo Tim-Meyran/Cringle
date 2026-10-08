@@ -66,3 +66,7 @@ off, `SetDwhRetention(fabric, kind, name, retention)` sets the retention of a pa
 viewer, the other two the role operator. The recording mode is part of the state (`recordings` in `management.json`) and is applied again when
 a fabric of that id is deployed again or restored by `Recover`; it is removed when recording is switched off. CLI: `cringle dwh ...`
 (`docs/cli.md`).
+
+## Web interface (#207)
+
+With `--web-port <port>` the ManagementServer also serves a web interface over HTTPS (login with the user tokens, sessions, CSRF protection); see [webui.md](webui.md).

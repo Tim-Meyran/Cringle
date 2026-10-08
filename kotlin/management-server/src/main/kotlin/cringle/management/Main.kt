@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth]"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>]"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -28,6 +28,8 @@ public fun main(args: Array<String>) {
     val machines = ArrayList<Pair<String, String>>()
     var cacheDays: Long? = null
     var auth = false
+    var webPort: Int? = null
+    var webHost = "127.0.0.1"
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -53,6 +55,8 @@ public fun main(args: Array<String>) {
             }
             "--cache-max-unused-days" -> cacheDays = value(option).toLongOrNull()?.takeIf { it >= 0 } ?: fail("--cache-max-unused-days must be a number >= 0")
             "--auth" -> auth = true
+            "--web-port" -> webPort = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--web-port must be 0..65535")
+            "--web-host" -> webHost = value(option)
             else -> fail("unknown argument '$option'")
         }
         i += 1
@@ -78,13 +82,14 @@ public fun main(args: Array<String>) {
     } else {
         System.err.println("WARNING: no --auth: everybody who can reach the port is administrator")
     }
-    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) })
+    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost)
     Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")
     // the fingerprint that CLI and WebUI pin the server to ('cringle login --fingerprint'); it does not change while the key stays
     println("fingerprint=${identity.publicKeyFingerprint}")
+    server.web?.let { println("web-port=${it.port}") }
     System.out.flush()
     Thread.currentThread().join()
 }

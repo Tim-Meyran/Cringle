@@ -91,6 +91,9 @@ public class ManagementServer(
     private val cleanupInterval: java.time.Duration = java.time.Duration.ofHours(1),
     /** Called with the token of every authenticated call; used to delete the bootstrap token file after its first use. */
     onAuthenticated: (token: String) -> Unit = {},
+    /** If set, the web interface (#207) listens on this port (0: any) on [webHost]. */
+    webPort: Int? = null,
+    webHost: String = "127.0.0.1",
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
@@ -113,6 +116,9 @@ public class ManagementServer(
         }
         .build()
 
+    /** The web interface; `null` if no web port was given. Pages register their routes before [start]. */
+    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost) }
+
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
     @Volatile
     public var recovery: Deferred<RecoveryReport>? = null
@@ -124,6 +130,7 @@ public class ManagementServer(
     /** Starts the server and, in the background, the recovery. */
     public fun start(): ManagementServer {
         server.start()
+        web?.start()
         if (recoverOnStart) recovery = scope.async { core.recover() }
         if (cacheMaxUnusedDays != null) {
             scope.launch {
@@ -139,6 +146,7 @@ public class ManagementServer(
     /** Stops the server. Engines and fabrics keep running. */
     override fun close() {
         scope.cancel()
+        web?.close()
         server.shutdown()
         if (!server.awaitTermination(5, TimeUnit.SECONDS)) server.shutdownNow()
         core.close()
