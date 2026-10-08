@@ -72,6 +72,7 @@ public class WebServer(
         server.createContext("/") { exchange -> runCatching { handle(exchange) }.onFailure { fail(exchange, it) } }
         registerFoundation()
         OverviewPages(core).register(this)
+        DeploymentPages(core).register(this)
     }
 
     private fun sslContext(): SSLContext {

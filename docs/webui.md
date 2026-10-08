@@ -55,3 +55,14 @@ The functions of `cringle machine|engine|fabric ...`. Each page is a list that r
 | Fabrics | `GET /fabrics`, `GET /fabrics/list`, `GET /fabrics/{machine}/{engine}/{fabric}` (blocks, last error) | `READ` | `POST .../start\|stop\|remove` (`OPERATE`) |
 
 Tags are entered as roles `a, b` and labels `key=value, key2=value2`. Buttons and forms the user may not use are not rendered.
+
+## Pages: deployments, logs, metrics, data warehouse (#209)
+
+| Page | Routes | Permission | Notes |
+|---|---|---|---|
+| Deployments | `GET /deployments`, `GET /deployments/list` | `READ` | deployed projects with their fabrics and states; deploy form (project from the repository, version range, start, relock) `POST /deployments`, `POST /deployments/{project}/undeploy`; bindings of service dependencies `POST /bindings` (fabrics in order of preference), `POST /bindings/{project}/{service}/unbind` (`OPERATE`) |
+| Logs | `GET /logs`, `GET /logs/list?machine&engine&fabric&block&level&minutes&limit` | `READ` | newest at the bottom; entries from the collector are marked `(collected)`, the file of foreign lines is the source column; an Alpine switch refreshes every 5 s |
+| Metrics | `GET /metrics`, `GET /metrics/list` | `READ` | one block per engine (CPU, heap, threads); click to expand fabrics, blocks and tethers; refreshes every 5 s (an expanded engine collapses on refresh) |
+| Data warehouse | `GET /dwh`, `GET /dwh/list`, `GET /dwh/records?fabric&kind&name&limit` | `READ` | partitions with size and retention, records of a partition; `POST /dwh/recording` (recording on/off with default retention) and `POST /dwh/retention` (`OPERATE`) |
+
+Retention is entered as hours and bytes; empty means no limit.

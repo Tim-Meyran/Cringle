@@ -17,3 +17,4 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .warning { background: var(--warn); padding: .5rem 1.2rem; margin: 0; }
 .error { color: var(--err); }
 code { font-size: 13px; word-break: break-all; }
+.info { color: #1a7f37; }
