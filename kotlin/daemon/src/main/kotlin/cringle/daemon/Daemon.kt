@@ -51,19 +51,32 @@ public class Daemon(
      * Trust the management server of the same home (`<home>/management`): its identity is created if it is missing and its key
      * entered as `COMPONENT`, here and in the router of combined mode, so that no fingerprint has to be copied (`LocalTrust`).
      */
-    private val trustLocal: Boolean = false,
+    trustLocal: Boolean = false,
+    /** The programs the daemon starts and keeps running next to the engines; none by default. */
+    private val companions: Companions = Companions(),
 ) : AutoCloseable {
+    /** Whether the components of this home trust each other by their key files; always when the daemon runs the management server or the repository. */
+    private val localTrust: Boolean = trustLocal || companions.any
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
     private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
     private val certificateWatchers = arrayListOf(cringle.common.CertificateWatcher(daemonIdentity))
 
     /** The fingerprint of the management server of this home when [trustLocal] is on, `null` otherwise. */
-    private val localManagement: String? = if (trustLocal) {
+    private val localManagement: String? = if (localTrust) {
         LocalTrust.ensure(home.resolve("management"), ComponentKind.MANAGEMENT.commonName("management")).also {
             LocalTrust.trust(daemonTrustStore, it, "management", TrustKind.COMPONENT)
         }
     } else null
+
+    /** The key of the repository of this home when the daemon runs it: its identity is made now, so the engines trust it from their first start. */
+    private val localRepository: String? = if (companions.repositoryPort != null) {
+        LocalTrust.ensure(home.resolve("repository"), ComponentKind.REPOSITORY.commonName("repository")).also {
+            LocalTrust.trust(daemonTrustStore, it, "repository", TrustKind.COMPONENT)
+        }
+    } else null
+
+    private val companionProcesses = ArrayList<CompanionProcess>()
 
     /** The fingerprint of the key of the daemon, which the engines and the management server have to trust. */
     public val identityFingerprint: String get() = daemonIdentity.publicKeyFingerprint
@@ -139,7 +152,28 @@ public class Daemon(
         }
         server.start()
         collector.start()
+        startCompanions()
         return this
+    }
+
+    /** Starts the repository and then the management server, if the daemon is to run them. */
+    private fun startCompanions() {
+        val environment = mapOf("CRINGLE_HOME" to home.toString(), LocalTrust.ENV to "1")
+        val logs = daemonDir.resolve("logs")
+        companions.repositoryPort?.let { repositoryPort ->
+            companionProcesses += CompanionProcess(
+                "repository", companions.command, "cringle.repository.MainKt",
+                listOf("--home", home.toString(), "--port", repositoryPort.toString(), "--trust-local"),
+                environment, logs,
+            ).also { it.start() }
+        }
+        companions.managementPort?.let { managementPort ->
+            val arguments = arrayListOf("--home", home.toString(), "--port", managementPort.toString(), "--auth", "--trust-local", "--machine", "local=127.0.0.1:$port")
+            companions.webPort?.let { arguments += listOf("--web-port", it.toString()) }
+            companions.repositoryPort?.let { arguments += listOf("--repository", "127.0.0.1:$it") }
+            router?.let { arguments += listOf("--router", "127.0.0.1:${it.port}") }
+            companionProcesses += CompanionProcess("management", companions.command, "cringle.management.MainKt", arguments, environment, logs).also { it.start() }
+        }
     }
 
     /** Registers a new engine; allocates an id if [id] is `null`. Does not start it. */
@@ -213,7 +247,7 @@ public class Daemon(
      */
     private fun writeEngineTrustFile(engineId: String) {
         // the local trust: a repository of this home (its key file exists once it has run) is trusted by the engines, which download from it
-        if (trustLocal) {
+        if (localTrust) {
             LocalTrust.fingerprintOf(home.resolve("repository"))?.let { LocalTrust.trust(daemonTrustStore, it, "repository", TrustKind.COMPONENT) }
         }
         val routerEntry = (router?.let { "127.0.0.1:${it.port}" } ?: routerAddress)?.let { routerAddr ->
@@ -249,6 +283,7 @@ public class Daemon(
 
     /** Stops the gRPC server, the router and all engine processes. */
     override fun close() {
+        companionProcesses.reversed().forEach { it.close() }
         certificateWatchers.forEach { it.close() }
         collector.close()
         server.shutdown()

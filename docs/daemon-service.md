@@ -5,12 +5,13 @@ One daemon runs per machine and starts at boot (Architecture 4.1). This page sho
 ## Command line
 
 ```
-java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined]
+java -cp <classpath> cringle.daemon.MainKt [--home <dir>] [--port <port>] [--router <host:port> | --combined] [--with-management [<port>]] [--web-port <port>] [--with-repository [<port>]]
 ```
 
 - `--home`: Cringle home (default `~/.cringle`, or `CRINGLE_HOME`). The engine register is `<home>/daemon/engines.json`, engine process logs are `<home>/daemon/logs/<id>.out.log` and `.err.log`.
 - `--port`: port of the daemon API (default: any free port; the daemon prints `daemon-port=<port>` on start). Use a fixed port for a service.
 - `--combined`: runs the router (registry) of the machine inside the daemon process (Architecture 4.3). Its data lives in `<home>/router/`.
+- `--with-management [<port>]` (default 7500), `--web-port <port>`, `--with-repository [<port>]` (default 7600): the daemon starts the management server and the repository as JVM processes of their own (same class path, same `CRINGLE_HOME`) and starts them again with a growing delay (1 s up to 30 s) when they end. The management server runs with `--auth` (user logins; the first start writes the admin token to `<home>/management/bootstrap-token`, see `docs/trust.md`), knows this daemon as machine `local`, and uses the repository and the router of the daemon. These options imply local trust (`--trust-local`): the programs of one home trust each other by their key files, and the daemon makes the identity of the repository before it starts the engines. The output of the programs is in `<home>/daemon/logs/management.out.log`, `management.err.log`, `repository.out.log` and `repository.err.log` (without the token). A daemon on its own (without these options) does not start them; they are one per site, so a machine that is not the site's central one uses `--daemon-only` in the installer.
 - `--router host:port`: points the engines to an existing router instead.
 
 The daemon starts engines with the same JVM and class path it runs with. When the daemon stops, it stops the engines it started. The ManagementServer brings them back during recovery (`Recover`, which also runs when the ManagementServer starts): it registers every engine it created with `autostart` (the default, see `CreateEngine`) at the daemon again if the daemon lost it and starts it, one engine after the other, and then deploys and starts the fabrics of the running engines that should run. Engines created without `autostart` stay stopped, and an engine that was stopped on purpose is not started again because stopping is not remembered (`autostart` is a setting, not the current state). The daemon API has a call `StartAllEngines`, but recovery does not use it.
@@ -23,11 +24,11 @@ The installers set up the daemon as a service from a release (`docs/releasing.md
 
 ```
 curl -fsSLO https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.sh
-sudo sh install.sh [--release <version>] [--with-management] [--start]
+sudo sh install.sh [--release <version>] [--daemon-only] [--start]
 ```
 
 - `--release <version>`: install this version (default: the latest release).
-- `--with-management`: also install `cringle-management.service`.
+- `--daemon-only`: run the daemon alone. By default the daemon service also runs the management server (port 7500, web interface 8443, with user logins) and the repository (port 7600) as programs it supervises (`--with-management --web-port --with-repository`, see below). An older `cringle-management.service` is removed on upgrade. `--with-management` is accepted and does nothing.
 - `--start`: start the services; without it they are enabled (start at boot), but not started.
 - `--uninstall`: stop and remove the units and the symlinks and delete `/opt/cringle`; `/var/lib/cringle` (data) and `/etc/cringle` (configuration) stay. `--uninstall --purge` removes them and the user `cringle` too; `--purge` alone is an error.
 
@@ -43,11 +44,11 @@ In a PowerShell (5.1 or newer; it asks for administrative rights when needed):
 
 ```
 Invoke-WebRequest https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.ps1 -OutFile install.ps1
-.\install.ps1 [-Version <version>] [-WithManagement] [-Start]
+.\install.ps1 [-Version <version>] [-DaemonOnly] [-Start]
 ```
 
 - `-Version <version>`: install this version (default: the latest release).
-- `-WithManagement`: also register the service `Cringle Management Server`.
+- `-DaemonOnly`: run the daemon alone. By default the service `Cringle Daemon` also runs the management server (7500, web interface 8443, user logins) and the repository (7600). An older service `Cringle Management Server` is removed on upgrade. `-WithManagement` is accepted and does nothing.
 - `-Start`: start the services; without it they start at the next boot.
 - `-Uninstall`: stop and remove the services, the `PATH` entry and `%ProgramFiles%\Cringle`; the data in `%ProgramData%\Cringle` stays. `-Uninstall -Purge` removes it too; `-Purge` alone is an error.
 
@@ -65,7 +66,7 @@ To run what you built yourself instead of a release, use Gradle in a PowerShell 
 .\gradlew.bat cringleUninstallLocal --console=plain --no-daemon   # remove it (the data stays)
 ```
 
-`cringleInstallLocal` and `cringleUpdateLocal` build the distribution (`cringleDist`, version `0.0.0-SNAPSHOT` unless you give `-PreleaseVersion=1.2.3`) and run `installer\install.ps1 -FromBuild build\dist -Version <version>`, so a local build is installed exactly like a release: same folders, services and `PATH` entry. `cringleUpdateLocal` stops with a message if nothing is installed; the services that were running are started again after the switch. The same version is replaced, so a new build of `0.0.0-SNAPSHOT` simply overwrites the old one. Options as `-P` properties: `-Pstart`, `-PwithManagement`, `-PnoService` (files only, no administrative rights needed), `-PinstallRoot=<dir>`, `-PdataRoot=<dir>`, and for `cringleUninstallLocal` `-Ppurge`.
+`cringleInstallLocal` and `cringleUpdateLocal` build the distribution (`cringleDist`, version `0.0.0-SNAPSHOT` unless you give `-PreleaseVersion=1.2.3`) and run `installer\install.ps1 -FromBuild build\dist -Version <version>`, so a local build is installed exactly like a release: same folders, services and `PATH` entry. `cringleUpdateLocal` stops with a message if nothing is installed; the services that were running are started again after the switch. The same version is replaced, so a new build of `0.0.0-SNAPSHOT` simply overwrites the old one. Options as `-P` properties: `-Pstart`, `-PdaemonOnly`, `-PnoService` (files only, no administrative rights needed), `-PinstallRoot=<dir>`, `-PdataRoot=<dir>`, and for `cringleUninstallLocal` `-Ppurge`.
 
 Without Gradle: `.\gradlew.bat cringleDist`, then `.\installer\install.ps1 -FromBuild build\dist` (`-Version` is needed only if `build\dist` holds several versions). WinSW is taken from `build\dist\winsw.exe` if it is there and otherwise downloaded (pinned version, checksum checked, as in a release). On Linux run `sudo installer/install.sh` with `CRINGLE_RELEASE_BASE_URL=file://<dir>` (a folder `v<version>` with the archive and `SHA256SUMS`); Gradle tasks for Linux do not exist yet.
 

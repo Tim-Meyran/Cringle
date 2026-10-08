@@ -382,7 +382,7 @@ tasks.register("cringleWindowsRuntime") {
 // files, the services and the PATH entry; install.ps1 asks for administrative rights (the Windows dialog) unless -PnoService is given.
 // `cringleUpdateLocal` builds and installs over an existing installation (it fails if there is none; the services that were
 // running are started again). `cringleUninstallLocal` removes it (data stays; -Ppurge removes it too).
-// Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot, withManagement, start, noService, purge.
+// Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot, daemonOnly, start, noService, purge.
 fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks.register(taskName) {
     group = "distribution"
     description = text
@@ -403,7 +403,7 @@ fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks
             if (flag("purge")) command += "-Purge"
         } else {
             command += listOf("-FromBuild", distDir.get().asFile.path, "-Version", releaseVersion)
-            if (flag("withManagement")) command += "-WithManagement"
+            if (flag("daemonOnly")) command += "-DaemonOnly"
             if (flag("start")) command += "-Start"
         }
         if (flag("noService")) command += "-NoService"

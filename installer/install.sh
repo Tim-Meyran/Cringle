@@ -3,11 +3,13 @@
 #
 # Installer of Cringle for Linux with systemd (docs/daemon-service.md).
 #
-#   sudo ./install.sh [--release <version>] [--with-management] [--start]
+#   sudo ./install.sh [--release <version>] [--daemon-only] [--start]
 #   sudo ./install.sh --uninstall [--purge]
 #
 #   --release <version>  install this version (default: the latest release)
-#   --with-management    also install the unit cringle-management.service
+#   --daemon-only        run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
+#                        user logins) and the repository (port 7600) as programs it supervises
+#   --with-management    no longer needed (the default); accepted for old scripts
 #   --start              start the installed services (default: they are enabled, but not started)
 #   --uninstall          stop and remove the services, the symlinks and /opt/cringle; data and configuration stay
 #   --purge              with --uninstall: also remove /var/lib/cringle, /etc/cringle and the user cringle
@@ -38,6 +40,8 @@ RUN_ENV="/etc/cringle/cringle.env"
 
 DAEMON_PORT=7400
 MANAGEMENT_PORT=7500
+WEB_PORT=8443
+REPOSITORY_PORT=7600
 
 TMP_DIR=""
 
@@ -63,11 +67,12 @@ trap cleanup EXIT
 trap 'exit 1' INT TERM
 
 usage() {
-    sed -n '4,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,19p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 RELEASE=""
 WITH_MANAGEMENT=0
+DAEMON_ONLY=0
 START=0
 UNINSTALL=0
 PURGE=0
@@ -85,6 +90,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --with-management) WITH_MANAGEMENT=1; shift ;;
+        --daemon-only) DAEMON_ONLY=1; shift ;;
         --start) START=1; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
         --purge) PURGE=1; shift ;;
@@ -96,8 +102,8 @@ done
 if [ "$PURGE" -eq 1 ] && [ "$UNINSTALL" -eq 0 ]; then
     die "--purge works only together with --uninstall"
 fi
-if [ "$UNINSTALL" -eq 1 ] && { [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$START" -eq 1 ]; }; then
-    die "--uninstall cannot be combined with --release, --with-management or --start"
+if [ "$UNINSTALL" -eq 1 ] && { [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ]; }; then
+    die "--uninstall cannot be combined with --release, --daemon-only or --start"
 fi
 if [ -n "$RELEASE" ]; then
     printf '%s' "$RELEASE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
@@ -209,11 +215,17 @@ EOF
 }
 
 install_units() {
-    write_unit cringle-daemon.service "Cringle daemon" network.target \
-        "$RUN_CURRENT/bin/cringle-daemon --port $DAEMON_PORT --combined"
-    if [ "$WITH_MANAGEMENT" -eq 1 ]; then
-        write_unit cringle-management.service "Cringle management server" "network.target cringle-daemon.service" \
-            "$RUN_CURRENT/bin/cringle-management-server --port $MANAGEMENT_PORT"
+    daemon_args="--port $DAEMON_PORT --combined"
+    if [ "$DAEMON_ONLY" -eq 0 ]; then
+        daemon_args="$daemon_args --with-management $MANAGEMENT_PORT --web-port $WEB_PORT --with-repository $REPOSITORY_PORT"
+    fi
+    write_unit cringle-daemon.service "Cringle daemon" network.target "$RUN_CURRENT/bin/cringle-daemon $daemon_args"
+    # an older installation ran the management server as a unit of its own; the daemon runs it now
+    if [ -e "$UNIT_DIR/cringle-management.service" ]; then
+        if systemd_running; then
+            systemctl disable --now cringle-management.service > /dev/null 2>&1 || true
+        fi
+        rm -f "$UNIT_DIR/cringle-management.service" "$UNIT_DIR/multi-user.target.wants/cringle-management.service"
     fi
 }
 
