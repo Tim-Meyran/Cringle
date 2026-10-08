@@ -439,12 +439,15 @@ fun registerProgram(module: String, taskName: String, mainClassName: String, sum
         mainClass.set(mainClassName)
         args(*defaultArgs)
         environment("CRINGLE_HOME", devHome.get())
+        // the programs of build/dev-home trust each other (docs/trust.md, "Local trust") and the command line finds the management server
+        environment("CRINGLE_TRUST_LOCAL", "1")
+        environment("CRINGLE_SERVER", "127.0.0.1:7500")
         standardInput = System.`in`
     }
 }
 
-registerProgram("daemon", "runDaemon", "cringle.daemon.MainKt", "Runs the daemon with its own router (combined mode) on port 7400; CRINGLE_HOME is build/dev-home.", "--port", "7400", "--combined")
-registerProgram("management-server", "runManagementServer", "cringle.management.MainKt", "Runs the management server with user management on port 7500 and the WebUI on https://127.0.0.1:8443 (prints its fingerprint and the bootstrap token); CRINGLE_HOME is build/dev-home.", "--port", "7500", "--auth", "--web-port", "8443")
+registerProgram("daemon", "runDaemon", "cringle.daemon.MainKt", "Runs the daemon with its own router (combined mode) on port 7400; it trusts the management server of build/dev-home.", "--port", "7400", "--combined")
+registerProgram("management-server", "runManagementServer", "cringle.management.MainKt", "Runs the management server on port 7500 and the WebUI on https://127.0.0.1:8443, without logins (everybody on this machine is administrator); trusts the daemon and the engines of build/dev-home. Add --auth with --args for logins.", "--port", "7500", "--web-port", "8443", "--machine", "local=127.0.0.1:7400")
 registerProgram("engine", "runEngine", "cringle.engine.MainKt", "Runs one engine by itself (normally the daemon starts engines); CRINGLE_HOME is build/dev-home.", "--id", "dev-engine")
 registerProgram("cli", "runCli", "cringle.cli.MainKt", "Runs the cringle command line; pass the command with --args, e.g. --args=\"login --server 127.0.0.1:7500 --fingerprint <sha256>\".", "--help")
 

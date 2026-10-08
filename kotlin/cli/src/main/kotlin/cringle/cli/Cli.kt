@@ -2,6 +2,7 @@
 
 package cringle.cli
 
+import cringle.common.LocalTrust
 import io.grpc.Status
 import io.grpc.StatusException
 import java.io.InputStream
@@ -27,6 +28,7 @@ public class Cli(
         var command: Command? = null
         try {
             var json = false
+            var trustLocal = false
             var server: String? = null
             var home: String? = null
             val rest = ArrayList<String>()
@@ -35,6 +37,7 @@ public class Cli(
                 val a = args[i]
                 when {
                     a == "--json" -> json = true
+                    a == "--trust-local" -> trustLocal = true
                     a == "--server" -> server = args.getOrNull(++i) ?: throw UsageException("--server needs a value")
                     a.startsWith("--server=") -> server = a.removePrefix("--server=")
                     a == "--home" -> home = args.getOrNull(++i) ?: throw UsageException("--home needs a value")
@@ -53,6 +56,7 @@ public class Cli(
                     server?.let { add("--server"); add(it) }
                     home?.let { add("--home"); add(it) }
                     if (json) add("--json")
+                    if (trustLocal) add("--trust-local")
                 })
             }
             val wantsHelp = rest.isEmpty() || rest.first() == "help" || rest.first() == "--help" || rest.first() == "-h"
@@ -79,7 +83,9 @@ public class Cli(
             val effective = Profile(
                 server ?: environment["CRINGLE_SERVER"]?.takeIf { it.isNotBlank() } ?: stored.server,
                 environment["CRINGLE_TOKEN"]?.takeIf { it.isNotBlank() } ?: stored.token,
-                environment["CRINGLE_FINGERPRINT"]?.takeIf { it.isNotBlank() } ?: stored.fingerprint,
+                environment["CRINGLE_FINGERPRINT"]?.takeIf { it.isNotBlank() } ?: stored.fingerprint
+                    // --trust-local: the management server of this home (same machine, same user): its public key file is in the home
+                    ?: if (LocalTrust.enabled(trustLocal, environment)) LocalTrust.fingerprintOf(homeDir.resolve("management")) else null,
             )
             if (command.needsServer && effective.server == null) {
                 throw UsageException("no server address: use --server host:port, CRINGLE_SERVER, or 'cringle login --server host:port'")
@@ -173,6 +179,7 @@ public class Cli(
         appendLine("global options:")
         appendLine("  --server host:port  address of the ManagementServer (default: CRINGLE_SERVER or the profile)")
         appendLine("  --json              print JSON instead of text")
+        appendLine("  --trust-local       pin the management server of this home by its key file (also CRINGLE_TRUST_LOCAL=1): same machine, no fingerprint")
         appendLine("  --home dir          Cringle home with the profile cli.json (default: CRINGLE_HOME or ~/.cringle)")
         appendLine("  --version           print the version of this installation")
         appendLine("  --help              show this help; 'cringle <command> --help' shows the options of a command")

@@ -80,6 +80,17 @@ A fabric that provides a service (#177) allows a list of engines instead of one 
 
 `ManagementTlsTest` (module `management-server`) shows that the links ManagementServer to Daemon, Engine and Repository and Daemon to Engine run only over mTLS, that a peer without a trust entry is refused, and that a removed peer is refused on its next connection. `RepositoryTlsTest` shows that a client with a valid token but without a trust entry fails at TLS, not at authentication. `NoPlaintextGuardTest` fails if `usePlaintext` returns to one of the classes `ManagementCore`, `RepositoryServer`, `RepositoryClient`, `Daemon` and `Engine`. How the management server and its trust store are described: `docs/management-server.md` (channels and trust).
 
+## Local trust (`--trust-local`)
+
+The daemon, the router, the engines and the management server of one machine run under one user and keep their keys below one home (`<home>/daemon`, `<home>/router`, `<home>/engines/<id>`, `<home>/management`). With the local trust they read each other's fingerprints from the public key files there, so that nobody copies a fingerprint or makes a trust entry:
+
+- **`daemon --trust-local`** creates the identity of the management server of the home if it is missing (the management server loads the same key later) and trusts it as `COMPONENT`, in its own trust store and in the router of combined mode. The engines get it through their trust file, as for any `COMPONENT` of the daemon.
+- **`management-server --trust-local`** trusts the daemon (`COMPONENT`), the router (`ROUTER`) and every engine (`ENGINE`) whose key file is in the home. It looks again before every new connection (at most twice a second), so an engine that was created a moment ago is trusted when it is first called. It creates nothing and removes nothing.
+- **`cringle --trust-local`** pins the management server by the key file in `<home>/management` when no fingerprint is configured (`CRINGLE_FINGERPRINT` and the profile still win). The same machine and user is the reason it needs no confirmation of a fingerprint.
+- **`CRINGLE_TRUST_LOCAL=1`** turns it on for all three without the option. It is off by default.
+
+What it is not: whoever can write into the home can make a component trust a key, which is no more than that person can do with the keys in the home anyway. Components on different machines still need fingerprints entered by hand (`cringle trust`). The Gradle tasks `runDaemon`, `runManagementServer`, `runEngine`, `runCli` and `runShell` set it (`docs/running-from-the-ide.md`); the installed services do not.
+
 ## What is missing
 
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
