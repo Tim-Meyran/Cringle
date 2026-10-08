@@ -54,6 +54,7 @@ abstract class ServiceTestBase {
     protected lateinit var dir: Path
     protected lateinit var s: ManagementServiceCoroutineStub
     protected lateinit var tls: ManagementTls
+    protected lateinit var core: ManagementCore
     protected lateinit var daemon: Daemon
     protected val closeables = ArrayList<AutoCloseable>()
     protected val received get() = dir.resolve("orders.txt")
@@ -210,7 +211,7 @@ abstract class ServiceTestBase {
         tls.trust(daemon)
         val repositoryServer = tls.startRepository(repository)
         closeables += AutoCloseable { repositoryServer.stop() }
-        val core = tls.core(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}")
+        core = tls.core(ManagementStore(dir.resolve("state.json")), "127.0.0.1:${repositoryServer.port}")
         val server = ManagementServer(core, recoverOnStart = false).start()
         closeables += server
         val channel = ManagementTls.channelTo(server)

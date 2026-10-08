@@ -43,3 +43,15 @@ Package `cringle.management.web`:
 To add a page: register its routes on `ManagementServer.web.router` and a `NavItem` in `web.navigation` before `start()`, return `Layout.page(...)` for a full page and an `Html` fragment for htmx requests, show errors of the core (`ManagementException`) inline, and test it with a client like the one in `WebServerTest`.
 
 Static files are served from `/static/...` with an `ETag` (`If-None-Match` gives 304); a path with `..` is 404.
+
+## Pages: machines, engines, fabrics (#208)
+
+The functions of `cringle machine|engine|fabric ...`. Each page is a list that refreshes itself every 5 seconds (`hx-trigger="every 5s"`); an action (`hx-post`) answers with the refreshed list, and an error of the core is shown above it with its gRPC code (for example `ALREADY_EXISTS: machine 'm2' is already known`). Destructive actions ask for confirmation (`hx-confirm`).
+
+| Page | Route | Permission | Actions |
+|---|---|---|---|
+| Machines | `GET /machines`, `GET /machines/list` | `READ` | add `POST /machines`, remove `POST /machines/{id}/remove` (`ADMINISTER`) |
+| Engines | `GET /engines`, `GET /engines/list` | `READ` | create `POST /engines`, `POST /engines/{machine}/{id}/start\|stop\|delete\|tags` (`OPERATE`) |
+| Fabrics | `GET /fabrics`, `GET /fabrics/list`, `GET /fabrics/{machine}/{engine}/{fabric}` (blocks, last error) | `READ` | `POST .../start\|stop\|remove` (`OPERATE`) |
+
+Tags are entered as roles `a, b` and labels `key=value, key2=value2`. Buttons and forms the user may not use are not rendered.
