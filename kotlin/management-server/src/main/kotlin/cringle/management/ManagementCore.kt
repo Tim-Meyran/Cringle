@@ -76,6 +76,9 @@ public data class EngineView(
 /** The outcome of [ManagementCore.deploy]. */
 public data class DeployResult(val project: String, val version: String, val lock: String, val fabrics: List<FabricView>)
 
+/** A fabric that was deployed from a project through this ManagementServer. */
+public data class DeployedFabric(val project: String, val version: String, val machine: String, val engineId: String, val fabricId: String, val desiredRunning: Boolean)
+
 /** A fabric with the wish of the ManagementServer. */
 public data class FabricView(val machine: String, val engineId: String, val info: FabricInfo, val desiredRunning: Boolean)
 
@@ -1046,6 +1049,12 @@ public class ManagementCore(
         }
         update { d -> d.copy(fabrics = d.fabrics.filter { !(it.machine == machineId && it.engineId == engineId && it.fabricId == fabricId) }) to Unit }
     }
+
+    /** The fabrics that were deployed from projects, sorted by project and fabric. */
+    public fun deployedFabrics(): List<DeployedFabric> = snapshot().fabrics.map {
+        val project = DeployFabricRequest.parseFrom(it.deploy).project
+        DeployedFabric(project.name, project.version, it.machine, it.engineId, it.fabricId, it.desiredRunning)
+    }.filter { it.project.isNotEmpty() }.sortedWith(compareBy({ it.project }, { it.fabricId }))
 
     /** Stops and removes all fabrics of [project]; returns them as `<machine>/<engine>/<fabric>`. */
     public suspend fun undeploy(project: String): List<String> {
