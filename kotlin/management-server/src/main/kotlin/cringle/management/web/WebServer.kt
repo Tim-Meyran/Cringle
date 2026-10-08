@@ -74,6 +74,7 @@ public class WebServer(
         OverviewPages(core).register(this)
         DeploymentPages(core).register(this)
         users?.let { UserPages(it).register(this) }
+        TrustPackagePages(core).register(this)
     }
 
     private fun sslContext(): SSLContext {
@@ -179,7 +180,7 @@ public class WebServer(
         if (method == "POST" && session != null && route.pattern != "/login" && !csrfOk(session, headers["x-csrf-token"])) {
             return WebResponse.page(403, layout.page("Refused", session, raw("<h1>Refused</h1><p>The request has no valid CSRF token.</p>"), openMode = users == null))
         }
-        val body = readBody(exchange)
+        val body = readBody(exchange, route.maxBodyBytes ?: maxBodyBytes)
         val form = if (headers["content-type"]?.startsWith("application/x-www-form-urlencoded") == true) parseQuery(String(body)) else emptyMap()
         val request = WebRequest(method, path, parseQuery(uri.rawQuery.orEmpty()), form, headers, session, params, body)
         val response = runBlocking { route.handler(request) }
@@ -199,7 +200,7 @@ public class WebServer(
 
     private fun status(code: Int): WebResponse = WebResponse(code, ByteArray(0), "text/plain; charset=utf-8")
 
-    private fun readBody(exchange: HttpExchange): ByteArray {
+    private fun readBody(exchange: HttpExchange, limit: Int): ByteArray {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         exchange.requestBody.use { input ->
@@ -207,7 +208,7 @@ public class WebServer(
                 val n = input.read(buffer)
                 if (n < 0) break
                 out.write(buffer, 0, n)
-                if (out.size() > maxBodyBytes) throw IllegalArgumentException("request too large")
+                if (out.size() > limit) throw IllegalArgumentException("request too large")
             }
         }
         return out.toByteArray()

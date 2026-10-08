@@ -70,3 +70,16 @@ Retention is entered as hours and bytes; empty means no limit.
 ## Pages: users, groups, tokens (#210)
 
 Only with `--auth`; every route needs `MANAGE_USERS`, and the navigation entries are shown only to users that have it. The functions of `cringle user|group|token`: `GET /users` (users with roles, groups, tokens), `POST /users` (name, roles, groups), `POST /users/{id}/delete` (the last administrator cannot be deleted), `POST /users/{id}/tokens` (label, lifetime in hours; the value is shown **once** in the answer and not kept), `POST /tokens/{id}/revoke`, `GET /groups`, `POST /groups`. A token is rotated by creating a new one and revoking the old one. Changing the groups or roles of an existing user or group is not possible in the CLI either and comes with its own issue.
+
+## Pages: trust and packages (#211)
+
+| Page | Routes | Permission | Notes |
+|---|---|---|---|
+| Trust | `GET /trust`, `GET /trust/list` | `READ` | everything that the ManagementServer and its router trust (`cringle trust list`), the connected routers |
+| | `POST /trust/probe` then `POST /trust/routers` | `ADMINISTER` | trusting a router is **two steps** as in the CLI: the first shows the key fingerprint that the router presents (nothing is trusted yet); the operator checks it with the operator of that router and confirms, and the second step connects the router with exactly that fingerprint |
+| | `POST /trust/routers/remove`, `POST /trust/components`, `POST /trust/revoke` | `ADMINISTER` | disconnect a router, trust a component (`COMPONENT` or `SERVER`) by fingerprint, revoke (for a router also the engines that came through it) |
+| Packages | `GET /packages`, `GET /packages/list` | `READ` | projects and plugins with version, size and the trust status of plugins |
+| | `POST /packages/upload` | `OPERATE` | publish a package file (multipart, at most 64 MB); the repository verifies it |
+| | `POST /packages/{plugin}/trust` | `ADMINISTER` | `trusted` or `untrusted` for all versions of a plugin |
+
+Deleting a package version is not possible in the repository (and so not here).
