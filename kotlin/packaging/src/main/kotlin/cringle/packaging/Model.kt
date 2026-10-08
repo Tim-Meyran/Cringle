@@ -153,7 +153,19 @@ public data class TetherDef(
     public val serial: SerialTetherConfig? = null,
     /** The far end on another engine; `null` for a tether between two local ports. See [RemoteEndpoint]. */
     public val remote: RemoteEndpoint? = null,
+    /**
+     * The far end on another engine as an abstract dependency: the name of a service that a blueprint of another
+     * fabric provides (see [ProvidedService]). Bound to a concrete [remote] at deploy time (#171, #172); `null` if the
+     * tether is local or has a [remote]. At most one of [remote] and [service] is set.
+     */
+    public val service: String? = null,
 )
+
+/**
+ * A port that a blueprint offers to the tethers of other projects under the name [service] (Architecture chapter
+ * 13.1): the `IN` port [port] of the block [block] of this blueprint.
+ */
+public data class ProvidedService(public val service: String, public val block: String, public val port: String)
 
 /**
  * A block instance in a blueprint. [block] is `pluginName/blockName`; [varArgCounts] gives the fixed size of every
@@ -172,6 +184,8 @@ public data class Blueprint(
     public val name: String,
     public val blocks: List<BlueprintBlock>,
     public val tethers: List<TetherDef>,
+    /** The services this blueprint provides; empty for an ordinary blueprint. */
+    public val provides: List<ProvidedService> = emptyList(),
 )
 
 /** A read project package. [schemas] maps ZIP entry to schema text; [files] lists every entry name, sorted. */

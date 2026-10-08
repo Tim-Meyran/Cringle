@@ -127,6 +127,13 @@ public object PackageValidator {
                 problem("$path.config", "'${b.block}' takes no configuration")
             }
         }
+        val services = HashSet<String>()
+        blueprint.provides.forEachIndexed { i, p ->
+            val path = "$.provides[$i]"
+            PackageNames.nameProblem(p.service)?.let { problem("$path.service", it) }
+            if (!services.add(p.service)) problem("$path.service", "duplicate service '${p.service}'")
+            endpoint(Endpoint(p.block, p.port), path, instances, unresolved, PortDirection.IN, ::problem)
+        }
         blueprint.tethers.forEachIndexed { i, t ->
             val path = "$.tethers[$i]"
             val from = t.from?.let { endpoint(it, "$path.from", instances, unresolved, PortDirection.OUT, ::problem) }
@@ -210,16 +217,20 @@ public object PackageValidator {
      */
     private fun endpointRules(t: TetherDef, path: String, problem: (String, String) -> Unit) {
         val remote = t.remote
+        val far = remote != null || t.service != null
         when {
-            remote == null && (t.from == null || t.to == null) ->
+            remote != null && t.service != null ->
+                problem(path, "a tether has a 'remote' with a fingerprint or a 'remote' with a service, not both")
+            !far && (t.from == null || t.to == null) ->
                 problem(path, "a tether needs 'from' and 'to', or exactly one of them and a 'remote'")
-            remote != null && t.from != null && t.to != null ->
+            far && t.from != null && t.to != null ->
                 problem(path, "a tether with a 'remote' has exactly one local endpoint: 'from' when the remote end receives, 'to' when it sends")
-            remote != null && t.from == null && t.to == null ->
+            far && t.from == null && t.to == null ->
                 problem(path, "a tether with a 'remote' needs its local endpoint 'from' (the remote end receives) or 'to' (the remote end sends)")
         }
+        if (far && t.type !in remoteTetherTypes) problem("$path.remote", "a ${t.type} tether is a local resource and cannot have a 'remote'")
+        t.service?.let { s -> PackageNames.nameProblem(s)?.let { problem("$path.remote.service", it) } }
         if (remote == null) return
-        if (t.type !in remoteTetherTypes) problem("$path.remote", "a ${t.type} tether is a local resource and cannot have a 'remote'")
         if (remote.address != null && (!remoteAddress.matches(remote.address) || remote.address.substringAfterLast(':').toInt() !in 1..65535)) {
             problem("$path.remote.address", "invalid address '${remote.address}': expected host:port with a port between 1 and 65535")
         }

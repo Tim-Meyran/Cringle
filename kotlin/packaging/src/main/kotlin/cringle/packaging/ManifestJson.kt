@@ -88,7 +88,8 @@ public object ManifestJson {
         "format", "kind", "name", "version", "dependencies", "providers", "drivers", "blocks", "libs", "schemas", "processors",
     )
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
-    private val blueprintKeys = setOf("name", "blocks", "tethers")
+    private val blueprintKeys = setOf("name", "blocks", "tethers", "provides")
+    private val providesKeys = setOf("service", "block", "port")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
     private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote")
     private val endpointKeys = setOf("block", "port", "index")
@@ -139,7 +140,8 @@ public object ManifestJson {
         val path = "$file $"
         val blocks = JsonReading.objectList(o, "blocks", path).mapIndexed { i, b -> block(b, "$file $.blocks[$i]") }
         val tethers = JsonReading.objectList(o, "tethers", path).mapIndexed { i, t -> tether(t, "$file $.tethers[$i]") }
-        return Blueprint(checkedName(JsonReading.string(o, "name", path), "$path.name"), blocks, tethers)
+        val provides = if (o.containsKey("provides")) JsonReading.objectList(o, "provides", path).mapIndexed { i, p -> provided(p, "$file $.provides[$i]") } else emptyList()
+        return Blueprint(checkedName(JsonReading.string(o, "name", path), "$path.name"), blocks, tethers, provides)
     }
 
     private fun header(text: String, file: String, kind: PackageKind, allowed: Set<String>): JsonObject {
@@ -239,12 +241,28 @@ public object ManifestJson {
                 stopBits = JsonReading.optInt(s, "stopBits", "$path.serial") ?: 1,
             )
         }
-        val remote = o["remote"]?.let { remoteEndpoint(it, "$path.remote") }
-        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial, remote)
+        val remoteObject = o["remote"]?.let { JsonReading.obj(it, "$path.remote") }
+        val service = remoteObject?.get("service")?.let { serviceName(remoteObject, "$path.remote") }
+        val remote = if (service == null) remoteObject?.let { remoteEndpoint(it, "$path.remote") } else null
+        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial, remote, service)
     }
 
-    private fun remoteEndpoint(e: JsonElement, path: String): RemoteEndpoint {
-        val o = JsonReading.obj(e, path)
+    /** The abstract form of a `remote`: `{"service": <name>}` and nothing else. */
+    private fun serviceName(o: JsonObject, path: String): String {
+        JsonReading.keys(o, path, setOf("service"))
+        return checkedName(JsonReading.string(o, "service", path), "$path.service")
+    }
+
+    private fun provided(o: JsonObject, path: String): ProvidedService {
+        JsonReading.keys(o, path, providesKeys)
+        return ProvidedService(
+            checkedName(JsonReading.string(o, "service", path), "$path.service"),
+            JsonReading.string(o, "block", path),
+            JsonReading.string(o, "port", path),
+        )
+    }
+
+    private fun remoteEndpoint(o: JsonObject, path: String): RemoteEndpoint {
         JsonReading.keys(o, path, remoteKeys)
         val index = JsonReading.optInt(o, "index", path)
         if (index != null && index < 0) throw PackageFormatException("$path.index", "must not be negative")
@@ -360,6 +378,7 @@ public object ManifestJson {
                                     r.index?.let { put("index", it) }
                                 })
                             }
+                            t.service?.let { s -> put("remote", buildJsonObject { put("service", s) }) }
                             if (t.delivery != DeliveryPolicy.DROP) put("delivery", t.delivery.name)
                             t.port?.let { put("port", it) }
                             t.bufferCapacity?.let { put("bufferCapacity", it) }
@@ -385,6 +404,20 @@ public object ManifestJson {
                     },
                 ),
             )
+            if (b.provides.isNotEmpty()) {
+                put(
+                    "provides",
+                    JsonArray(
+                        b.provides.map { p ->
+                            buildJsonObject {
+                                put("service", p.service)
+                                put("block", p.block)
+                                put("port", p.port)
+                            }
+                        },
+                    ),
+                )
+            }
         },
     ) + "\n"
 

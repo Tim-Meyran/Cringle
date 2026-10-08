@@ -890,6 +890,10 @@ public class TetherNetwork private constructor(
                 val remote = t.remote
                 val localFrom = t.from
                 val localTo = t.to
+                if (t.service != null) {
+                    problems += "tether ${t.type} to the service '${t.service}': the service is not bound to a fabric (a service dependency is bound when the project is deployed)"
+                    continue
+                }
                 if (remote != null) {
                     val local = if (localFrom != null && localTo == null) localFrom else if (localTo != null && localFrom == null) localTo else null
                     if (local == null) {
