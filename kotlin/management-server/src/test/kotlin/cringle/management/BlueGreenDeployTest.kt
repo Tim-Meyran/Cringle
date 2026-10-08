@@ -98,4 +98,15 @@ class BlueGreenDeployTest : ServiceTestBase() {
         assertTrue(r.strategy.contains("not started"), r.strategy)
         assertEquals(setOf("recorded-app-app-1"), states().keys)
     }
+
+    @Test
+    fun theDataFolderOfABlockSurvivesTheUpdateAndDoesNotDependOnTheFabricId() {
+        redeploy("recorded-app")
+        redeploy("recorded-app") // blue-green: the id is now ...-1b
+        redeploy("recorded-app", blueGreen = false) // back to ...-1
+        val data = dir.resolve("home/data/recorded-app/app/1/s/seen.txt")
+        assertEquals(listOf("start", "start", "start"), java.nio.file.Files.readAllLines(data))
+        // each block has its own folder, below the instance of the blueprint
+        assertTrue(java.nio.file.Files.isDirectory(dir.resolve("home/data/recorded-app/app/1/s2")))
+    }
 }

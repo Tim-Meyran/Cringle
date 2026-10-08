@@ -53,4 +53,16 @@ class FabricPathsTest {
         assertTrue(Files.isDirectory(engineDir.resolve("fabrics/shop-1/working/m1")))
         assertFalse(Files.exists(engineDir.resolve("fabrics/shop-1/evil")))
     }
+
+    @Test
+    fun theDataFolderOfABlockIsBelowTheDataBaseAndNotBelowTheFabric() {
+        val base = engineDir.resolve("data").resolve("shop").resolve("app").resolve("1")
+        val paths = FabricPaths(engineDir, "shop-app-1b", base)
+        assertEquals(base.resolve("db"), paths.blockData("db"))
+        assertFalse(paths.blockData("db")!!.startsWith(paths.root), "the data does not move with the id of the fabric")
+        assertEquals(null, FabricPaths(engineDir, "shop-1").blockData("db"), "no data base, no data folder")
+        assertThrows<FabricException> { paths.blockData("../escape") }
+        paths.create(listOf("db", "web"))
+        assertTrue(Files.isDirectory(base.resolve("db")) && Files.isDirectory(base.resolve("web")))
+    }
 }

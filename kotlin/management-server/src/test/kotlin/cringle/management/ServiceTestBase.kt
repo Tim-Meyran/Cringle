@@ -123,7 +123,15 @@ abstract class ServiceTestBase {
             import java.nio.file.*;
             public class SinkBlock implements Block {
                 private String file;
-                public Object init(BlockContext c, Continuation<? super Unit> k) { file = (String) c.getConfig().get("file"); return Unit.INSTANCE; }
+                public Object init(BlockContext c, Continuation<? super Unit> k) {
+                    file = (String) c.getConfig().get("file");
+                    // the data folder of the block (#227): one line per start, it survives redeploys and updates
+                    Path data = c.getDataDirectory();
+                    if (data != null) {
+                        try { Files.writeString(data.resolve("seen.txt"), "start\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND); } catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+                    }
+                    return Unit.INSTANCE;
+                }
                 public Object start(Continuation<? super Unit> k) { return Unit.INSTANCE; }
                 public Object stop(Continuation<? super Unit> k) { return Unit.INSTANCE; }
                 public Object destroy(Continuation<? super Unit> k) { return Unit.INSTANCE; }

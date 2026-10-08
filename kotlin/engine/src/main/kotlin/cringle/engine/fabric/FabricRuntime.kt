@@ -367,6 +367,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             override val config: Map<String, Any?> = entry.config
             override val ports: BlockPorts = this@BlockHost.ports
             override val logDirectory: java.nio.file.Path = spec.paths.blockLogs(blockId.value)
+            override val dataDirectory: java.nio.file.Path? = spec.paths.blockData(blockId.value)
         }
 
         private fun buildPorts(): BlockPorts {

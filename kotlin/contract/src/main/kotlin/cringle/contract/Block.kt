@@ -73,6 +73,15 @@ public interface BlockContext {
      * log query (Architecture 16.1).
      */
     public val logDirectory: java.nio.file.Path? get() = null
+
+    /**
+     * The data folder of this block, or `null` if the engine gives none: `<home>/data/<project>/<blueprint>/<n>/<block id>`, the same for every
+     * deployment of the same instance of the blueprint (`n` is the number of the instance), whatever the id and the version of the fabric. It
+     * survives redeploys and updates, so a block keeps its persistent state here; migrating it on a new version is the job of a processor. Only one
+     * running fabric should use it at a time: a block that does says so with an exclusive resource (`OTHER`, label `data`) in its definition, which makes
+     * the project be updated by stopping the old fabric first. Data lives on the machine of the engine, not in the repository.
+     */
+    public val dataDirectory: java.nio.file.Path? get() = null
 }
 
 /**
