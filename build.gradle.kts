@@ -421,3 +421,29 @@ fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks
 registerLocalInstaller("cringleInstallLocal", "Builds the distribution and installs it on this Windows machine (installer/install.ps1 -FromBuild).", "install")
 registerLocalInstaller("cringleUpdateLocal", "Builds the distribution and installs it over the existing local installation (fails if there is none).", "update")
 registerLocalInstaller("cringleUninstallLocal", "Removes the Cringle that is installed on this Windows machine (the data stays unless -Ppurge).", "uninstall")
+
+// --- Start the programs from the IDE -------------------------------------------------------------------------------------
+// One JavaExec task per program, group "cringle", so that the IDE can run and debug each of them from the Gradle tool window
+// (`./gradlew runDaemon --console=plain --no-daemon` works as well). The programs read CRINGLE_HOME: the tasks point it at
+// build/dev-home, never at ~/.cringle; -PcringleHome=<dir> chooses another folder. The default arguments are replaced by
+// `--args="..."`, e.g. `./gradlew runManagementServer --args="--port 7501 --auth"`. The standard input is connected, so
+// `cringle login` can read a token from it. Each program is its own process: start the daemon and the management server in
+// two run configurations; they find each other by the trust entries that docs/trust.md describes.
+val devHome = providers.gradleProperty("cringleHome").orElse(layout.buildDirectory.dir("dev-home").map { it.asFile.absolutePath })
+
+fun registerProgram(module: String, taskName: String, mainClassName: String, summary: String, vararg defaultArgs: String) {
+    project(":$module").tasks.register<JavaExec>(taskName) {
+        group = "cringle"
+        description = summary
+        classpath = project(":$module").extensions.getByType<SourceSetContainer>().getByName("main").runtimeClasspath
+        mainClass.set(mainClassName)
+        args(*defaultArgs)
+        environment("CRINGLE_HOME", devHome.get())
+        standardInput = System.`in`
+    }
+}
+
+registerProgram("daemon", "runDaemon", "cringle.daemon.MainKt", "Runs the daemon with its own router (combined mode) on port 7400; CRINGLE_HOME is build/dev-home.", "--port", "7400", "--combined")
+registerProgram("management-server", "runManagementServer", "cringle.management.MainKt", "Runs the management server with user management on port 7500 (prints its fingerprint and the bootstrap token); CRINGLE_HOME is build/dev-home.", "--port", "7500", "--auth")
+registerProgram("engine", "runEngine", "cringle.engine.MainKt", "Runs one engine by itself (normally the daemon starts engines); CRINGLE_HOME is build/dev-home.", "--id", "dev-engine")
+registerProgram("cli", "runCli", "cringle.cli.MainKt", "Runs the cringle command line; pass the command with --args, e.g. --args=\"login --server 127.0.0.1:7500 --fingerprint <sha256>\".", "--help")

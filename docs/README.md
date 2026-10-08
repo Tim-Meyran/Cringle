@@ -11,6 +11,7 @@
 | [webui.md](webui.md) | WebUI des ManagementServers (htmx, Alpine.js, Drawflow): Start, Login, Sicherheit, Aufbau von Seiten. Englisch. |
 | [daemon-service.md](daemon-service.md) | Daemon als Dienst, Engine-Identität und Trust-Dateien. Englisch. |
 | [gradle-plugin.md](gradle-plugin.md) | Gradle-Plugins `cringle.plugin` und `cringle.project`, `cringlePublish`. Englisch. |
+| [running-from-the-ide.md](running-from-the-ide.md) | Gradle-Tasks `runDaemon`, `runManagementServer`, `runEngine`, `runCli` zum Starten und Debuggen in der IDE. Englisch. |
 | [releasing.md](releasing.md) | Release-Archive und Installer. Englisch. |
 | [logging.md](logging.md) | Einheitliches Logging der Kotlin-Prozesse (Daemon, Engine, Management-Server). |
 | [observability.md](observability.md) | Logs, metrics, heartbeat, data warehouse, recording and retention. Englisch. |
