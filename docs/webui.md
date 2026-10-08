@@ -173,4 +173,6 @@ Without a page:
 | `cringle cache cleanup` | maintenance of the package cache, run by the ManagementServer on a schedule (--cache-max-unused-days) |
 | `cringle recover` | runs at the start of the ManagementServer |
 | `cringle repo download` | downloads a file; the browser has no use for it |
+| `cringle cert status` | reads the certificate files of the local home; no server involved |
+| `cringle cert renew` | renews the certificate files of the local home; no server involved |
 | `cringle self-update` | updates the installation of the command line tool |
