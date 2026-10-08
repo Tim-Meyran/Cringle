@@ -1,0 +1,10 @@
+{
+  "name": "service",
+  "blocks": [
+    { "id": "store", "block": "acme-orders/order-store" }
+  ],
+  "tethers": [],
+  "provides": [
+    { "service": "orders", "block": "store", "port": "in", "type": "MESSAGE" }
+  ]
+}
