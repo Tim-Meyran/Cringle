@@ -10,6 +10,7 @@ grpc = "1.70.0"
 grpc-kotlin = "1.4.1"
 bouncycastle = "1.80"
 jserialcomm = "2.11.4"
+jline = "3.30.6"
 slf4j = "2.0.16"
 logback = "1.5.12"
 
@@ -28,6 +29,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jun
 # Protobuf and gRPC
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-kotlin = { module = "com.google.protobuf:protobuf-kotlin", version.ref = "protobuf" }
+jline = { module = "org.jline:jline", version.ref = "jline" }
 grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
 grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
 grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }

@@ -7,3 +7,6 @@ Third-party files served by the WebUI of the ManagementServer (kotlin/management
 - htmx 2.0.4 (htmx.org), 0BSD license
 - Alpine.js 3.14.8 (alpinejs), MIT license
 - Drawflow 0.0.60 (drawflow), MIT license
+
+Third-party library of the command line (kotlin/cli, interactive mode):
+- JLine 3.30.6 (org.jline:jline), BSD-3-Clause license
