@@ -108,6 +108,10 @@ public class Engine private constructor(
         it.sweepLeftovers()
     }
 
+    /** The data warehouse of this engine (`<engine dir>/dwh`, #188); its retention is applied every [DWH_RETENTION_INTERVAL_SECONDS] seconds. */
+    public val dwh: cringle.engine.dwh.Dwh = cringle.engine.dwh.Dwh(dir.resolve("dwh"))
+    private var retention: java.util.concurrent.ScheduledExecutorService? = null
+
     private val lock = Any()
     private var currentConfig = config
     private val startedAt: Instant = Instant.now()
@@ -165,6 +169,9 @@ public class Engine private constructor(
         server.start()
         remoteTethers.start()
         started = true
+        retention = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "dwh-retention").also { it.isDaemon = true } }.also {
+            it.scheduleWithFixedDelay({ runCatching { dwh.applyRetention() } }, DWH_RETENTION_INTERVAL_SECONDS, DWH_RETENTION_INTERVAL_SECONDS, TimeUnit.SECONDS)
+        }
         Files.writeString(dir.resolve(PORT_FILE), managementPort.toString() + "\n")
         Files.writeString(dir.resolve(TETHER_PORT_FILE), tetherPort.toString() + "\n")
         synchronized(lock) { restartLink() }
@@ -174,6 +181,8 @@ public class Engine private constructor(
     /** Stops the management server gracefully and removes the port file. Safe to call more than once. */
     public fun stop() {
         state = EngineState.ENGINE_STATE_STOPPING
+        retention?.shutdownNow()
+        retention = null
         fabrics.close()
         drivers.close()
         synchronized(lock) {
@@ -442,6 +451,9 @@ public class Engine private constructor(
 
         /** Name of the file that holds the port for tethers between engines of a running engine. */
         public const val TETHER_PORT_FILE: String = "tether.port"
+
+        /** How often the retention of the DWH is applied. */
+        public const val DWH_RETENTION_INTERVAL_SECONDS: Long = 60
 
         /**
          * Prepares an engine for [args]: resolves the home, loads or creates config and identity. The server is not
