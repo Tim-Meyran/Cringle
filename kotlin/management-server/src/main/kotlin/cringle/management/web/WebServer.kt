@@ -73,6 +73,7 @@ public class WebServer(
         registerFoundation()
         OverviewPages(core).register(this)
         DeploymentPages(core).register(this)
+        users?.let { UserPages(it).register(this) }
     }
 
     private fun sslContext(): SSLContext {
