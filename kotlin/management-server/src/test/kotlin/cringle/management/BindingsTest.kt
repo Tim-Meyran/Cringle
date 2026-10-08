@@ -5,6 +5,7 @@ package cringle.management
 import cringle.common.test.TestTls
 import io.grpc.Status
 import java.nio.file.Path
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -35,50 +36,64 @@ class BindingsTest {
         return core()
     }
 
+    private fun bind(core: ManagementCore, project: String, service: String, targets: List<String>) = runBlocking { core.bind(project, service, targets) }
+
+    private fun unbind(core: ManagementCore, project: String, service: String) = runBlocking { core.unbind(project, service) }
+
     private fun code(block: () -> Unit): Status.Code = assertThrows<ManagementException> { block() }.code
 
     @Test
     fun bindListAndUnbind() {
         val core = withFabrics("orders-service-0", "other-0")
-        core.bind("shop", "orders", listOf("orders-service-0"))
-        core.bind("billing", "orders", listOf("orders-service-0"))
+        bind(core, "shop", "orders", listOf("orders-service-0"))
+        bind(core, "billing", "orders", listOf("orders-service-0"))
         assertEquals(
             listOf(BindingRecord("billing", "orders", listOf("orders-service-0")), BindingRecord("shop", "orders", listOf("orders-service-0"))),
             core.listBindings(""),
         )
         assertEquals(listOf(BindingRecord("shop", "orders", listOf("orders-service-0"))), core.listBindings("shop"))
-        core.unbind("shop", "orders")
+        unbind(core, "shop", "orders")
         assertEquals(listOf("billing"), core.listBindings("").map { it.consumerProject })
     }
 
     @Test
     fun bindingAnUnknownFabricIsNotFound() {
         val core = withFabrics("a-0")
-        assertEquals(Status.Code.NOT_FOUND, code { core.bind("shop", "orders", listOf("nope")) })
+        assertEquals(Status.Code.NOT_FOUND, code { bind(core, "shop", "orders", listOf("nope")) })
         assertEquals(emptyList<BindingRecord>(), core.listBindings(""))
     }
 
     @Test
     fun bindingTwiceReplacesTheTarget() {
         val core = withFabrics("a-0", "b-0")
-        core.bind("shop", "orders", listOf("a-0"))
-        core.bind("shop", "orders", listOf("b-0"))
+        bind(core, "shop", "orders", listOf("a-0"))
+        bind(core, "shop", "orders", listOf("b-0"))
         assertEquals(listOf(BindingRecord("shop", "orders", listOf("b-0"))), core.listBindings("shop"))
     }
 
     @Test
     fun invalidRequestsAreRefused() {
         val core = withFabrics("a-0")
-        assertEquals(Status.Code.INVALID_ARGUMENT, code { core.bind("", "orders", listOf("a-0")) })
-        assertEquals(Status.Code.INVALID_ARGUMENT, code { core.bind("shop", "Not A Name", listOf("a-0")) })
-        assertEquals(Status.Code.INVALID_ARGUMENT, code { core.bind("shop", "orders", emptyList()) })
-        assertEquals(Status.Code.INVALID_ARGUMENT, code { core.bind("shop", "orders", listOf("a-0", "a-0")) })
-        assertEquals(Status.Code.NOT_FOUND, code { core.unbind("shop", "orders") })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { bind(core, "", "orders", listOf("a-0")) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { bind(core, "shop", "Not A Name", listOf("a-0")) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { bind(core, "shop", "orders", emptyList()) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { bind(core, "shop", "orders", listOf("a-0", "a-0")) })
+        assertEquals(Status.Code.NOT_FOUND, code { bind(core, "shop", "orders", listOf("a-0", "nope")) })
+        assertEquals(Status.Code.NOT_FOUND, code { unbind(core, "shop", "orders") })
+    }
+
+    @Test
+    fun aBindingKeepsSeveralTargetsInOrder() {
+        val core = withFabrics("a-0", "b-0", "c-0")
+        bind(core, "shop", "orders", listOf("b-0", "a-0", "c-0"))
+        assertEquals(listOf("b-0", "a-0", "c-0"), core.listBindings("shop").single().targets)
+        bind(core, "shop", "orders", listOf("c-0", "b-0"))
+        assertEquals(listOf("c-0", "b-0"), core.listBindings("shop").single().targets)
     }
 
     @Test
     fun bindingsSurviveARestartOfTheManagementServer() {
-        withFabrics("a-0").bind("shop", "orders", listOf("a-0"))
+        bind(withFabrics("a-0"), "shop", "orders", listOf("a-0"))
         val again = core()
         assertEquals(listOf(BindingRecord("shop", "orders", listOf("a-0"))), again.listBindings(""))
         assertTrue(again.listBindings("other").isEmpty())

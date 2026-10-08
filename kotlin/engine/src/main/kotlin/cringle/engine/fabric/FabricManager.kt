@@ -32,7 +32,31 @@ import kotlin.reflect.KClass
 public data class DeployPlugin(val name: String, val version: String, val trust: PluginTrust)
 
 /** The concrete far end of the service [service] for the service tethers of a fabric (#178); see `ServiceBinding` in the engine API. */
-public data class ServiceBinding(val service: String, val fabric: String, val block: String, val port: String, val fingerprint: String)
+public data class ServiceBinding(
+    val service: String,
+    val fabric: String,
+    val block: String,
+    val port: String,
+    val fingerprint: String,
+    /** Further instances of the service in the order of preference (#173); their own fallbacks are ignored. */
+    val fallbacks: List<ServiceBinding> = emptyList(),
+) {
+    /** The far end of the tether: no address (the registry finds the engine), the fallbacks as alternatives. */
+    internal fun toRemote(): RemoteEndpoint = RemoteEndpoint(
+        null, fingerprint, fabric, block, port, null,
+        fallbacks.map { RemoteEndpoint(null, it.fingerprint, it.fabric, it.block, it.port, null, emptyList(), service) },
+        service,
+    )
+
+    /** What is wrong with this end itself (not with the fallbacks). */
+    internal fun problems(): List<String> = buildList {
+        if (!Regex("[0-9a-f]{64}").matches(fingerprint)) add("invalid fingerprint '$fingerprint' of the service '$service': expected 64 lowercase hex characters")
+        for (name in listOf(fabric, block, port)) PackageNames.identifierProblem(name)?.let { add("service '$service': $it") }
+    }
+
+    /** What is wrong with this end or with one of its fallbacks. */
+    internal fun allProblems(): List<String> = problems() + fallbacks.flatMap { it.problems() }
+}
 
 /** What to deploy: [blueprint] of project [projectName]@[projectVersion] as fabric [fabricId], with exact [plugins]. */
 public data class DeployRequest(
@@ -61,6 +85,12 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
     private val fabrics = LinkedHashMap<String, FabricRuntime>()
 
     private fun find(id: String): FabricRuntime = synchronized(fabrics) { fabrics[id] } ?: throw FabricNotFoundException(id)
+
+    /** Replaces the instances of services that the fabric [id] calls, without a redeploy (see [FabricRuntime.updateServiceBindings]). */
+    public fun updateServiceBindings(id: String, bindings: List<ServiceBinding>) {
+        bindings.flatMap { it.allProblems() }.firstOrNull()?.let { throw FabricException(it) }
+        find(id).updateServiceBindings(bindings.associate { it.service to it.toRemote() })
+    }
 
     /** Replaces the engines that may call the provided service ports of the fabric [id] (see [FabricRuntime.setServiceCallers]). */
     public fun setServiceCallers(id: String, fingerprints: List<String>) {
@@ -265,11 +295,13 @@ internal fun Blueprint.bindServices(bindings: List<ServiceBinding>): Blueprint {
     bindings.groupingBy { it.service }.eachCount().entries.firstOrNull { it.value > 1 }
         ?.let { throw FabricException("service '${it.key}' is bound more than once") }
     if (bindings.isEmpty()) return this
+    // the validators look at the primary end; the fallbacks are checked here
+    bindings.flatMap { b -> b.fallbacks.flatMap { it.problems() } }.firstOrNull()?.let { throw FabricException(it) }
     val byService = bindings.associateBy { it.service }
     return copy(
         tethers = tethers.map { t ->
             val binding = t.service?.let { byService[it] } ?: return@map t
-            t.copy(remote = RemoteEndpoint(null, binding.fingerprint, binding.fabric, binding.block, binding.port), service = null)
+            t.copy(remote = binding.toRemote(), service = null)
         },
     )
 }

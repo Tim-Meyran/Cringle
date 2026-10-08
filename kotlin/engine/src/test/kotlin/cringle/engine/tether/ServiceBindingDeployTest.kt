@@ -34,8 +34,13 @@ class ServiceBindingDeployTest : RemoteTetherTestBase() {
         val bound = consumerBlueprint().bindServices(listOf(ServiceBinding("orders", "svc", "d", "in", fingerprint), ServiceBinding("unused", "x", "y", "z", fingerprint)))
         val tether = bound.tethers.single()
         assertNull(tether.service)
-        assertEquals(RemoteEndpoint(null, fingerprint, "svc", "d", "in"), tether.remote)
+        assertEquals(RemoteEndpoint(null, fingerprint, "svc", "d", "in", null, emptyList(), "orders"), tether.remote)
         assertEquals(Endpoint("s", "out"), tether.from)
+        // fallbacks become the alternatives of the far end, in order
+        val other = "cd".repeat(32)
+        val withFallbacks = consumerBlueprint().bindServices(listOf(ServiceBinding("orders", "svc", "d", "in", fingerprint, listOf(ServiceBinding("orders", "svc2", "d2", "in2", other))))).tethers.single().remote!!
+        assertEquals(listOf(RemoteEndpoint(null, other, "svc2", "d2", "in2", null, emptyList(), "orders")), withFallbacks.alternatives)
+        assertEquals("orders", withFallbacks.service)
         // without a binding nothing changes
         assertEquals(consumerBlueprint(), consumerBlueprint().bindServices(emptyList()))
         assertEquals(consumerBlueprint(), consumerBlueprint().bindServices(listOf(ServiceBinding("other", "x", "y", "z", fingerprint))))
@@ -51,9 +56,10 @@ class ServiceBindingDeployTest : RemoteTetherTestBase() {
             received += (e as TetherEvent.Message).value
             arrived.complete(Unit)
         }.start()
-        // the engine of the service is found through its address; the binding carries no address, a fixed one is added here
+        // the binding carries no address (the registry finds the engine); a fixed one is added here. A bound tether connects in the
+        // background, so the message is kept until it is connected (BUFFER)
         val bound = consumerBlueprint().bindServices(listOf(ServiceBinding("orders", "svc", "d", "in", b.identity.publicKeyFingerprint)))
-        val tether = bound.tethers.single().let { it.copy(remote = it.remote!!.copy(address = "127.0.0.1:${b.tetherPort}")) }
+        val tether = bound.tethers.single().let { it.copy(delivery = cringle.packaging.DeliveryPolicy.BUFFER, remote = it.remote!!.copy(address = "127.0.0.1:${b.tetherPort}")) }
         val caller = Node(a, "fa", senderDef(), tether)
         caller.start()
         caller.out().send("order-7")

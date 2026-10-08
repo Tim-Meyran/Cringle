@@ -143,6 +143,13 @@ validated, the engine replaces the `service` of every service tether by that `re
 finds the engine, see above); from then on the tether is an ordinary remote tether. A service without a binding stays
 unbound and the fabric is refused when it starts; a binding that no tether names is ignored; two bindings for one
 service are an error.
+
+**Several instances (failover, #173).** A binding can name further instances of the service (`fallbacks`, each with its own
+fabric, block, port and key). The tether then connects to the first instance, in the order of the list, that answers (a
+refusal counts as not answering). It stays there; while it is on a later instance it looks at the better ones every health
+interval and goes back to the best one that answers. When the engine gets a new list (`UpdateServiceBindings`) it
+connects again at once. Requests and streams that were in flight on a connection that is left fail like those of a lost
+connection; there is no delivery across the switch beyond what the delivery policy gives.
 ## Schemas
 
 Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). The schema check applies to these three types, on local tethers, and to nothing else: byte streams (`BYTE_STREAM`, `TCP` and `SERIAL`) are not checked. Schema messages for every tether type, across process boundaries too, follow with the wire format of #76. **Decided:** a response is validated against the same schema as the request; a port has one schema for both directions.

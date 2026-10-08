@@ -357,8 +357,8 @@ internal val COMMANDS: List<Command> = listOf(
         val r = env.m.deploy(b.build())
         Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "fabrics" to r.fabricsList.map(::fabricRow)))
     },
-    Command(listOf("bind"), "<project> <service> <fabric>", "Bind a service dependency of a project to the fabric that provides it", minArgs = 3) { env, a ->
-        Output.Detail(bindingRow(env.m.bind(cringle.management.v1.Binding.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).addTargets(a.positional[2]).build())))
+    Command(listOf("bind"), "<project> <service> <fabric>...", "Bind a service dependency of a project to the fabrics that provide it, the preferred one first", minArgs = 3, maxArgs = 20) { env, a ->
+        Output.Detail(bindingRow(env.m.bind(cringle.management.v1.Binding.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).addAllTargets(a.positional.drop(2)).build())))
     },
     Command(listOf("unbind"), "<project> <service>", "Remove the binding of a service dependency", minArgs = 2) { env, a ->
         env.m.unbind(cringle.management.v1.UnbindRequest.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).build())

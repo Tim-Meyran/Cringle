@@ -94,6 +94,12 @@ public interface RemoteCall : AutoCloseable {
     /** Sends [frame]; suspends while the connection cannot take more, and fails once the call has ended. */
     public suspend fun send(frame: WireFrame)
 
+    /**
+     * Replaces the far end of a call whose target is resolved at run time (#173): [remote] and its
+     * [cringle.packaging.RemoteEndpoint.alternatives] in the order of preference. A call to a fixed address ignores it.
+     */
+    public fun updateRemote(remote: RemoteEndpoint) {}
+
     /** Ends the call. */
     override fun close()
 }

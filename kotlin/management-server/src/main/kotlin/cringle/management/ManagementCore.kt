@@ -125,28 +125,40 @@ public class ManagementCore(
     private fun snapshot(): ManagementData = synchronized(lock) { data }
 
     /**
-     * Binds the service dependency [service] of [project] to the fabric [targets] (#171); replaces an earlier binding of
-     * the pair. A target has to be a fabric that was deployed through this ManagementServer. Several targets are not
-     * accepted yet.
+     * Binds the service dependency [service] of [project] to the fabrics [targets] in the order of preference (#171, #173);
+     * replaces an earlier binding of the pair. A target has to be a fabric that was deployed through this ManagementServer.
+     * The running fabrics of [project] that use the service switch to the new list without a redeploy, and the
+     * allow-lists of the old and the new targets are updated; what fails is reported after the binding is stored.
      */
-    public fun bind(project: String, service: String, targets: List<String>): BindingRecord {
+    public suspend fun bind(project: String, service: String, targets: List<String>): BindingRecord {
         if (project.isBlank()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a project name is required")
         cringle.packaging.PackageNames.nameProblem(service)?.let { throw ManagementException(Status.Code.INVALID_ARGUMENT, "service '$service': $it") }
-        if (targets.size != 1) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a binding has exactly one target fabric for now, got ${targets.size}")
+        if (targets.isEmpty()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a binding needs at least one target fabric")
+        if (targets.distinct().size != targets.size) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a fabric is named more than once: $targets")
         val record = BindingRecord(project, service, targets)
-        return update { d ->
-            if (d.fabrics.none { it.fabricId == targets[0] }) throw ManagementException(Status.Code.NOT_FOUND, "fabric '${targets[0]}' is not known")
-            d.copy(bindings = d.bindings.filterNot { it.consumerProject == project && it.service == service } + record) to record
+        val old = update { d ->
+            targets.firstOrNull { t -> d.fabrics.none { it.fabricId == t } }?.let { throw ManagementException(Status.Code.NOT_FOUND, "fabric '$it' is not known") }
+            val before = d.bindings.firstOrNull { it.consumerProject == project && it.service == service }?.targets.orEmpty()
+            d.copy(bindings = d.bindings.filterNot { it.consumerProject == project && it.service == service } + record) to before
         }
+        applyBindingChange(project, service, old + targets)
+        return record
     }
 
     /** Removes the binding of [service] for [project]. */
-    public fun unbind(project: String, service: String) {
-        update { d ->
-            if (d.bindings.none { it.consumerProject == project && it.service == service }) {
-                throw ManagementException(Status.Code.NOT_FOUND, "service '$service' of project '$project' is not bound")
+    public suspend fun unbind(project: String, service: String) {
+        val old = update { d ->
+            val before = d.bindings.firstOrNull { it.consumerProject == project && it.service == service }
+                ?: throw ManagementException(Status.Code.NOT_FOUND, "service '$service' of project '$project' is not bound")
+            d.copy(bindings = d.bindings - before) to before.targets
+        }
+        // the running fabrics keep their instances until they are deployed again, but the services no longer accept them
+        for (fabricId in old) {
+            try {
+                syncCallers(fabricId)
+            } catch (e: StatusException) {
+                throw ManagementException(Status.Code.INTERNAL, "unbound, but the allow-list of $fabricId could not be updated: ${e.status.description ?: e.status.code.name}")
             }
-            d.copy(bindings = d.bindings.filterNot { it.consumerProject == project && it.service == service }) to Unit
         }
     }
 
@@ -717,7 +729,18 @@ public class ManagementCore(
     ): cringle.engine.v1.ServiceBinding {
         val binding = snapshot().bindings.firstOrNull { it.consumerProject == project && it.service == service }
             ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "project '$project' uses the service '$service', but it is not bound (cringle bind $project $service <fabric>)")
-        val target = binding.targets.first()
+        val first = resolveTarget(project, service, binding.targets.first(), planned, repo)
+        if (binding.targets.size == 1) return first
+        return first.toBuilder().addAllFallbacks(binding.targets.drop(1).map { resolveTarget(project, service, it, planned, repo) }).build()
+    }
+
+    private suspend fun resolveTarget(
+        project: String,
+        service: String,
+        target: String,
+        planned: Map<String, Pair<EngineView, cringle.packaging.Blueprint>>,
+        repo: cringle.repository.RepositoryClient,
+    ): cringle.engine.v1.ServiceBinding {
         val fingerprint: String
         val blueprint: cringle.packaging.Blueprint
         val inPlan = planned[target]
@@ -783,6 +806,50 @@ public class ManagementCore(
             }
         }
         if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "$project is $what, but its services could not all be updated: ${problems.joinToString("; ")}")
+    }
+
+    /**
+     * After a binding changed (#173): the running fabrics of [project] that use [service] get the new instances through
+     * `UpdateServiceBindings` (no redeploy) and their recorded requests are updated; the allow-lists of the [targets]
+     * (old and new) are brought up to date.
+     */
+    private suspend fun applyBindingChange(project: String, service: String, targets: List<String>) {
+        val problems = ArrayList<String>()
+        try {
+            projectLock(project).withLock {
+                val defaultAddress = defaultRepository ?: return@withLock
+                val repo = repositoryClient(defaultAddress)
+                for (record in snapshot().fabrics.filter { projectOf(it) == project }) {
+                    val request = DeployFabricRequest.parseFrom(record.deploy)
+                    if (request.serviceBindingsList.none { it.service == service }) continue
+                    try {
+                        val fresh = resolveBinding(project, service, emptyMap(), repo)
+                        runningEngine(record.machine, record.engineId).updateServiceBindings(
+                            cringle.engine.v1.UpdateServiceBindingsRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(record.fabricId)).addBindings(fresh).build(),
+                        )
+                        val next = request.toBuilder().clearServiceBindings()
+                            .addAllServiceBindings(request.serviceBindingsList.map { if (it.service == service) fresh else it }).build().toByteArray()
+                        update { d -> d.copy(fabrics = d.fabrics.map { if (it.fabricId == record.fabricId) it.copy(deploy = next) else it }) to Unit }
+                    } catch (e: StatusException) {
+                        problems += "${record.fabricId}: ${e.status.description ?: e.status.code.name}"
+                    } catch (e: ManagementException) {
+                        problems += "${record.fabricId}: ${e.message}"
+                    }
+                }
+            }
+        } catch (e: ManagementException) {
+            problems += e.message.orEmpty()
+        }
+        for (fabricId in targets.distinct()) {
+            try {
+                syncCallers(fabricId)
+            } catch (e: StatusException) {
+                problems += "allow-list of $fabricId: ${e.status.description ?: e.status.code.name}"
+            } catch (e: ManagementException) {
+                problems += "allow-list of $fabricId: ${e.message}"
+            }
+        }
+        if (problems.isNotEmpty()) throw ManagementException(Status.Code.INTERNAL, "the binding of '$service' of $project is stored, but could not be applied everywhere: ${problems.joinToString("; ")}")
     }
 
     /** Sets the allowed callers of the service fabric [fabricId] on its Engine and in its recorded request, if they changed. */

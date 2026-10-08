@@ -490,6 +490,20 @@ public class TetherNetwork private constructor(
         }
     }
 
+    /**
+     * Replaces the instances of the services that sending tethers of this network call (#173): [remotes] maps a service
+     * name to its new far end with the alternatives. A tether that is open switches to the first reachable instance; one
+     * that is not open uses the new ones when it opens. Services that are not named keep their instances.
+     */
+    public fun updateServiceBindings(remotes: Map<String, RemoteEndpoint>) {
+        for (c in connections.values.distinctBy { it.info.id }) {
+            if (!c.remoteSends) continue
+            val next = remotes[c.remote?.service ?: continue] ?: continue
+            c.remote = next
+            c.call?.updateRemote(next)
+        }
+    }
+
     /** The registrations at the remote driver of the callers of the provided service ports, by public key fingerprint. */
     private val serviceRegistrations = HashMap<String, AutoCloseable>()
 
@@ -576,7 +590,7 @@ public class TetherNetwork private constructor(
         val retry: RetryConfig,
         val serialConfig: SerialTetherConfig?,
         /** Set for a tether that ends on another engine; [remoteSends] says whether the local end is the sending one. */
-        val remote: RemoteEndpoint? = null,
+        @Volatile var remote: RemoteEndpoint? = null,
         val remoteSends: Boolean = false,
         /** Set for the receiving end of a provided service port: the name of the service (#177). */
         val serviceName: String? = null,

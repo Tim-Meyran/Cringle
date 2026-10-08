@@ -305,7 +305,7 @@ message DeployProjectResponse {
 message Binding {
   string consumer_project = 1;
   string service = 2;
-  // Fabric ids as `ListFabrics` shows them. Exactly one for now; several (failover) follow.
+  // Fabric ids as `ListFabrics` shows them, in the order of preference: the consumer calls the first one that answers (failover, #173).
   repeated string targets = 3;
 }
 

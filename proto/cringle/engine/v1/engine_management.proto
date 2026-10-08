@@ -26,6 +26,10 @@ service EngineManagementService {
   // ones are accepted from now on, removed ones are refused and their open calls are ended.
   rpc SetServiceCallers(SetServiceCallersRequest) returns (SetServiceCallersResponse);
 
+  // Replaces the instances of a service that the running fabric calls (its binding), without a redeploy. The tether
+  // switches to the first reachable instance of the new list; calls in flight on a connection that is left fail.
+  rpc UpdateServiceBindings(UpdateServiceBindingsRequest) returns (UpdateServiceBindingsResponse);
+
   // Starts a deployed fabric.
   rpc StartFabric(FabricRequest) returns (FabricInfo);
 
@@ -123,7 +127,17 @@ message ServiceBinding {
   string block = 3;
   string port = 4;
   string fingerprint = 5;
+  // Further instances of the same service, in the order of preference (#173). Their own `fallbacks` are ignored.
+  repeated ServiceBinding fallbacks = 6;
 }
+
+message UpdateServiceBindingsRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  // The bindings that change; a service of the fabric that is not named keeps its binding.
+  repeated ServiceBinding bindings = 2;
+}
+
+message UpdateServiceBindingsResponse {}
 
 message SetServiceCallersRequest {
   cringle.common.v1.FabricId fabric_id = 1;

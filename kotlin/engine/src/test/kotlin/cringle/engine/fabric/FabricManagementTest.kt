@@ -266,6 +266,10 @@ class FabricManagementTest {
         val bound = failure(request(binding("orders", "zz")))
         assertEquals(Status.Code.INVALID_ARGUMENT, bound.status.code)
         assertTrue(bound.status.description!!.contains("invalid fingerprint 'zz'"), bound.status.description)
+        // the fallbacks are checked, too
+        val badFallback = failure(request(binding("orders", "ab".repeat(32)).toBuilder().addFallbacks(binding("orders", "yy")).build()))
+        assertEquals(Status.Code.INVALID_ARGUMENT, badFallback.status.code)
+        assertTrue(badFallback.status.description!!.contains("invalid fingerprint 'yy'"), badFallback.status.description)
         val twice = failure(request(binding("orders", "ab".repeat(32)), binding("orders", "cd".repeat(32))))
         assertEquals(Status.Code.INVALID_ARGUMENT, twice.status.code)
         assertTrue(twice.status.description!!.contains("bound more than once"), twice.status.description)
