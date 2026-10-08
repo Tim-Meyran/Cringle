@@ -203,6 +203,27 @@ abstract class ServiceTestBase {
                 .fabric(FabricConfig("app", 1, listOf("a"), emptyMap()))
                 .build(work, listOf(plugin.pkg)).file,
         )
+        // a plugin whose block holds an exclusive resource, and a project that uses it (#226)
+        val excl = TestPluginBuilder("acme-excl", "1.0.0")
+            .provider("com.acme.SvcProvider")
+            .block(
+                BlockDefinition(
+                    "caller", emptyList(), listOf(PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "String"))), emptyList(),
+                    SchemaRef("acme.svc", "CallerConfig"), listOf(cringle.contract.ExclusiveResource(cringle.contract.ExclusiveKind.SERIAL, "COM3")),
+                ),
+            )
+            .schema("svc.json", schema)
+            .lib("svc.jar", TestJar.fromJavaSources(sources))
+            .build(work)
+        repository.publish(excl.file)
+        repository.setTrust("acme-excl", cringle.repository.PluginTrust.TRUSTED)
+        repository.publish(
+            TestProjectBuilder("excl-app", "1.0.0")
+                .dependency("acme-excl", "^1.0.0")
+                .blueprint(Blueprint("app", listOf(BlueprintBlock("c1", "acme-excl/caller", config = JsonObject(mapOf("message" to JsonPrimitive("from-excl"))))), emptyList()))
+                .fabric(FabricConfig("app", 1, listOf("a"), emptyMap()))
+                .build(work, listOf(excl.pkg)).file,
+        )
         repository.setTrust("acme-svc", cringle.repository.PluginTrust.TRUSTED)
 
         tls = ManagementTls(dir.resolve("tls"))

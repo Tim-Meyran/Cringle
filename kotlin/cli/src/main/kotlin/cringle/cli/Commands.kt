@@ -410,14 +410,16 @@ internal val COMMANDS: List<Command> = listOf(
             opt("version", "version range, default: the highest release", "RANGE"),
             flag("no-start", "deploy the fabrics but do not start them"),
             flag("relock", "resolve the dependencies again instead of using the lock file of this version"),
+            flag("no-blue-green", "stop the running fabrics of the project first instead of starting the new ones next to them"),
         ),
         1,
     ) { env, a ->
         val b = DeployProjectRequest.newBuilder().setProject(a.positional[0]).setVersionRange(a.option("version").orEmpty())
         if (a.flag("no-start")) b.start = false
         if (a.flag("relock")) b.relock = true
+        if (a.flag("no-blue-green")) b.noBlueGreen = true
         val r = env.m.deploy(b.build())
-        Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "fabrics" to r.fabricsList.map(::fabricRow)))
+        Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "strategy" to r.strategy, "fabrics" to r.fabricsList.map(::fabricRow)))
     },
     Command(listOf("bind"), "<project> <service> <fabric>...", "Bind a service dependency of a project to the fabrics that provide it, the preferred one first", minArgs = 3, maxArgs = 20) { env, a ->
         Output.Detail(bindingRow(env.m.bind(cringle.management.v1.Binding.newBuilder().setConsumerProject(a.positional[0]).setService(a.positional[1]).addAllTargets(a.positional.drop(2)).build())))

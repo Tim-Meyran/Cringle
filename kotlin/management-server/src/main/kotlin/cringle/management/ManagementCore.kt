@@ -74,7 +74,7 @@ public data class EngineView(
 )
 
 /** The outcome of [ManagementCore.deploy]. */
-public data class DeployResult(val project: String, val version: String, val lock: String, val fabrics: List<FabricView>)
+public data class DeployResult(val project: String, val version: String, val lock: String, val fabrics: List<FabricView>, val strategy: String = "")
 
 /** A fabric that was deployed from a project through this ManagementServer. */
 public data class DeployedFabric(val project: String, val version: String, val machine: String, val engineId: String, val fabricId: String, val desiredRunning: Boolean)
@@ -641,9 +641,10 @@ public class ManagementCore(
 
     private fun projectOf(f: FabricRecord): String = DeployFabricRequest.parseFrom(f.deploy).project.name
 
-    private fun fabricIdFor(project: String, blueprint: String, index: Int): String {
+    /** The id of an instance of a blueprint: `<project>-<blueprint>-<n>`, and `...-<n>b` for the second color that a Blue-Green update switches to. */
+    private fun fabricIdFor(project: String, blueprint: String, index: Int, color: String = COLOR_A): String {
         val base = "$project-$blueprint".lowercase().replace(Regex("[^a-z0-9-]"), "-").trimStart('-').ifEmpty { "fabric" }
-        val suffix = "-${index + 1}"
+        val suffix = "-${index + 1}" + if (color == COLOR_B) "b" else ""
         return base.take(63 - suffix.length) + suffix
     }
 
@@ -716,15 +717,15 @@ public class ManagementCore(
      * and the new ones deployed. If that fails, the new fabrics are removed again and the previous ones are restored
      * from their recorded requests.
      */
-    public suspend fun deploy(project: String, range: String, start: Boolean, relock: Boolean = false): DeployResult {
+    public suspend fun deploy(project: String, range: String, start: Boolean, relock: Boolean = false, blueGreen: Boolean = true): DeployResult {
         val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
         val repo = repositoryClient(defaultAddress)
-        val result = projectLock(project).withLock { deployLocked(project, range, start, relock, repo) }
+        val result = projectLock(project).withLock { deployLocked(project, range, start, relock, blueGreen, repo) }
         afterChange(project, "deployed")
         return result
     }
 
-    private suspend fun deployLocked(project: String, range: String, start: Boolean, relock: Boolean, repo: cringle.repository.RepositoryClient): DeployResult {
+    private suspend fun deployLocked(project: String, range: String, start: Boolean, relock: Boolean, blueGreen: Boolean, repo: cringle.repository.RepositoryClient): DeployResult {
         val pinned = if (relock) null else existingLock(repo, project, range)
         val lock: LockFile
         val version: String
@@ -756,6 +757,12 @@ public class ManagementCore(
 
         // place on the running Engines, counting the load without the fabrics this deploy is going to replace
         val previous = snapshot().fabrics.filter { projectOf(it) == project }
+        // Blue-Green (Architecture 14.2): the new fabrics run next to the old ones, under the other of two colors of fabric ids, and replace them when they run
+        val previousColor = if (previous.any { BLUE_ID.containsMatchIn(it.fabricId) }) COLOR_B else COLOR_A
+        val strategyReason = if (previous.isEmpty()) null else stopThenStartReason(project, blueGreen, start, configs.map { c -> projectPackage.blueprints.first { it.name == c.blueprint } }, lock, repo)
+        val sideBySide = previous.isNotEmpty() && strategyReason == null
+        val color = if (sideBySide) (if (previousColor == COLOR_A) COLOR_B else COLOR_A) else COLOR_A
+        val idMap = LinkedHashMap<String, String>() // old fabric id to the new one, for what is carried over
         val engines = listEngines(null).filter { it.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING }
         val load = HashMap<Pair<String, String>, Int>()
         snapshot().fabrics.filter { it !in previous }.forEach { load.merge(it.machine to it.engineId, 1, Int::plus) }
@@ -773,7 +780,8 @@ public class ManagementCore(
             for (i in 0 until config.instances) {
                 val e = candidates[i]
                 load.merge(e.machine to e.process.engineId.value, 1, Int::plus)
-                plan += Triple(e, fabricIdFor(project, config.blueprint, i), config.blueprint)
+                plan += Triple(e, fabricIdFor(project, config.blueprint, i, color), config.blueprint)
+                idMap[fabricIdFor(project, config.blueprint, i, previousColor)] = fabricIdFor(project, config.blueprint, i, color)
             }
         }
         if (plan.map { it.second }.distinct().size != plan.size) throw ManagementException(Status.Code.FAILED_PRECONDITION, "the fabric configuration of $project@$version yields duplicate fabric ids")
@@ -818,7 +826,7 @@ public class ManagementCore(
         // nothing has been touched so far; a lock that cannot be written stops the deploy here
         if (pinned == null) writeAtomically(lockPath(project, version), lockText)
 
-        undeployLocked(project)
+        if (!sideBySide) undeployLocked(project) else carryOverRecordings(idMap)
         val touched = ArrayList<Triple<String, String, String>>() // machine, engine, fabric
         val deployed = ArrayList<FabricView>()
         try {
@@ -832,17 +840,82 @@ public class ManagementCore(
                     throw ManagementException(e.status.code, "deploying $fabricId on ${engine.machine}/$engineId: ${e.status.description ?: e.status.code.name}")
                 }
             }
+            if (sideBySide) for ((machineId, engineId, fabricId) in touched) awaitRunning(machineId, engineId, fabricId)
         } catch (e: Exception) {
             // cleanup must not be cancelled with the call that failed
             val notRestored = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 touched.forEach { (machineId, engineId, fabricId) -> runCatching { removeFabricQuietly(machineId, engineId, fabricId) } }
-                restore(previous)
+                if (sideBySide) {
+                    // the old fabrics were not touched: they still run
+                    update { d -> d.copy(recordings = d.recordings.filter { it.fabricId !in idMap.values }) to Unit }
+                    emptyList()
+                } else {
+                    restore(previous)
+                }
             }
-            if (notRestored.isEmpty()) throw e
+            if (notRestored.isEmpty()) throw if (sideBySide) ManagementException((e as? ManagementException)?.code ?: Status.Code.INTERNAL, "${e.message}; the previous fabrics of $project keep running") else e
             val code = (e as? ManagementException)?.code ?: Status.Code.INTERNAL
             throw ManagementException(code, "${e.message}; the previous fabrics of $project could not all be restored: ${notRestored.joinToString()}")
         }
-        return DeployResult(project, version, lockText, deployed)
+        if (sideBySide) {
+            // the switch: the new fabrics run, the old ones go
+            previous.forEach { removeFabricQuietly(it.machine, it.engineId, it.fabricId) }
+            update { d -> d.copy(recordings = d.recordings.filter { it.fabricId !in idMap.keys }) to Unit }
+        }
+        val strategy = when {
+            previous.isEmpty() -> "first deploy"
+            sideBySide -> "blue-green"
+            else -> "stop-then-start ($strategyReason)"
+        }
+        return DeployResult(project, version, lockText, deployed, strategy)
+    }
+
+    /** Why the fabrics of [project] are replaced by stopping the old ones first, or `null` if they can run side by side. */
+    private suspend fun stopThenStartReason(
+        project: String,
+        blueGreen: Boolean,
+        start: Boolean,
+        blueprints: List<cringle.packaging.Blueprint>,
+        lock: LockFile,
+        repo: cringle.repository.RepositoryClient,
+    ): String? {
+        if (!blueGreen) return "blue-green is switched off for this deploy"
+        if (!start) return "the fabrics are not started"
+        // consumers are bound to the ids of the fabrics that provide a service
+        if (blueprints.any { it.provides.isNotEmpty() }) return "it provides a service, and consumers are bound to the fabric"
+        val definitions = HashMap<String, cringle.contract.BlockDefinition>()
+        for ((name, locked) in lock.packages.filterKeys { it != project }) {
+            readPluginPackage(repo, name, locked.version).manifest.blocks.forEach { definitions["$name/${it.name}"] = it }
+        }
+        val exclusive = blueprints.flatMap { cringle.packaging.ExclusiveResources.of(it) { ref -> definitions[ref] } }
+        return if (exclusive.isEmpty()) null else "it holds exclusive resources: ${exclusive.joinToString("; ")}"
+    }
+
+    /** Gives the new fabrics the recording mode of the old ones they replace, before they are deployed. */
+    private fun carryOverRecordings(idMap: Map<String, String>) {
+        update { d ->
+            val copies = d.recordings.filter { it.fabricId in idMap.keys }.map { it.copy(fabricId = idMap.getValue(it.fabricId)) }
+            d.copy(recordings = d.recordings.filter { r -> copies.none { it.fabricId == r.fabricId } } + copies) to Unit
+        }
+    }
+
+    /** Waits until the fabric runs; a fabric that failed or does not run within [timeoutMillis] is an error. */
+    private suspend fun awaitRunning(machineId: String, engineId: String, fabricId: String, timeoutMillis: Long = 30_000) {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+        while (true) {
+            val info = try {
+                runningEngine(machineId, engineId).getFabricStatus(fabricRef(fabricId))
+            } catch (e: StatusException) {
+                throw ManagementException(e.status.code, "fabric $fabricId: ${e.status.description ?: e.status.code.name}")
+            }
+            when (info.state) {
+                cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING -> return
+                cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED -> throw ManagementException(Status.Code.FAILED_PRECONDITION, "fabric $fabricId failed to start: ${info.failure}")
+                else -> {}
+            }
+            if (System.nanoTime() > deadline) throw ManagementException(Status.Code.DEADLINE_EXCEEDED, "fabric $fabricId does not run after ${timeoutMillis / 1000} s (${info.state.name.removePrefix("FABRIC_RUNTIME_STATE_").lowercase()})")
+            kotlinx.coroutines.delay(200)
+        }
     }
 
     /** The plugins of the default repository, each with its highest version (the web editor offers their blocks). */
@@ -857,8 +930,10 @@ public class ManagementCore(
     }
 
     /** Downloads and reads the plugin package [name] [version] of the default repository. */
-    public suspend fun readPlugin(name: String, version: String): cringle.packaging.PluginPackage {
-        val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
+    public suspend fun readPlugin(name: String, version: String): cringle.packaging.PluginPackage =
+        readPluginPackage(repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")), name, version)
+
+    private suspend fun readPluginPackage(repo: cringle.repository.RepositoryClient, name: String, version: String): cringle.packaging.PluginPackage {
         return try {
             val file = java.nio.file.Files.createTempFile("cringle-plugin", ".cringle")
             try {
@@ -1245,6 +1320,9 @@ public class ManagementCore(
 
     private companion object {
         val MACHINE_ID = Regex("[a-z0-9][a-z0-9-]{0,62}")
+        const val COLOR_A = "a"
+        const val COLOR_B = "b"
+        val BLUE_ID = Regex("-[0-9]+b$")
         val ADDRESS = Regex("[^:\\s]+:[0-9]{1,5}")
     }
 }

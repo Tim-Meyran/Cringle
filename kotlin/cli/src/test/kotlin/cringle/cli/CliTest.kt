@@ -393,6 +393,7 @@ class CliTest {
 
         val deployed = json(ok("deploy", "demo", "--json")) as JsonObject
         assertEquals("0.1.0", field(deployed, "version"))
+        assertEquals("first deploy", field(deployed, "strategy"))
         assertEquals("started", Files.readString(marker))
         val fabrics = ok("fabric", "list")
         assertTrue(fabrics.out.contains("demo-main-1") && fabrics.out.contains("running"))
@@ -422,6 +423,12 @@ class CliTest {
         assertEquals("no fabrics", ok("fabric", "list").out)
         ok("deploy", "demo", "--no-start")
         assertTrue(ok("fabric", "list", "m1", "e1").out.contains("stopped"))
+        // an update (#226): stop-then-start on request, otherwise the new fabric runs next to the old one and replaces it
+        val stopFirst = json(ok("deploy", "demo", "--no-blue-green", "--json")) as JsonObject
+        assertTrue(field(stopFirst, "strategy").startsWith("stop-then-start") && field(stopFirst, "strategy").contains("switched off"), stopFirst.toString())
+        val blueGreen = json(ok("deploy", "demo", "--json")) as JsonObject
+        assertEquals("blue-green", field(blueGreen, "strategy"))
+        assertTrue(ok("fabric", "list").out.contains("demo-main-1b"))
         assertTrue(ok("undeploy", "demo").out.contains("demo-main-1"))
         assertTrue(ok("cache", "cleanup", "m1").out.contains("acme-demo"))
     }
