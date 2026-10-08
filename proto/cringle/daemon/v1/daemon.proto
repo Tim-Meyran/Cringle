@@ -5,6 +5,7 @@ syntax = "proto3";
 package cringle.daemon.v1;
 
 import "cringle/common/v1/identifiers.proto";
+import "cringle/engine/v1/engine_management.proto";
 import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
@@ -35,6 +36,13 @@ service DaemonService {
 
   // Starts every registered Engine that is not running (used after a machine restart).
   rpc StartAllEngines(StartAllEnginesRequest) returns (ListEnginesResponse);
+
+  // Switches the LoggingCollector of the machine on or off for one Engine (Architecture 16.1). The collector pulls the entries of the
+  // logging driver of a running Engine and keeps them, so that they can be read when the Engine is stopped.
+  rpc SetLogCollection(SetLogCollectionRequest) returns (SetLogCollectionResponse);
+
+  // The entries the collector has kept for an Engine.
+  rpc QueryCollectedLogs(QueryCollectedLogsRequest) returns (QueryCollectedLogsResponse);
 }
 
 // State of an Engine process as seen by the Daemon.
@@ -90,3 +98,26 @@ message ListEnginesResponse {
 }
 
 message StartAllEnginesRequest {}
+
+message SetLogCollectionRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+  bool enabled = 2;
+}
+
+message SetLogCollectionResponse {}
+
+message QueryCollectedLogsRequest {
+  cringle.common.v1.EngineId engine_id = 1;
+  string fabric = 2;
+  string block = 3;
+  cringle.engine.v1.LogLevel min_level = 4;
+  google.protobuf.Timestamp since = 5;
+  // 0 means the default of 1000.
+  int32 limit = 6;
+}
+
+message QueryCollectedLogsResponse {
+  // Whether the collector is switched on for the Engine; without it there is nothing to read.
+  bool enabled = 1;
+  repeated cringle.engine.v1.LogEntry entries = 2;
+}

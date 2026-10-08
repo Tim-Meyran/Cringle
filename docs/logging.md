@@ -107,3 +107,16 @@ val engine = Engine.create(parsed)
 ```
 
 The `init` call is idempotent: calling it again with the same arguments replaces the configuration. Calling it with different arguments resets and reconfigures.
+
+## Logging collector (#195)
+
+Logs are first kept by every engine itself. The LoggingCollector of a machine (part of its daemon) keeps them beyond the life of an engine:
+`cringle engine collect <machine> <engine> on` switches it on for that engine (off by default; the choice is kept in
+`<home>/daemon/collector.json`). Every 10 seconds the daemon asks each running engine it is switched on for for the entries of the logging
+driver since the last one it has and appends them to `<home>/daemon/collected/<engine>/logs/engine.log` (the format of the engine's own store;
+the file is cut to the newest 50 MB when it grows past 60 MB). Lines of foreign log files are not collected: they stay in the log folders on
+the machine and are part of the log query while the engine runs.
+
+`QueryLogs` (`cringle logs`) of a stopped engine, or of one that does not answer, returns the collected entries marked as collected (`(collected)`
+in the text output, `"collected": true` in JSON) if the collector is on for it; without it the call fails as before. In the list of all engines
+the collected entries of stopped engines are added. Entries of a running engine are always the live ones.

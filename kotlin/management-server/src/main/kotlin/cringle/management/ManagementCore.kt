@@ -80,7 +80,7 @@ public data class DeployResult(val project: String, val version: String, val loc
 public data class FabricView(val machine: String, val engineId: String, val info: FabricInfo, val desiredRunning: Boolean)
 
 /** A log entry with its origin. */
-public data class LogView(val machine: String, val engineId: String, val entry: LogEntry)
+public data class LogView(val machine: String, val engineId: String, val entry: LogEntry, val collected: Boolean = false)
 
 /** The numbers of one Engine with its origin. */
 public data class MetricsView(val machine: String, val engineId: String, val metrics: cringle.engine.v1.EngineMetrics)
@@ -403,11 +403,23 @@ public class ManagementCore(
         val problems = ArrayList<String>()
         val entries = ArrayList<LogView>()
         if (!machineId.isNullOrEmpty() && !id.isNullOrEmpty()) {
-            runningEngine(machineId, id).queryLogs(request).entriesList.forEach { entries += LogView(machineId, id, it) }
+            try {
+                runningEngine(machineId, id).queryLogs(request).entriesList.forEach { entries += LogView(machineId, id, it) }
+            } catch (ex: StatusException) {
+                val kept = collectedLogs(machine(machineId), id, request) ?: throw ex
+                kept.forEach { entries += LogView(machineId, id, it, collected = true) }
+            } catch (ex: ManagementException) {
+                val kept = collectedLogs(machine(machineId), id, request) ?: throw ex
+                kept.forEach { entries += LogView(machineId, id, it, collected = true) }
+            }
         } else {
             for (e in listEngines(machineId)) {
-                if (e.process.state != EngineProcessState.ENGINE_PROCESS_STATE_RUNNING) continue
                 val eid = e.process.engineId.value
+                if (e.process.state != EngineProcessState.ENGINE_PROCESS_STATE_RUNNING) {
+                    // a stopped engine has no entries of its own; the collector of its machine may still have some
+                    collectedLogs(machine(e.machine), eid, request)?.forEach { entries += LogView(e.machine, eid, it, collected = true) }
+                    continue
+                }
                 try {
                     runningEngine(e.machine, eid).queryLogs(request).entriesList.forEach { entries += LogView(e.machine, eid, it) }
                 } catch (ex: StatusException) {
@@ -419,6 +431,29 @@ public class ManagementCore(
         }
         val sorted = entries.sortedWith(compareBy({ it.entry.timestamp.seconds }, { it.entry.timestamp.nanos })).takeLast(limit)
         return LogResult(sorted, problems)
+    }
+
+    /**
+     * The entries the LoggingCollector of [m] has kept for the engine [id], or `null` if the collector is not switched on for it
+     * (or the daemon cannot be asked) (#195).
+     */
+    private suspend fun collectedLogs(m: MachineRecord, id: String, request: QueryLogsRequest): List<cringle.engine.v1.LogEntry>? = try {
+        val asked = cringle.daemon.v1.QueryCollectedLogsRequest.newBuilder()
+            .setEngineId(engineId(id)).setFabric(request.fabric).setBlock(request.block).setMinLevel(request.minLevel).setLimit(request.limit)
+        if (request.hasSince()) asked.since = request.since
+        probe(daemon(m)).queryCollectedLogs(asked.build()).takeIf { it.enabled }?.entriesList
+    } catch (_: StatusException) {
+        null
+    }
+
+    /** Switches the LoggingCollector of the machine of the engine [id] on or off for it (#195). */
+    public suspend fun setLogCollection(machineId: String, id: String, enabled: Boolean) {
+        val m = machine(machineId)
+        try {
+            daemon(m).setLogCollection(cringle.daemon.v1.SetLogCollectionRequest.newBuilder().setEngineId(engineId(id)).setEnabled(enabled).build())
+        } catch (e: StatusException) {
+            throw ManagementException(e.status.code, e.status.description ?: e.status.code.name)
+        }
     }
 
     /** The numbers of the running Engine [machineId]/[id], or of all running Engines (of [machineId] if given) if no Engine is named (#191). */

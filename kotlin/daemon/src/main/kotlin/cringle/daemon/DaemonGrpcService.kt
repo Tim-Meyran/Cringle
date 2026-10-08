@@ -68,6 +68,49 @@ internal class DaemonGrpcService(private val daemon: Daemon) : DaemonServiceGrpc
 
     override suspend fun getEngine(request: EngineRequest): EngineInfo = info(call { daemon.supervisor.get(request.engineId.value) })
 
+    override suspend fun setLogCollection(request: cringle.daemon.v1.SetLogCollectionRequest): cringle.daemon.v1.SetLogCollectionResponse {
+        call {
+            daemon.supervisor.get(request.engineId.value) // NOT_FOUND for an unknown engine
+            daemon.collector.setEnabled(request.engineId.value, request.enabled)
+        }
+        return cringle.daemon.v1.SetLogCollectionResponse.getDefaultInstance()
+    }
+
+    override suspend fun queryCollectedLogs(request: cringle.daemon.v1.QueryCollectedLogsRequest): cringle.daemon.v1.QueryCollectedLogsResponse {
+        val id = request.engineId.value
+        val enabled = call { daemon.supervisor.get(id); daemon.collector.enabled(id) }
+        val entries = call {
+            val level = when (request.minLevel) {
+                cringle.engine.v1.LogLevel.LOG_LEVEL_INFO -> cringle.contract.LogLevel.INFO
+                cringle.engine.v1.LogLevel.LOG_LEVEL_WARN -> cringle.contract.LogLevel.WARN
+                cringle.engine.v1.LogLevel.LOG_LEVEL_ERROR -> cringle.contract.LogLevel.ERROR
+                else -> cringle.contract.LogLevel.DEBUG
+            }
+            daemon.collector.query(
+                id,
+                cringle.engine.drivers.LogQuery(
+                    request.fabric.takeIf { it.isNotEmpty() }, request.block.takeIf { it.isNotEmpty() }, level,
+                    if (request.hasSince()) java.time.Instant.ofEpochSecond(request.since.seconds, request.since.nanos.toLong()) else null,
+                    if (request.limit > 0) request.limit else 1000,
+                ),
+            )
+        }
+        return cringle.daemon.v1.QueryCollectedLogsResponse.newBuilder().setEnabled(enabled).addAllEntries(
+            entries.map {
+                cringle.engine.v1.LogEntry.newBuilder().setTimestamp(Timestamp.newBuilder().setSeconds(it.timestamp.epochSecond).setNanos(it.timestamp.nano))
+                    .setFabric(it.fabric).setBlock(it.block).setMessage(it.message)
+                    .setLevel(
+                        when (it.level) {
+                            cringle.contract.LogLevel.DEBUG -> cringle.engine.v1.LogLevel.LOG_LEVEL_DEBUG
+                            cringle.contract.LogLevel.INFO -> cringle.engine.v1.LogLevel.LOG_LEVEL_INFO
+                            cringle.contract.LogLevel.WARN -> cringle.engine.v1.LogLevel.LOG_LEVEL_WARN
+                            cringle.contract.LogLevel.ERROR -> cringle.engine.v1.LogLevel.LOG_LEVEL_ERROR
+                        },
+                    ).build()
+            },
+        ).build()
+    }
+
     override suspend fun startAllEngines(request: StartAllEnginesRequest): ListEnginesResponse {
         call {
             for (e in daemon.supervisor.list()) {

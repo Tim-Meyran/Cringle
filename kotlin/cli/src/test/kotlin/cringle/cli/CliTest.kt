@@ -454,6 +454,23 @@ class CliTest {
     }
 
     @Test
+    fun theLoggingCollectorKeepsTheLogsOfAStoppedEngine() {
+        machine()
+        ok("engine", "create", "m1", "--id", "e1")
+        ok("engine", "start", "m1", "e1")
+        LoggingService(CringleHome.engineDir(home, "e1")).append(LogEntry(Instant.parse("2026-01-01T10:00:00Z"), "shop", "a", LogLevel.INFO, "kept for later"))
+        assertEquals(2, cli("engine", "collect", "m1", "e1").code)
+        assertEquals(2, cli("engine", "collect", "m1", "e1", "maybe").code)
+        assertTrue(ok("engine", "collect", "m1", "e1", "on").out.contains("on"))
+        assertEquals(1, daemon.collectLogsNow())
+        ok("engine", "stop", "m1", "e1")
+        assertTrue(ok("logs", "m1", "e1").out.contains("(collected): kept for later"))
+        assertEquals(true, ((json(ok("logs", "m1", "e1", "--json")) as JsonArray).single() as JsonObject)["collected"].let { (it as JsonPrimitive).content.toBoolean() })
+        assertTrue(ok("engine", "collect", "m1", "e1", "off").out.contains("off"))
+        assertTrue(cli("logs", "m1", "e1").code != 0)
+    }
+
+    @Test
     fun logFilesOfForeignProcessesShowTheirSource() {
         machine()
         ok("engine", "create", "m1", "--id", "e1")

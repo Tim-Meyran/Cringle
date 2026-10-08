@@ -29,6 +29,8 @@ public data class LogQuery(
     val since: Instant? = null,
     /** At most this many entries are returned: the newest ones, oldest first. */
     val limit: Int = 1000,
+    /** Only the entries of the logging driver; the lines of foreign log files are left out (#195). */
+    val driverOnly: Boolean = false,
 ) {
     init {
         require(limit >= 1) { "limit must be at least 1" }
@@ -61,7 +63,7 @@ public class LoggingService(private val engineDir: Path) {
     /** Returns the entries that match [query], oldest first. */
     public fun query(query: LogQuery = LogQuery()): List<LogEntry> {
         val all = synchronized(lock) { if (Files.exists(file)) Files.readAllLines(file, StandardCharsets.UTF_8) else emptyList() }
-        return (all.asSequence().mapNotNull { decode(it) } + foreignEntries(query).asSequence())
+        return (all.asSequence().mapNotNull { decode(it) } + (if (query.driverOnly) emptySequence() else foreignEntries(query).asSequence()))
             .sortedBy { it.timestamp }
             .filter { query.fabric == null || it.fabric == query.fabric }
             .filter { query.block == null || it.block == query.block }

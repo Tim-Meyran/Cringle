@@ -395,6 +395,9 @@ message QueryLogsRequest {
   google.protobuf.Timestamp since = 4;
   // At most this many entries (the newest ones, oldest first); 0 means the default of 1000.
   int32 limit = 5;
+  // Only the entries of the logging driver, not the lines of the log files that foreign processes wrote into the log folders
+  // of blocks (the collector of the daemon uses this: those lines may carry the modification time of their file).
+  bool driver_only = 6;
 }
 
 message QueryLogsResponse {

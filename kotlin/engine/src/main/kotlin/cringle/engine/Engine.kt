@@ -442,6 +442,7 @@ public class Engine private constructor(
                 minLevel = minLevel,
                 since = if (request.hasSince()) Instant.ofEpochSecond(request.since.seconds, request.since.nanos.toLong()) else null,
                 limit = if (request.limit > 0) request.limit else 1000,
+                driverOnly = request.driverOnly,
             )
             val entries = withContext(Dispatchers.IO) { drivers.logging.query(query) }
             return cringle.engine.v1.QueryLogsResponse.newBuilder().addAllEntries(
