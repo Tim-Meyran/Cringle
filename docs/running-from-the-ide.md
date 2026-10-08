@@ -8,7 +8,7 @@ Every program has a Gradle task in the group `cringle`, so that the IDE can run 
 | `runManagementServer` | management server (`cringle.management.MainKt`) with the WebUI on https://127.0.0.1:8443 (`docs/webui.md`) | `--port 7500 --auth --web-port 8443` |
 | `runEngine` | one engine by itself (`cringle.engine.MainKt`); normally the daemon starts engines | `--id dev-engine` |
 | `runCli` | the `cringle` command line (`cringle.cli.MainKt`) | `--help` |
-| `runShell` | the `cringle` command line in interactive mode (`cringle shell`); the standard input is the console | `shell` |
+| `runShell` | the `cringle` command line in interactive mode (`cringle shell`); the console of Gradle and of the IDE is no terminal, so there are no Tab and no history there (start `cringle shell` from the terminal of the IDE for that) | `shell` |
 
 ```
 ./gradlew runDaemon --console=plain --no-daemon

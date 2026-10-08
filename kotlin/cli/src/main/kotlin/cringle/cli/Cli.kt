@@ -49,7 +49,7 @@ public class Cli(
             }
             if (rest == listOf("shell")) {
                 // the global options of this call apply to every command of the session
-                return shell(buildList {
+                return shell(shellHome(home), buildList {
                     server?.let { add("--server"); add(it) }
                     home?.let { add("--home"); add(it) }
                     if (json) add("--json")
@@ -120,32 +120,43 @@ public class Cli(
         }
     }
 
+    /** The Cringle home of the session: `--home`, `CRINGLE_HOME` or `~/.cringle`. */
+    private fun shellHome(home: String?): Path =
+        (home ?: environment["CRINGLE_HOME"]?.takeIf { it.isNotBlank() })?.let { Paths.get(it) }
+            ?: Paths.get(System.getProperty("user.home"), ".cringle")
+
     /**
-     * The interactive mode: reads one command per line from the standard input and runs it like a command line of its own,
-     * with the global options [globals]; a failing command is reported and the session goes on. `exit`, `quit` or the end of
-     * the input leave it. The standard input of a single command is empty: a login in the shell takes its token with
-     * `--token-file` or `--token`, because the lines of the session are not its token.
+     * The interactive mode: reads one command per line and runs it like a command line of its own, with the global options
+     * [globals]; a failing command is reported and the session goes on. `exit`, `quit` or the end of the input leave it.
+     * On a terminal the line can be edited, Tab completes commands and options and the history is kept in
+     * `<home>/shell-history`; from a pipe or a file the lines are read as they are. The standard input of a single command is
+     * empty: a login in the shell takes its token with `--token-file` or `--token`, because the lines of the session are
+     * not its token.
      */
-    private fun shell(globals: List<String>): Int {
-        val reader = stdin.bufferedReader()
-        out.println("cringle $version: type a command, 'help' lists them, 'exit' leaves")
-        while (true) {
-            out.print("cringle> ")
-            out.flush()
-            val line = reader.readLine() ?: break
-            val words = try {
-                splitWords(line)
-            } catch (e: IllegalArgumentException) {
-                err.println("error: ${e.message}")
-                continue
+    private fun shell(home: Path, globals: List<String>): Int {
+        val input = (if (stdin === System.`in`) terminalShellInput(home.resolve("shell-history")) else null)
+            ?: PlainShellInput(stdin.bufferedReader(), out)
+        input.use {
+            out.println(
+                if (it.isTerminal) "cringle $version: Tab completes, the arrow keys show the history, 'help' lists the commands, 'exit' leaves"
+                else "cringle $version: type a command, 'help' lists them, 'exit' leaves",
+            )
+            while (true) {
+                val line = it.readLine("cringle> ") ?: break
+                val words = try {
+                    splitWords(line)
+                } catch (e: IllegalArgumentException) {
+                    err.println("error: ${e.message}")
+                    continue
+                }
+                if (words.isEmpty()) continue
+                if (words.first() == "exit" || words.first() == "quit") break
+                if (words.first() == "shell") {
+                    err.println("error: you are in the shell already")
+                    continue
+                }
+                Cli(out, err, java.io.ByteArrayInputStream(ByteArray(0)), environment, version).run(globals + words)
             }
-            if (words.isEmpty()) continue
-            if (words.first() == "exit" || words.first() == "quit") break
-            if (words.first() == "shell") {
-                err.println("error: you are in the shell already")
-                continue
-            }
-            Cli(out, err, java.io.ByteArrayInputStream(ByteArray(0)), environment, version).run(globals + words)
         }
         out.println()
         return 0
