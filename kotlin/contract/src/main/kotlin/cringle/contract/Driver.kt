@@ -53,12 +53,21 @@ public enum class IsolationLevel {
 }
 
 /**
- * Lets blocks write entries into the data warehouse. **[Zu bestätigen]** This is deliberately minimal: the
- * structure and the query interface of the data warehouse are open points of the architecture.
+ * Lets blocks write entries into the data warehouse of the engine and read their own back (Architecture 16.5). **[Zu bestätigen]**
+ * The structure of the data warehouse is an open point of the architecture; this is the interface of its first version: the
+ * entries of a block form one partition of the engine's store, ordered by time and removed by the retention of that partition.
+ * A block reads only its own partition.
  */
 public interface DwhDriver : Driver {
     /** Writes [entry] into the data warehouse. */
     public suspend fun write(entry: DwhEntry)
+
+    /**
+     * The entries of this block in the range [since] to [until] (both inclusive and optional): the newest [limit], oldest first.
+     * A driver that cannot read (a fake in a test) throws [UnsupportedOperationException].
+     */
+    public suspend fun read(since: java.time.Instant? = null, until: java.time.Instant? = null, limit: Int = 1000): List<DwhEntry> =
+        throw UnsupportedOperationException("this data warehouse driver cannot read")
 }
 
 /**
@@ -67,11 +76,13 @@ public interface DwhDriver : Driver {
  * @property key identifies what the entry is about.
  * @property value the payload.
  * @property timestamp when the entry was created.
+ * @property tags free labels, for example to find the entry again.
  */
 public data class DwhEntry(
     public val key: String,
     public val value: Any,
     public val timestamp: java.time.Instant = java.time.Instant.now(),
+    public val tags: Map<String, String> = emptyMap(),
 ) {
     init {
         require(key.isNotBlank()) { "DwhEntry key must not be blank" }

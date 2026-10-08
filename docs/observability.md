@@ -37,7 +37,7 @@ per partition:
   the newest file always stays, so a size limit is kept to `maxBytes` plus up to one day file.
 - Queries take a time range and a limit and return the newest records, oldest first.
 
-The block driver (#192), the recording of tether traffic (#193) and the access of the ManagementServer (#194) build on it.
+The block driver (below), the recording of tether traffic (#193) and the access of the ManagementServer (#194) build on it.
 
 ## Heartbeat (#190)
 
@@ -50,3 +50,12 @@ The router keeps the last numbers of every engine in memory only (they are not w
 keeps the last ones, an unregistered engine loses them) and returns them as `vitals` of the engine entry in `ListEngines`. The
 cached engines of remote routers carry the numbers their router reported at the last refresh. The full numbers stay a pull:
 `GetMetrics` of the engine (`cringle metrics`).
+
+## DWH driver for blocks (#192)
+
+A block that names the driver `dwh` in its `requiredDrivers` gets a `DwhDriver` (`BuiltinDriverTypes.DWH`, contract). It writes
+`DwhEntry(key, value, timestamp, tags)` to the partition `(fabric, block)` of the engine's store and reads its own entries back
+(`read(since, until, limit)`: the newest `limit`, oldest first). The value is JSON-like data (maps with string keys, lists, strings,
+numbers, booleans, `null`); anything else is rejected with an `IllegalArgumentException`. A block cannot read the partitions of other
+blocks or fabrics; the ManagementServer reads any partition (#194). An entry is stored as `{"key": ..., "value": ...}` with the
+timestamp and tags of the entry. The retention of a block partition is set per partition (`SetDwhRetention`, #193).
