@@ -18,6 +18,7 @@ import cringle.packaging.PackageNames
 import cringle.packaging.PackageValidator
 import cringle.packaging.PluginManifest
 import cringle.packaging.PluginPackage
+import cringle.packaging.RemoteEndpoint
 import cringle.packaging.ProjectPackage
 import cringle.schema.SchemaConflictException
 import cringle.schema.SchemaParseException
@@ -30,6 +31,9 @@ import kotlin.reflect.KClass
 /** A plugin version that a fabric loads, with its trust status. */
 public data class DeployPlugin(val name: String, val version: String, val trust: PluginTrust)
 
+/** The concrete far end of the service [service] for the service tethers of a fabric (#178); see `ServiceBinding` in the engine API. */
+public data class ServiceBinding(val service: String, val fabric: String, val block: String, val port: String, val fingerprint: String)
+
 /** What to deploy: [blueprint] of project [projectName]@[projectVersion] as fabric [fabricId], with exact [plugins]. */
 public data class DeployRequest(
     val fabricId: String,
@@ -39,6 +43,8 @@ public data class DeployRequest(
     val plugins: List<DeployPlugin>,
     /** Public key fingerprints of the engines that may call the provided service ports of the blueprint (#177). */
     val serviceCallers: List<String> = emptyList(),
+    /** The concrete far ends of the service tethers of the blueprint (#178). */
+    val serviceBindings: List<ServiceBinding> = emptyList(),
 )
 
 /** Turns a [DeployRequest] into a [FabricRuntime] (in state `CREATED`). */
@@ -145,11 +151,12 @@ public class LocalFabricDeployer(
         if (projectManifest.name != request.projectName || projectManifest.version != request.projectVersion) {
             throw FabricException("project directory ${request.projectName}@${request.projectVersion} contains ${projectManifest.name}@${projectManifest.version}")
         }
-        val blueprints = try {
+        val parsed = try {
             projectManifest.blueprints.map { ManifestJson.parseBlueprint(read(projectRoot.resolve(it), it), it) }
         } catch (e: PackageFormatException) {
             throw FabricException("invalid blueprint in project ${request.projectName}: ${e.message}", e)
         }
+        val blueprints = parsed.map { if (it.name == request.blueprint) it.bindServices(request.serviceBindings) else it }
         val blueprint = blueprints.firstOrNull { it.name == request.blueprint }
             ?: throw FabricException("project ${request.projectName}@${request.projectVersion} has no blueprint '${request.blueprint}' (has: ${blueprints.joinToString { it.name }})")
         val projectSchemas = projectManifest.schemas.associateWith { read(projectRoot.resolve(it), it) }
@@ -251,4 +258,18 @@ public class LocalFabricDeployer(
         if (!Files.isRegularFile(file)) throw FabricException("$what is not unpacked in the Cringle home (missing $file)")
         return Files.readString(file)
     }
+}
+
+/** This blueprint with the `service` of every service tether replaced by the `remote` of the binding of that service (#178). */
+internal fun Blueprint.bindServices(bindings: List<ServiceBinding>): Blueprint {
+    bindings.groupingBy { it.service }.eachCount().entries.firstOrNull { it.value > 1 }
+        ?.let { throw FabricException("service '${it.key}' is bound more than once") }
+    if (bindings.isEmpty()) return this
+    val byService = bindings.associateBy { it.service }
+    return copy(
+        tethers = tethers.map { t ->
+            val binding = t.service?.let { byService[it] } ?: return@map t
+            t.copy(remote = RemoteEndpoint(null, binding.fingerprint, binding.fabric, binding.block, binding.port), service = null)
+        },
+    )
 }

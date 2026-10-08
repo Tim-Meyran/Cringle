@@ -136,6 +136,13 @@ allowed like the sender of a `remote` tether (trusted by its key, never on first
 naming them as any remote port, `<fabric>/<block>/<port>`. Several engines can call the same port. A caller that is
 removed is refused at its next call, and its open calls end with the error `stopping`. Calls are delivered with the
 delivery policy `DROP`.
+
+The consuming side is bound by the deploy request (#178): it carries one `ServiceBinding` per service (`fabric`, `block`,
+`port` of the service port and the public key `fingerprint` of the engine that runs it). Before the blueprint is
+validated, the engine replaces the `service` of every service tether by that `remote`, without an address (the registry
+finds the engine, see above); from then on the tether is an ordinary remote tether. A service without a binding stays
+unbound and the fabric is refused when it starts; a binding that no tether names is ignored; two bindings for one
+service are an error.
 ## Schemas
 
 Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). The schema check applies to these three types, on local tethers, and to nothing else: byte streams (`BYTE_STREAM`, `TCP` and `SERIAL`) are not checked. Schema messages for every tether type, across process boundaries too, follow with the wire format of #76. **Decided:** a response is validated against the same schema as the request; a port has one schema for both directions.

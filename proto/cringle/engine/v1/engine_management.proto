@@ -110,6 +110,19 @@ message DeployFabricRequest {
   // Public key fingerprints (64 lower case hex characters) of the Engines that may call the provided service ports of the
   // blueprint, see SetServiceCallers.
   repeated string service_callers = 6;
+  // The concrete far ends of the service tethers of the blueprint (a tether whose `remote` names a service). A service
+  // without a binding stays unbound and the fabric is refused when it starts; a binding that no tether uses is ignored.
+  repeated ServiceBinding service_bindings = 7;
+}
+
+// Where the service `service` is: the port `block`.`port` of the fabric `fabric`, on the Engine with the public key
+// `fingerprint` (the fields of a `remote` of a blueprint without an address: the router finds the Engine).
+message ServiceBinding {
+  string service = 1;
+  string fabric = 2;
+  string block = 3;
+  string port = 4;
+  string fingerprint = 5;
 }
 
 message SetServiceCallersRequest {

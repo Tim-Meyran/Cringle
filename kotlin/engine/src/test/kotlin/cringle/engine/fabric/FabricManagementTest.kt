@@ -240,6 +240,38 @@ class FabricManagementTest {
     }
 
     @Test
+    fun aBoundServiceTetherIsCheckedLikeAConcreteRemoteAndAnUnboundOneIsNot() = withEngine { stub, m1, _ ->
+        // #178: the marker block has no ports, so every variant fails on 'out'; what else is reported shows whether the tether was bound
+        val projectDir = dir.resolve("home/projects/demo/0.1.0")
+        val service = Blueprint(
+            "service",
+            listOf(BlueprintBlock("m1", "acme-demo/marker", config = JsonObject(mapOf("marker" to JsonPrimitive(m1.toString()))))),
+            listOf(TetherDef(TetherType.MESSAGE, Endpoint("m1", "out"), null, service = "orders")),
+        )
+        Files.createDirectories(projectDir.resolve("blueprints"))
+        Files.writeString(projectDir.resolve("blueprints/service.json"), ManifestJson.encode(service))
+        val manifest = projectDir.resolve("cringle-project.json")
+        Files.writeString(manifest, Files.readString(manifest).replace("\"blueprints/main.json\"", "\"blueprints/main.json\", \"blueprints/service.json\""))
+        fun request(vararg bindings: cringle.engine.v1.ServiceBinding) =
+            deploy("svc-1", ProtoTrust.PLUGIN_TRUST_TRUSTED, blueprint = "service").toBuilder().addAllServiceBindings(bindings.toList()).build()
+        fun failure(r: DeployFabricRequest): StatusException = assertThrows { runBlocking { stub.deployFabric(r) } }
+        fun binding(name: String, fingerprint: String) = cringle.engine.v1.ServiceBinding.newBuilder()
+            .setService(name).setFabric("shop").setBlock("sink").setPort("in").setFingerprint(fingerprint).build()
+
+        val unbound = failure(request())
+        assertTrue(unbound.status.description!!.contains("has no port 'out'") && !unbound.status.description!!.contains("fingerprint"), unbound.status.description)
+        val unused = failure(request(binding("other", "zz")))
+        assertFalse(unused.status.description!!.contains("fingerprint"), unused.status.description)
+        // bound: the tether is now a concrete remote, so its fingerprint is validated
+        val bound = failure(request(binding("orders", "zz")))
+        assertEquals(Status.Code.INVALID_ARGUMENT, bound.status.code)
+        assertTrue(bound.status.description!!.contains("invalid fingerprint 'zz'"), bound.status.description)
+        val twice = failure(request(binding("orders", "ab".repeat(32)), binding("orders", "cd".repeat(32))))
+        assertEquals(Status.Code.INVALID_ARGUMENT, twice.status.code)
+        assertTrue(twice.status.description!!.contains("bound more than once"), twice.status.description)
+    }
+
+    @Test
     fun namesAndVersionsOfADeployRequestAreCheckedBeforeAnyPathIsBuilt() = withEngine { stub, _, _ ->
         fun failure(request: DeployFabricRequest): StatusException = assertThrows { runBlocking { stub.deployFabric(request) } }
         val home = dir.resolve("home")
