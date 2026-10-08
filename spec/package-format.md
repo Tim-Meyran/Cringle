@@ -141,9 +141,12 @@ version of its own and no engine, role or label fields, so it always runs entire
 A blueprint can offer ports to the tethers of other projects as **services**, and a tether can name such a service
 instead of a concrete engine:
 
-- `"provides": [{"service": <name>, "block": <id>, "port": <name>}, ...]` (optional, default none) at the top of
-  the blueprint. `service` follows the package-name grammar of section 3 and is unique within the blueprint; `block`
-  and `port` name an `IN` port of a block of this blueprint.
+- `"provides": [{"service": <name>, "block": <id>, "port": <name>, "type": <tether type>}, ...]` (optional, default
+  none) at the top of the blueprint. `service` follows the package-name grammar of section 3 and is unique within the
+  blueprint; `block` and `port` name an `IN` port of a block of this blueprint. `type` (optional) is the tether type
+  of the calls to the port: `MESSAGE`, `REQUEST_RESPONSE`, `STREAM` or `BYTE_STREAM`, and one that the port supports.
+  Without `type` the port must support exactly one of these types, which is then the type of the service; a port with
+  several needs `type`. A service that is offered with two types is two entries with two names.
 - An **abstract** `remote` is `{"service": <name>}` and nothing else (no `address`, `fingerprint`, `fabric`,
   `block`, `port`). It replaces the concrete `remote`; a tether has one of the two forms, never both. The local
   endpoint and the rules for the tether type are the same as for a concrete `remote`.
@@ -185,7 +188,8 @@ blueprint:
     for a local tether (existence, direction, tether type, `index`); the schema of the remote port cannot be checked
     here and is checked when the tether connects;
 14. a `remote` with a `service` has a name in the package-name grammar and no other key; every `provides` entry has
-    a valid service name that is unique in the blueprint and names an existing `IN` port of an existing block.
+    a valid service name that is unique in the blueprint and names an existing `IN` port of an existing block; its `type`
+    is a type that can end on another engine and that the port supports, and is given if the port supports several.
 
 Validation reports all of these together; reading a package reports the first violation it meets, because parsing
 stops there.

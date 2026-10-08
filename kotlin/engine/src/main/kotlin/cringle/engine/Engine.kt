@@ -301,8 +301,17 @@ public class Engine private constructor(
                     },
                 )
             }
-            info(fabrics.deploy(DeployRequest(request.fabricId.value, request.project.name, request.project.version, request.blueprint, plugins)))
+            info(fabrics.deploy(DeployRequest(request.fabricId.value, request.project.name, request.project.version, request.blueprint, plugins, request.serviceCallersList)))
         }
+
+        override suspend fun setServiceCallers(request: cringle.engine.v1.SetServiceCallersRequest): cringle.engine.v1.SetServiceCallersResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                request.fingerprintsList.forEach {
+                    if (!Regex("[0-9a-f]{64}").matches(it)) throw FabricException("invalid fingerprint '$it': expected 64 lowercase hex characters")
+                }
+                fabrics.setServiceCallers(request.fabricId.value, request.fingerprintsList)
+                cringle.engine.v1.SetServiceCallersResponse.getDefaultInstance()
+            }
 
         override suspend fun startFabric(request: FabricRequest): FabricInfo = fabricCall { info(fabrics.start(request.fabricId.value)) }
 

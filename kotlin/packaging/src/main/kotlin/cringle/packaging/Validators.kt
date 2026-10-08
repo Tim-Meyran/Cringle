@@ -132,7 +132,16 @@ public object PackageValidator {
             val path = "$.provides[$i]"
             PackageNames.nameProblem(p.service)?.let { problem("$path.service", it) }
             if (!services.add(p.service)) problem("$path.service", "duplicate service '${p.service}'")
-            endpoint(Endpoint(p.block, p.port), path, instances, unresolved, PortDirection.IN, ::problem)
+            val port = endpoint(Endpoint(p.block, p.port), path, instances, unresolved, PortDirection.IN, ::problem)
+            if (port != null) {
+                val offered = port.tetherTypes.filter { it in remoteTetherTypes }
+                when {
+                    p.type != null && p.type !in remoteTetherTypes -> problem("$path.type", "a ${p.type} tether cannot end on another engine")
+                    p.type != null && p.type !in port.tetherTypes -> problem("$path.type", "port '${p.port}' does not support ${p.type}")
+                    p.type == null && offered.isEmpty() -> problem(path, "port '${p.port}' supports no tether type that can end on another engine")
+                    p.type == null && offered.size > 1 -> problem("$path.type", "port '${p.port}' supports ${offered.joinToString()}: give the 'type' of the service")
+                }
+            }
         }
         blueprint.tethers.forEachIndexed { i, t ->
             val path = "$.tethers[$i]"

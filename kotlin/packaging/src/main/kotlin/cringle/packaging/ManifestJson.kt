@@ -89,7 +89,7 @@ public object ManifestJson {
     )
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
     private val blueprintKeys = setOf("name", "blocks", "tethers", "provides")
-    private val providesKeys = setOf("service", "block", "port")
+    private val providesKeys = setOf("service", "block", "port", "type")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
     private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote")
     private val endpointKeys = setOf("block", "port", "index")
@@ -259,6 +259,7 @@ public object ManifestJson {
             checkedName(JsonReading.string(o, "service", path), "$path.service"),
             JsonReading.string(o, "block", path),
             JsonReading.string(o, "port", path),
+            JsonReading.optString(o, "type", path)?.let { enumValue<TetherType>(it, "$path.type") },
         )
     }
 
@@ -413,6 +414,7 @@ public object ManifestJson {
                                 put("service", p.service)
                                 put("block", p.block)
                                 put("port", p.port)
+                                p.type?.let { put("type", it.name) }
                             }
                         },
                     ),

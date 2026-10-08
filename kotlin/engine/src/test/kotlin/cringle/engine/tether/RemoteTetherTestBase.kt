@@ -104,9 +104,11 @@ abstract class RemoteTetherTestBase {
         val engine: Engine,
         val fabricId: String,
         definition: BlockDefinition,
-        tether: TetherDef,
+        tether: TetherDef?,
         capacity: Int = 64,
         requestTimeout: java.time.Duration = java.time.Duration.ofSeconds(30),
+        provides: List<cringle.packaging.ProvidedService> = emptyList(),
+        serviceCallers: List<String> = emptyList(),
         handler: suspend (TetherEvent) -> Unit = {},
     ) {
         val blockId: String = if (definition.name == "src") "s" else "d"
@@ -120,11 +122,11 @@ abstract class RemoteTetherTestBase {
         val fabric = FabricRuntime(
             FabricSpec(
                 id = fabricId,
-                blueprint = Blueprint(fabricId, listOf(BlueprintBlock(blockId, "p/${definition.name}")), listOf(tether)),
+                blueprint = Blueprint(fabricId, listOf(BlueprintBlock(blockId, "p/${definition.name}")), listOfNotNull(tether), provides),
                 resolver = BlockResolver { ref -> ResolvedBlock(provider, definition, PluginTrust.TRUSTED).takeIf { ref == "p/${definition.name}" } },
                 drivers = DriverFactory { _, _ -> TestDriverSet() },
                 paths = FabricPaths(dir.resolve("fabric-${engine.config.id}"), fabricId),
-                tethers = TetherConfig(SchemaRegistry(), capacity, requestTimeout, remote = engine.remoteTethers.portsFor(fabricId)),
+                tethers = TetherConfig(SchemaRegistry(), capacity, requestTimeout, remote = engine.remoteTethers.portsFor(fabricId), serviceCallers = serviceCallers),
                 schemas = SchemaRegistry(),
                 logger = FabricLogger { _, message -> log += message },
                 watchdog = WatchdogConfig(enabled = false),

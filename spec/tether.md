@@ -126,6 +126,16 @@ streams, on both engines. A fabric that stops tells the senders first (an `ERROR
 ID 0, then the end of the call), so that the exception names the stop and nobody waits for a timeout. The tether is not
 reconnected if it has a fixed address: the fabric has to be restarted (see "Supervision and reconnecting" for the others). At-least-once delivery is not part of this.
 
+
+### Service ports (#177)
+
+A blueprint that provides a service (`package-format.md`, "Services") has a receiving end without a tether of its own:
+the `IN` port of the service. The engine of the fabric is told which engines may call its service ports, as public key
+fingerprints in the deploy request (`service_callers`) and later with `SetServiceCallers`. Each of these engines is
+allowed like the sender of a `remote` tether (trusted by its key, never on first use) and reaches the service ports by
+naming them as any remote port, `<fabric>/<block>/<port>`. Several engines can call the same port. A caller that is
+removed is refused at its next call, and its open calls end with the error `stopping`. Calls are delivered with the
+delivery policy `DROP`.
 ## Schemas
 
 Ports carry a schema. `MESSAGE`, `REQUEST_RESPONSE` and `STREAM` values are checked against the schema of the sending port before they enter the tether; violations throw `TetherValidationException` naming the tether, the schema and the JSON path. The schemas of both ports must be assignable (nominal, see `schema.md`). The schema check applies to these three types, on local tethers, and to nothing else: byte streams (`BYTE_STREAM`, `TCP` and `SERIAL`) are not checked. Schema messages for every tether type, across process boundaries too, follow with the wire format of #76. **Decided:** a response is validated against the same schema as the request; a port has one schema for both directions.

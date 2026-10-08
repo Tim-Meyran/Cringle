@@ -46,7 +46,7 @@ class RemoteTetherTypesTest : RemoteTetherTestBase() {
     ): Pair {
         val a = engine("a")
         val b = engine("b")
-        val receiver = Node(b, "fb", receiverDef(string, all), receiverTether(a, type = type), capacity, requestTimeout, handler)
+        val receiver = Node(b, "fb", receiverDef(string, all), receiverTether(a, type = type), capacity, requestTimeout, handler = handler)
         receiver.start()
         val sender = Node(a, "fa", senderDef(string, all), senderTether(b, type = type), capacity, requestTimeout)
         sender.start()

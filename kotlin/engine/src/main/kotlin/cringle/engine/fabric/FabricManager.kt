@@ -37,6 +37,8 @@ public data class DeployRequest(
     val projectVersion: String,
     val blueprint: String,
     val plugins: List<DeployPlugin>,
+    /** Public key fingerprints of the engines that may call the provided service ports of the blueprint (#177). */
+    val serviceCallers: List<String> = emptyList(),
 )
 
 /** Turns a [DeployRequest] into a [FabricRuntime] (in state `CREATED`). */
@@ -53,6 +55,11 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
     private val fabrics = LinkedHashMap<String, FabricRuntime>()
 
     private fun find(id: String): FabricRuntime = synchronized(fabrics) { fabrics[id] } ?: throw FabricNotFoundException(id)
+
+    /** Replaces the engines that may call the provided service ports of the fabric [id] (see [FabricRuntime.setServiceCallers]). */
+    public fun setServiceCallers(id: String, fingerprints: List<String>) {
+        find(id).setServiceCallers(fingerprints)
+    }
 
     /** Creates a fabric from [request]; it is not started. */
     public fun deploy(request: DeployRequest): FabricStatus {
@@ -196,6 +203,7 @@ public class LocalFabricDeployer(
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
                             it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
                             remote = remoteTethers?.portsFor(request.fabricId),
+                            serviceCallers = request.serviceCallers,
                         )
                     },
                     defaultRestart = defaultRestart,

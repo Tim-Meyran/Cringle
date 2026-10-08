@@ -2,6 +2,10 @@
 
 package cringle.packaging
 
+import cringle.contract.BlockDefinition
+import cringle.contract.PortDefinition
+import cringle.contract.PortDirection
+import cringle.contract.SchemaRef
 import cringle.contract.TetherType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -93,5 +97,31 @@ class BlueprintServiceTest {
     fun aServiceNameIsProvidedOnlyOnce() {
         val p = problems(provider(service, ProvidedService("orders", "sink", "in")))
         assertTrue(p.any { it.path.endsWith("$.provides[1].service") && "duplicate service 'orders'" in it.message }, p.toString())
+    }
+
+    @Test
+    fun theServiceTypeIsReadWrittenAndChecked() {
+        val typed = provider(ProvidedService("orders", "sink", "in", TetherType.MESSAGE))
+        val back = ManifestJson.parseBlueprint(ManifestJson.encode(typed), "f.json")
+        assertEquals(TetherType.MESSAGE, back.provides.single().type)
+        assertEquals(emptyList<PackageProblem>(), problems(typed))
+        val unsupported = problems(provider(ProvidedService("orders", "sink", "in", TetherType.STREAM)))
+        assertTrue(unsupported.any { it.path.endsWith("$.provides[0].type") && "does not support STREAM" in it.message }, unsupported.toString())
+        val local = problems(provider(ProvidedService("orders", "sink", "in", TetherType.TCP)))
+        assertTrue(local.any { it.path.endsWith("$.provides[0].type") && "cannot end on another engine" in it.message }, local.toString())
+    }
+
+    @Test
+    fun aPortWithSeveralRemoteTypesNeedsTheServiceType() {
+        val string = SchemaRef("cringle.std", "String")
+        val multi = BlockDefinition("multi", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE), string)), emptyList())
+        val plugin = Fixtures.pluginPackage().let { it.copy(manifest = it.manifest.copy(blocks = it.manifest.blocks + multi)) }
+        fun check(vararg provides: ProvidedService): List<PackageProblem> {
+            val bp = Blueprint("main", listOf(BlueprintBlock("m", "acme-orders/multi")), emptyList(), provides.toList())
+            return PackageValidator.validateProject(Fixtures.projectPackage(listOf(bp)), listOf(plugin))
+        }
+        val missing = check(ProvidedService("orders", "m", "in"))
+        assertTrue(missing.any { it.path.endsWith("$.provides[0].type") && "give the 'type'" in it.message }, missing.toString())
+        assertEquals(emptyList<PackageProblem>(), check(ProvidedService("orders", "m", "in", TetherType.REQUEST_RESPONSE)))
     }
 }
