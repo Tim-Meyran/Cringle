@@ -63,6 +63,11 @@ message GetStatusResponse {
   cringle.common.v1.CertificateInfo certificate = 5;
   // Address of the local Router; empty until configured.
   string router_address = 6;
+  // SHA-256 of the public key of the Engine identity, 64 lower case hex characters. This is the key that other Engines
+  // and the ManagementServer trust (Architecture chapter 5); the certificate fingerprint above changes with a renewal.
+  string public_key_fingerprint = 7;
+  // Port of the tether service for tethers between Engines (spec/tether.md); 0 if the Engine has none.
+  int32 tether_port = 8;
 }
 
 message ConfigureRequest {

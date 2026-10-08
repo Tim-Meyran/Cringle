@@ -44,6 +44,12 @@ class EngineTest {
             assertEquals("e1", status.engineId.value)
             assertEquals("Edge", status.name)
             assertEquals(EngineState.ENGINE_STATE_RUNNING, status.state)
+            // the key that other engines trust, and the port of the tether service (#172)
+            assertEquals(64, status.publicKeyFingerprint.length)
+            assertTrue(status.publicKeyFingerprint.all { it in "0123456789abcdef" })
+            assertEquals(engine.identity.publicKeyFingerprint, status.publicKeyFingerprint)
+            assertEquals(engine.tetherPort, status.tetherPort)
+            assertTrue(status.tetherPort > 0)
         } finally {
             engine.stop()
         }

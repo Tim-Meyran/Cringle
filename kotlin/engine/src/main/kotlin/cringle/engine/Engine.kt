@@ -239,6 +239,8 @@ public class Engine private constructor(
                         .setSerialNumber(cert.serialNumber.toString(16)),
                 )
                 .setRouterAddress(cfg.routerAddress.orEmpty())
+                .setPublicKeyFingerprint(identity.publicKeyFingerprint)
+                .setTetherPort(tetherPort)
                 .build()
         }
 
