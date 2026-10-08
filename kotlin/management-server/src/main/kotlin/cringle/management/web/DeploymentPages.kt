@@ -93,7 +93,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
         } else {
             val projects = core.repository().listPackages(ListPackagesRequest.newBuilder().setKind(PackageKind.PACKAGE_KIND_PROJECT).build()).packagesList.map { it.name }.distinct().sorted()
             html(
-                raw("<form hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"innerHTML\"><select name=\"project\">"),
+                raw("<form hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><select name=\"project\">"),
                 projects.map { h("<option>{}</option>", it) },
                 raw("</select> <input name=\"version\" placeholder=\"version range (default: highest)\"> <label><input type=\"checkbox\" name=\"start\" checked> start</label> <label><input type=\"checkbox\" name=\"relock\"> relock</label> <button>Deploy</button></form>"),
             )
@@ -108,7 +108,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
         val bindForm = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/bindings\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"project\" placeholder=\"consumer project\" required> <input name=\"service\" placeholder=\"service\" required> <input name=\"fabrics\" placeholder=\"fabrics in order, comma separated\" required> <button>Bind</button></form>")
+            raw("<form hx-post=\"/bindings\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"project\" placeholder=\"consumer project\" required> <input name=\"service\" placeholder=\"service\" required> <input name=\"fabrics\" placeholder=\"fabrics in order, comma separated\" required> <button>Bind</button></form>")
         }
         return html(
             notice(error), info(done),
@@ -121,7 +121,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
 
     private fun logsPage(): Html = raw(
         """<h1>Logs</h1><div x-data="{auto: false, timer: null}">
-<form x-ref="filters" hx-get="/logs/list" hx-target="#logs" hx-trigger="submit, load, refresh">
+<form x-ref="filters" hx-get="/logs/list" hx-target="#logs" hx-swap="morph:innerHTML" hx-trigger="submit, load, refresh">
 <input name="machine" placeholder="machine"> <input name="engine" placeholder="engine"> <input name="fabric" placeholder="fabric"> <input name="block" placeholder="block">
 <select name="level"><option value="">all levels</option><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option></select>
 <input name="minutes" type="number" min="1" placeholder="last minutes"> <input name="limit" type="number" min="1" value="200">
@@ -158,27 +158,28 @@ internal class DeploymentPages(private val core: ManagementCore) {
 
     private suspend fun metrics(): Html {
         val result = core.getMetrics(null, null)
+        // an engine is a <details>: the browser keeps it open, and the refresh waits while one is open (see `cringleIdle`)
         return html(
             result.problems.map { notice(it) },
-            raw("<table><tr><th>Engine</th><th>CPU</th><th>Heap (MB)</th><th>Threads</th><th>Fabrics</th></tr>"),
             result.metrics.map { m ->
                 val x = m.metrics
                 html(
-                    raw("</table><table class=\"engine\" x-data=\"{open: false}\">"),
                     h(
-                        "<tr @click=\"open = !open\" class=\"clickable\"><td>{}/{}</td><td>{}</td><td>{} / {}</td><td>{}</td><td>{}</td></tr>",
+                        "<details class=\"engine\"><summary><strong>{}/{}</strong>: cpu {}, heap {} / {} MB, {} threads, {} fabrics</summary><ul>",
                         m.machine, m.engineId, if (x.processCpuLoad < 0) "?" else "%.0f %%".format(x.processCpuLoad * 100), x.heapUsedBytes / 1_048_576, x.heapMaxBytes / 1_048_576, x.threadCount, x.fabricsCount,
                     ),
                     x.fabricsList.map { f ->
                         html(
-                            h("<tr x-show=\"open\"><td colspan=\"5\"><strong>{}</strong>: {} errors, cpu {} ms</td></tr>", f.fabricId.value, f.errors, if (f.cpuTimeNs < 0) "?" else f.cpuTimeNs / 1_000_000),
-                            f.blocksList.map { b -> h("<tr x-show=\"open\"><td colspan=\"5\">&nbsp;&nbsp;block {}: {} errors</td></tr>", b.blockId, b.errors) },
-                            f.tethersList.map { t -> h("<tr x-show=\"open\"><td colspan=\"5\">&nbsp;&nbsp;tether {} ({}): {} messages, {} bytes, {} errors</td></tr>", t.tetherId, t.type, t.messages, t.bytes, t.errors) },
+                            h("<li><strong>{}</strong>: {} errors, cpu {} ms<ul>", f.fabricId.value, f.errors, if (f.cpuTimeNs < 0) "?" else f.cpuTimeNs / 1_000_000),
+                            f.blocksList.map { b -> h("<li>block {}: {} errors</li>", b.blockId, b.errors) },
+                            f.tethersList.map { t -> h("<li>tether {} ({}): {} messages, {} bytes, {} errors</li>", t.tetherId, t.type, t.messages, t.bytes, t.errors) },
+                            raw("</ul></li>"),
                         )
                     },
+                    raw("</ul></details>"),
                 )
             },
-            raw("</table>"),
+            if (result.metrics.isEmpty() && result.problems.isEmpty()) raw("<p>No engine is running.</p>") else Html(""),
         )
     }
 
@@ -205,13 +206,13 @@ internal class DeploymentPages(private val core: ManagementCore) {
                 if (p.retention.maxBytes > 0) "${p.retention.maxBytes} bytes" else "no size limit",
             )
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><button hx-get=\"/dwh/records\" hx-vals='{\"fabric\": \"{}\", \"kind\": \"{}\", \"name\": \"{}\"}' hx-target=\"#records\">Records</button> {}</td></tr>",
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><button hx-get=\"/dwh/records\" hx-vals='{\"fabric\": \"{}\", \"kind\": \"{}\", \"name\": \"{}\"}' hx-target=\"#records\" hx-swap=\"morph:innerHTML\">Records</button> {}</td></tr>",
                 p.fabric, kind, p.name, p.bytes, retention, p.fabric, kind, p.name,
                 if (!session.can(Permission.OPERATE)) {
                     Html("")
                 } else {
                     h(
-                        "<form hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\"><input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set retention</button></form>",
+                        "<form hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\"><input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set retention</button></form>",
                         p.fabric, kind, p.name,
                     )
                 },
@@ -220,7 +221,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
         val recordForm = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/dwh/recording\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"fabric\" placeholder=\"fabric\" required> <select name=\"mode\"><option value=\"on\">record all tethers</option><option value=\"off\">record only tethers with record</option></select> <input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set recording</button></form>")
+            raw("<form hx-post=\"/dwh/recording\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"fabric\" placeholder=\"fabric\" required> <select name=\"mode\"><option value=\"on\">record all tethers</option><option value=\"off\">record only tethers with record</option></select> <input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set recording</button></form>")
         }
         return html(
             notice(error), info(done), problems.map { notice(it) },

@@ -35,7 +35,7 @@ internal fun button(session: Session, permission: Permission, label: String, url
     if (!session.can(permission)) {
         Html("")
     } else {
-        h("<button hx-post=\"{}\" hx-target=\"#list\" hx-swap=\"innerHTML\"{}>{}</button> ", url, if (confirm != null) h(" hx-confirm=\"{}\"", confirm) else Html(""), label)
+        h("<button hx-post=\"{}\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"{}>{}</button> ", url, if (confirm != null) h(" hx-confirm=\"{}\"", confirm) else Html(""), label)
     }
 
 internal fun Any.pretty(): String = toString().substringAfter("STATE_").lowercase()
@@ -43,9 +43,11 @@ internal fun Any.pretty(): String = toString().substringAfter("STATE_").lowercas
 /** A page body with a heading and the self-refreshing `#list`. */
 internal fun section(title: String, name: String, initial: Html): Html = html(
     h("<h1>{}</h1>", title),
-    h("<div id=\"list\" hx-get=\"/{}/list\" hx-trigger=\"every 5s\" hx-swap=\"innerHTML\">", name),
+    // the refresh morphs the list in place and waits while the user is working in it (see `cringleIdle` in app.js)
+    h("<div id=\"list\" hx-get=\"/{}/list\" hx-trigger=\"every 5s [cringleIdle()]\" hx-swap=\"morph:innerHTML\">", name),
     initial,
     raw("</div>"),
+    h("<p id=\"paused\" class=\"muted\" hidden>Refresh paused while you edit. <a href=\"/{}/list\" hx-get=\"/{}/list\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">Refresh now</a></p>", name, name),
 )
 
 /** Publishes the package [data] in the repository of [core] (the repository checks the package and the hash). */

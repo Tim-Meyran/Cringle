@@ -28,3 +28,6 @@ code { font-size: 13px; word-break: break-all; }
 textarea.invalid { border-color: var(--err); }
 #blueprint-meta { margin-top: .6rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
 @media (max-width: 800px) { #blueprint-editor { grid-template-columns: 1fr; } }
+.muted { color: var(--muted); }
+details.engine { border: 1px solid var(--line); border-radius: 4px; padding: .3rem .6rem; margin-bottom: .4rem; }
+details.engine summary { cursor: pointer; }

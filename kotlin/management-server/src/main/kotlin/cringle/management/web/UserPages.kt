@@ -58,7 +58,7 @@ internal class UserPages(private val users: UserManager) {
                 u.name, v.effectiveRoles.joinToString(", ") { it.name.lowercase() }, u.groups.joinToString(", "), u.id,
                 button(NO_SESSION_CHECK, Permission.AUTHENTICATED, "Delete", "/users/${u.id}/delete", "Delete user ${u.name} and its tokens?"),
                 h(
-                    "<details><summary>Tokens ({})</summary><table>{}</table><form hx-post=\"/users/{}/tokens\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"label\" placeholder=\"label\"> <input name=\"hours\" placeholder=\"lifetime in hours (empty: never expires)\" size=\"30\"> <button>Create token</button></form></details>",
+                    "<details><summary>Tokens ({})</summary><table>{}</table><form hx-post=\"/users/{}/tokens\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"label\" placeholder=\"label\"> <input name=\"hours\" placeholder=\"lifetime in hours (empty: never expires)\" size=\"30\"> <button>Create token</button></form></details>",
                     tokens.count { !it.revoked }.toString(),
                     tokens.map { t ->
                         h(
@@ -74,7 +74,7 @@ internal class UserPages(private val users: UserManager) {
         return html(
             notice(error), if (created == null) Html("") else html(raw("<p class=\"info\" role=\"status\">"), created, raw("</p>")),
             raw("<table><tr><th>Name</th><th>Roles</th><th>Groups</th><th>Id</th><th></th></tr>"), rows, raw("</table>"),
-            raw("<form hx-post=\"/users\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"name\" placeholder=\"name\" required> "), roleBoxes(),
+            raw("<form hx-post=\"/users\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"name\" placeholder=\"name\" required> "), roleBoxes(),
             raw("<input name=\"groups\" placeholder=\"groups, comma separated\"> <button>Create user</button></form>"),
         )
     }
@@ -84,7 +84,7 @@ internal class UserPages(private val users: UserManager) {
         return html(
             notice(error),
             raw("<table><tr><th>Group</th><th>Roles</th></tr>"), rows, raw("</table>"),
-            raw("<form hx-post=\"/groups\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"name\" placeholder=\"name\" required> "), roleBoxes(), raw("<button>Create group</button></form>"),
+            raw("<form hx-post=\"/groups\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"name\" placeholder=\"name\" required> "), roleBoxes(), raw("<button>Create group</button></form>"),
         )
     }
 
