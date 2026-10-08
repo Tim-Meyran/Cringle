@@ -18,6 +18,7 @@ import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -27,6 +28,7 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import org.slf4j.LoggerFactory
 
 /** The kinds of components that have an [Identity]; the kind is part of the subject name (`CN=<prefix>:<id>`). */
 public enum class ComponentKind(public val prefix: String) {
@@ -70,6 +72,7 @@ public class Identity private constructor(
     initialCertificate: X509Certificate,
 ) {
     /** The current certificate. */
+    @Volatile
     public var certificate: X509Certificate = initialCertificate
         private set
 
@@ -81,14 +84,39 @@ public class Identity private constructor(
         get() = PublicKeyFingerprint.hex(MessageDigest.getInstance("SHA-256").digest(certificate.encoded))
 
     /** Issues a new certificate with the same key pair and subject, and stores it. The identity stays the same. */
-    public fun renew(validity: Duration = VALIDITY) {
-        certificate = issue(commonName, keyPair, validity)
+    @JvmOverloads
+    public fun renew(validity: Duration = VALIDITY, clock: Clock = Clock.systemUTC()) {
+        certificate = issue(commonName, keyPair, validity, clock.instant())
         write(dir.resolve(CERT_FILE), pem("CERTIFICATE", certificate.encoded), secret = false)
+    }
+
+    /** How long the current certificate is still valid at [clock]; negative if it has ended. */
+    public fun remaining(clock: Clock = Clock.systemUTC()): Duration = Duration.between(clock.instant(), certificate.notAfter.toInstant())
+
+    /**
+     * Renews the certificate (same key pair, so the fingerprint and every trust entry stay valid) if it ends within [threshold] or has ended, and says whether
+     * it did. An ended certificate is logged as a warning. A running server keeps the certificate it was built with: the new one is used from the next start.
+     */
+    public fun renewIfDue(threshold: Duration = RENEWAL_THRESHOLD, validity: Duration = VALIDITY, clock: Clock = Clock.systemUTC()): Boolean {
+        val left = remaining(clock)
+        if (left > threshold) return false
+        if (left.isNegative) {
+            log.warn("the certificate of {} ended {} ago; issuing a new one", commonName, left.negated())
+        } else {
+            log.info("the certificate of {} ends in {}; issuing a new one", commonName, left)
+        }
+        renew(validity, clock)
+        return true
     }
 
     public companion object {
         /** Certificate validity, `[Zu bestätigen]`; renewal triggers are an open point in the architecture. */
         public val VALIDITY: Duration = Duration.ofDays(3650)
+
+        /** A certificate that ends within this time is renewed (`[Zu bestätigen]`). */
+        public val RENEWAL_THRESHOLD: Duration = Duration.ofDays(30)
+
+        private val log = LoggerFactory.getLogger("cringle.common.identity")
         private const val KEY_FILE = "identity.key"
         private const val PUB_FILE = "identity.pub"
         private const val CERT_FILE = "identity.crt"
@@ -96,9 +124,11 @@ public class Identity private constructor(
         /**
          * Loads the identity from `<home>/certs`, creating key pair and certificate on first use. [commonName] is the
          * subject (`CN=<commonName>`), for a new component [ComponentKind.commonName]. [validity] only applies to a
-         * certificate that is issued now.
+         * certificate that is issued now. An existing certificate that ends within [RENEWAL_THRESHOLD] (or has ended) is renewed when [renew] is set; a
+         * certificate that is created now is not (tests ask for expired ones).
          */
-        public fun loadOrCreate(home: Path, commonName: String, validity: Duration = VALIDITY): Identity {
+        @JvmOverloads
+        public fun loadOrCreate(home: Path, commonName: String, validity: Duration = VALIDITY, clock: Clock = Clock.systemUTC(), renew: Boolean = true): Identity {
             val dir = home.resolve("certs")
             Files.createDirectories(dir)
             val keyFile = dir.resolve(KEY_FILE)
@@ -108,23 +138,23 @@ public class Identity private constructor(
                 val priv = kf.generatePrivate(PKCS8EncodedKeySpec(unpem(Files.readString(keyFile))))
                 val pub = kf.generatePublic(X509EncodedKeySpec(unpem(Files.readString(dir.resolve(PUB_FILE)))))
                 val pair = KeyPair(pub, priv)
-                val cert = if (Files.exists(certFile)) parse(unpem(Files.readString(certFile))) else issue(commonName, pair, validity)
+                val existing = Files.exists(certFile)
+                val cert = if (existing) parse(unpem(Files.readString(certFile))) else issue(commonName, pair, validity, clock.instant())
                 return Identity(dir, commonName, pair, cert).also {
-                    if (!Files.exists(certFile)) write(certFile, pem("CERTIFICATE", cert.encoded), secret = false)
+                    if (!existing) write(certFile, pem("CERTIFICATE", cert.encoded), secret = false) else if (renew) it.renewIfDue(validity = validity, clock = clock)
                 }
             }
             val gen = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
             val pair = gen.generateKeyPair()
-            val cert = issue(commonName, pair, validity)
+            val cert = issue(commonName, pair, validity, clock.instant())
             write(dir.resolve(PUB_FILE), pem("PUBLIC KEY", pair.public.encoded), secret = false)
             write(certFile, pem("CERTIFICATE", cert.encoded), secret = false)
             write(keyFile, pem("PRIVATE KEY", pair.private.encoded), secret = true) // key last: its presence marks a complete identity
             return Identity(dir, commonName, pair, cert)
         }
 
-        private fun issue(commonName: String, pair: KeyPair, validity: Duration): X509Certificate {
+        private fun issue(commonName: String, pair: KeyPair, validity: Duration, now: Instant): X509Certificate {
             val subject = X500Name("CN=$commonName")
-            val now = Instant.now()
             val builder = JcaX509v3CertificateBuilder(
                 subject,
                 BigInteger(64, SecureRandom()).abs().add(BigInteger.ONE),

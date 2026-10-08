@@ -122,6 +122,8 @@ public class Engine private constructor(
     /** The identity of this engine. */
     public val identity: EngineIdentity = identity
 
+    private val certificateWatcher = cringle.common.CertificateWatcher(identity.common)
+
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), requestedPort))
         .sslContext(TlsHelper.serverCredentials(identity.common, trustStore))
@@ -170,6 +172,7 @@ public class Engine private constructor(
      * `<engine dir>/management.port` and `<engine dir>/tether.port`.
      */
     public fun start(): Engine {
+        certificateWatcher.start()
         server.start()
         remoteTethers.start()
         started = true
@@ -185,6 +188,7 @@ public class Engine private constructor(
     /** Stops the management server gracefully and removes the port file. Safe to call more than once. */
     public fun stop() {
         state = EngineState.ENGINE_STATE_STOPPING
+        certificateWatcher.close()
         retention?.shutdownNow()
         retention = null
         fabrics.close()

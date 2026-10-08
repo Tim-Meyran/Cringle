@@ -94,6 +94,34 @@ internal class Command(
     val name: String get() = words.joinToString(" ")
 }
 
+
+/** The identities a home can hold: component name → (folder below the home, kind of the subject). */
+private val CERT_COMPONENTS = linkedMapOf(
+    "daemon" to ("daemon" to cringle.common.ComponentKind.DAEMON),
+    "router" to ("router" to cringle.common.ComponentKind.ROUTER),
+    "management" to ("management" to cringle.common.ComponentKind.MANAGEMENT),
+)
+
+/** The Cringle home of this call: the folder of the profile (`--home`, else `CRINGLE_HOME`, else `~/.cringle`). */
+private fun certHome(env: Env): Path = env.profileFile.toAbsolutePath().parent
+
+/** The identities of [component] (or of all) that exist in [home]. Never creates one. */
+private fun existingIdentities(home: Path, component: String?): List<Pair<String, cringle.common.Identity>> {
+    if (component != null && component !in CERT_COMPONENTS) throw UsageException("unknown component '$component': ${CERT_COMPONENTS.keys.joinToString(", ")}")
+    return CERT_COMPONENTS.filterKeys { component == null || it == component }.mapNotNull { (name, place) ->
+        val dir = home.resolve(place.first)
+        if (Files.exists(dir.resolve("certs").resolve("identity.key"))) name to cringle.common.Identity.loadOrCreate(dir, place.second.commonName(name), renew = false) else null
+    }
+}
+
+private fun certRow(name: String, identity: cringle.common.Identity): Map<String, Any?> = linkedMapOf(
+    "component" to name,
+    "subject" to identity.certificate.subjectX500Principal.name,
+    "fingerprint" to identity.publicKeyFingerprint,
+    "validUntil" to identity.certificate.notAfter.toInstant().toString(),
+    "daysLeft" to identity.remaining().toDays(),
+)
+
 private fun opt(name: String, description: String, placeholder: String = "VALUE", repeatable: Boolean = false) = OptionSpec(name, description, true, repeatable, placeholder)
 
 private fun flag(name: String, description: String) = OptionSpec(name, description, takesValue = false)
@@ -732,6 +760,31 @@ internal val COMMANDS: List<Command> = listOf(
     Command(listOf("token", "revoke"), "<token-id>", "Revoke a token", minArgs = 1) { env, a ->
         env.users.revokeToken(RevokeTokenRequest.newBuilder().setTokenId(a.positional[0]).build())
         Output.Message("revoked token ${a.positional[0]}")
+    },
+
+    // --- certificates of the local home ---
+    Command(
+        listOf("cert", "status"), "[--component <name>]", "Show the certificates of the daemon, router and management server in the local home with the days left",
+        listOf(opt("component", "daemon, router or management (default: all)", "NAME")),
+        needsServer = false,
+    ) { env, a ->
+        Output.Rows(existingIdentities(certHome(env), a.option("component")).map { (name, identity) -> certRow(name, identity) }, "no identity in ${certHome(env)}")
+    },
+    Command(
+        listOf("cert", "renew"), "[--component <name>] [--force]", "Renew the certificates in the local home that end within 30 days (or all with --force); the key and so the trust stay",
+        listOf(
+            opt("component", "daemon, router or management (default: all)", "NAME"),
+            flag("force", "renew even if the certificate is valid for longer"),
+        ),
+        needsServer = false,
+    ) { env, a ->
+        val renewed = ArrayList<Map<String, Any?>>()
+        for ((name, identity) in existingIdentities(certHome(env), a.option("component"))) {
+            val due = if (a.flag("force")) identity.renew().let { true } else identity.renewIfDue()
+            if (due) renewed += certRow(name, identity)
+        }
+        if (renewed.isNotEmpty()) env.warn("running components keep the certificate they started with; restart them to use the new one")
+        Output.Rows(renewed, "nothing to renew: every certificate is valid for more than 30 days")
     },
 
     // --- installation ---

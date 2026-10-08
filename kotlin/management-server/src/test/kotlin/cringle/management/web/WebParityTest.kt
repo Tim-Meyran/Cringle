@@ -48,6 +48,8 @@ class WebParityTest {
         "cache cleanup" to "maintenance of the package cache, run by the ManagementServer on a schedule (--cache-max-unused-days)",
         "recover" to "runs at the start of the ManagementServer",
         "repo download" to "downloads a file; the browser has no use for it",
+        "cert status" to "reads the certificate files of the local home; no server involved",
+        "cert renew" to "renews the certificate files of the local home; no server involved",
         "self-update" to "updates the installation of the command line tool",
     )
 
