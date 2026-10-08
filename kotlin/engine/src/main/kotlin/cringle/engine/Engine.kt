@@ -373,6 +373,42 @@ public class Engine private constructor(
                 cringle.engine.v1.SetDwhRetentionResponse.getDefaultInstance()
             }
 
+        private fun dwhKind(kind: cringle.engine.v1.DwhKind): cringle.engine.dwh.DwhKind = when (kind) {
+            cringle.engine.v1.DwhKind.DWH_KIND_BLOCK -> cringle.engine.dwh.DwhKind.BLOCK
+            cringle.engine.v1.DwhKind.DWH_KIND_TETHER -> cringle.engine.dwh.DwhKind.TETHER
+            else -> throw StatusException(Status.INVALID_ARGUMENT.withDescription("the kind of the partition must be block or tether"))
+        }
+
+        override suspend fun queryDwh(request: cringle.engine.v1.QueryDwhRequest): cringle.engine.v1.QueryDwhResponse {
+            if (request.fabricId.value.isBlank() || request.name.isBlank()) throw StatusException(Status.INVALID_ARGUMENT.withDescription("fabric and name of the partition are required"))
+            fun instant(t: com.google.protobuf.Timestamp) = Instant.ofEpochSecond(t.seconds, t.nanos.toLong())
+            val records = withContext(Dispatchers.IO) {
+                dwh.query(
+                    cringle.engine.dwh.DwhPartition(request.fabricId.value, dwhKind(request.kind), request.name),
+                    if (request.hasSince()) instant(request.since) else null,
+                    if (request.hasUntil()) instant(request.until) else null,
+                    if (request.limit > 0) request.limit else 1000,
+                )
+            }
+            return cringle.engine.v1.QueryDwhResponse.newBuilder().addAllRecords(
+                records.map {
+                    cringle.engine.v1.DwhRecord.newBuilder().setTimestamp(timestamp(it.timestamp)).setPayloadJson(it.payload.toString()).putAllTags(it.tags).build()
+                },
+            ).build()
+        }
+
+        override suspend fun listDwhPartitions(request: cringle.engine.v1.ListDwhPartitionsRequest): cringle.engine.v1.ListDwhPartitionsResponse {
+            val all = withContext(Dispatchers.IO) { dwh.partitions() }
+            return cringle.engine.v1.ListDwhPartitionsResponse.newBuilder().addAllPartitions(
+                all.filter { request.fabric.isEmpty() || it.partition.fabric == request.fabric }.map {
+                    cringle.engine.v1.DwhPartitionInfo.newBuilder().setFabric(it.partition.fabric).setName(it.partition.name).setBytes(it.bytes)
+                        .setKind(if (it.partition.kind == cringle.engine.dwh.DwhKind.BLOCK) cringle.engine.v1.DwhKind.DWH_KIND_BLOCK else cringle.engine.v1.DwhKind.DWH_KIND_TETHER)
+                        .setRetention(cringle.engine.v1.DwhRetention.newBuilder().setMaxAgeMs(it.retention.maxAge?.toMillis() ?: 0).setMaxBytes(it.retention.maxBytes ?: 0))
+                        .build()
+                },
+            ).build()
+        }
+
         override suspend fun getMetrics(request: cringle.engine.v1.GetMetricsRequest): cringle.engine.v1.GetMetricsResponse {
             val e = cringle.engine.metrics.MetricsCollector.engine()
             val b = cringle.engine.v1.EngineMetrics.newBuilder()

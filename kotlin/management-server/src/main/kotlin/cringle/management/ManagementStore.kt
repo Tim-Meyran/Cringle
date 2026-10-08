@@ -50,12 +50,16 @@ public data class FabricRecord(
 /** A service dependency of [consumerProject] bound to the fabrics [targets] that provide [service] (#171). */
 public data class BindingRecord(val consumerProject: String, val service: String, val targets: List<String>)
 
+/** The recording mode of a fabric (#194): every typed tether is recorded, with these limits for tethers without their own (0 = no limit). */
+public data class RecordingRecord(val fabricId: String, val maxAgeMs: Long = 0, val maxBytes: Long = 0)
+
 /** Everything the ManagementServer persists. */
 public data class ManagementData(
     val machines: List<MachineRecord> = emptyList(),
     val engines: List<EngineRecord> = emptyList(),
     val fabrics: List<FabricRecord> = emptyList(),
     val bindings: List<BindingRecord> = emptyList(),
+    val recordings: List<RecordingRecord> = emptyList(),
 )
 
 /** Thrown when the state file exists but cannot be read; the server refuses to start then instead of forgetting its machines. */
@@ -97,6 +101,10 @@ public class ManagementStore(private val file: Path) {
                     val o = it as JsonObject
                     BindingRecord(o.text("consumerProject"), o.text("service"), (o["targets"] as JsonArray).map { t -> (t as JsonPrimitive).content })
                 } ?: emptyList(),
+                recordings = (root["recordings"] as? JsonArray)?.map {
+                    val o = it as JsonObject
+                    RecordingRecord(o.text("fabricId"), (o["maxAgeMs"] as? JsonPrimitive)?.content?.toLong() ?: 0, (o["maxBytes"] as? JsonPrimitive)?.content?.toLong() ?: 0)
+                } ?: emptyList(),
             )
         } catch (e: ManagementStoreException) {
             throw e
@@ -133,6 +141,13 @@ public class ManagementStore(private val file: Path) {
                     put("fabricId", f.fabricId)
                     put("deploy", java.util.Base64.getEncoder().encodeToString(f.deploy))
                     put("desiredRunning", f.desiredRunning)
+                })
+            }
+            putJsonArray("recordings") {
+                for (r in data.recordings) add(buildJsonObject {
+                    put("fabricId", r.fabricId)
+                    put("maxAgeMs", r.maxAgeMs)
+                    put("maxBytes", r.maxBytes)
                 })
             }
             putJsonArray("bindings") {

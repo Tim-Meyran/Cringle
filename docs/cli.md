@@ -13,6 +13,7 @@ The CLI talks to the ManagementServer only (one address, also for user managemen
 | Session | `login`, `logout`, `whoami` |
 | Machines | `machine add\|list\|remove` |
 | Engines | `engine create\|start\|stop\|delete\|list\|status\|tag` (roles and labels for placement) |
+| Data warehouse | `dwh list [fabric]`, `dwh query <fabric> <block|tether> <name> [--since t] [--until t] [--limit n]`, `dwh record <fabric> on|off [--max-age d] [--max-size s]`, `dwh retention <fabric> <block|tether> <name> [--max-age d] [--max-size s]` (durations `90s`, `30m`, `2h`, `7d`; sizes `500k`, `10m`, `2g`) |
 | Metrics | `metrics [machine engine] [--fabrics] [--tethers] [--fabric id]`: engine numbers (CPU, heap, threads, errors); with `--fabrics` one row per fabric, with `--tethers` one row per tether |
 | Bindings of service dependencies | `bind <project> <service> <fabric>...` (the preferred fabric first; more than one gives failover), `unbind <project> <service>`, `bindings [project]` |
 | Fabrics, deployment | `fabric list\|status\|start\|stop\|remove`, `deploy <project> [--version range] [--no-start] [--relock]`, `undeploy <project>`, `cache cleanup [machine]`, `recover` |

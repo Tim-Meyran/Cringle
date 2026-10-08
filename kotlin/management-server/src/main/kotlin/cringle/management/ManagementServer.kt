@@ -262,6 +262,32 @@ public class ManagementServer(
             ListFabricsResponse.newBuilder().addAllFabrics(core.listFabrics(e.machineId, e.engineId.value).map(::fabricInfo)).build()
         }
 
+        override suspend fun queryDwh(request: cringle.management.v1.QueryDwhRequest): cringle.management.v1.QueryDwhResponse = guard {
+            cringle.management.v1.QueryDwhResponse.newBuilder().addAllRecords(core.queryDwh(request).recordsList).build()
+        }
+
+        override suspend fun listDwhPartitions(request: cringle.management.v1.ListDwhPartitionsRequest): cringle.management.v1.ListDwhPartitionsResponse = guard {
+            val (partitions, problems) = core.listDwhPartitions(request.fabric)
+            cringle.management.v1.ListDwhPartitionsResponse.newBuilder()
+                .addAllPartitions(
+                    partitions.map { (machine, engine, p) ->
+                        cringle.management.v1.ManagedDwhPartition.newBuilder().setMachineId(machine).setEngineId(EngineId.newBuilder().setValue(engine)).setPartition(p).build()
+                    },
+                )
+                .addAllProblems(problems)
+                .build()
+        }
+
+        override suspend fun setRecording(request: cringle.management.v1.SetRecordingRequest): cringle.management.v1.SetRecordingResponse = guard {
+            core.setRecording(request.fabric, request.all, if (request.hasDefaultRetention()) request.defaultRetention else null)
+            cringle.management.v1.SetRecordingResponse.getDefaultInstance()
+        }
+
+        override suspend fun setDwhRetention(request: cringle.management.v1.SetDwhRetentionRequest): cringle.management.v1.SetDwhRetentionResponse = guard {
+            core.setDwhRetention(request)
+            cringle.management.v1.SetDwhRetentionResponse.getDefaultInstance()
+        }
+
         override suspend fun getMetrics(request: cringle.management.v1.GetMetricsRequest): cringle.management.v1.GetMetricsResponse = guard {
             val result = core.getMetrics(request.engine.machineId, request.engine.engineId.value)
             cringle.management.v1.GetMetricsResponse.newBuilder()
@@ -353,6 +379,10 @@ public class ManagementServer(
             "ListFabrics" to Permission.READ,
             "QueryLogs" to Permission.READ,
             "GetMetrics" to Permission.READ,
+            "QueryDwh" to Permission.READ,
+            "ListDwhPartitions" to Permission.READ,
+            "SetRecording" to Permission.OPERATE,
+            "SetDwhRetention" to Permission.OPERATE,
             "AddRemoteRouter" to Permission.ADMINISTER,
             "RemoveRemoteRouter" to Permission.ADMINISTER,
             "ListRemoteRouters" to Permission.READ,
