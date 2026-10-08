@@ -50,6 +50,7 @@ public class Daemon(
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
     private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
+    private val certificateWatchers = arrayListOf(cringle.common.CertificateWatcher(daemonIdentity))
 
     /** The fingerprint of the key of the daemon, which the engines and the management server have to trust. */
     public val identityFingerprint: String get() = daemonIdentity.publicKeyFingerprint
@@ -61,6 +62,7 @@ public class Daemon(
     public val router: RouterServer? = if (combined) {
         val routerDir = home.resolve("router")
         val routerIdentity = Identity.loadOrCreate(routerDir, ComponentKind.ROUTER.commonName("router"))
+        certificateWatchers += cringle.common.CertificateWatcher(routerIdentity)
         val routerTrustStore = TrustStore(routerDir.resolve("trust.json"))
         RouterServer(
             routerDir.resolve("registry.json"),
@@ -114,6 +116,7 @@ public class Daemon(
 
     /** Starts the router (combined mode) and the gRPC server. */
     public fun start(): Daemon {
+        certificateWatchers.forEach { it.start() }
         router?.start()
         if (router != null) {
             val routerAddr = "127.0.0.1:${router.port}"
@@ -228,6 +231,7 @@ public class Daemon(
 
     /** Stops the gRPC server, the router and all engine processes. */
     override fun close() {
+        certificateWatchers.forEach { it.close() }
         collector.close()
         server.shutdown()
         if (!server.awaitTermination(5, TimeUnit.SECONDS)) server.shutdownNow()

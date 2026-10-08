@@ -66,6 +66,7 @@ public fun main(args: Array<String>) {
     // the identity and the peers of the management server: every channel to a daemon, engine, repository or router is mTLS
     val identity = Identity.loadOrCreate(base, ComponentKind.MANAGEMENT.commonName("management"))
     val trustStore = TrustStore(base.resolve("trust.json"))
+    val certificateWatcher = cringle.common.CertificateWatcher(identity).start()
     val core = ManagementCore(ManagementStore(base.resolve("state.json")), identity, trustStore, repository, token, router)
     val known = kotlinx.coroutines.runBlocking { core.listMachines().map { it.record.id }.toSet() }
     for ((id, address) in machines) {
@@ -83,7 +84,7 @@ public fun main(args: Array<String>) {
         System.err.println("WARNING: no --auth: everybody who can reach the port is administrator")
     }
     val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost)
-    Runtime.getRuntime().addShutdownHook(Thread({ server.close() }, "management-shutdown"))
+    Runtime.getRuntime().addShutdownHook(Thread({ certificateWatcher.close(); server.close() }, "management-shutdown"))
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")

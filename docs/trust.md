@@ -84,3 +84,12 @@ A fabric that provides a service (#177) allows a list of engines instead of one 
 
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).
 - Closing connections of a peer whose trust was removed.
+
+## Renewal of certificates (#224)
+
+A certificate is valid for 10 years (`Identity.VALIDITY`). Trust is given to the **key**, so a certificate can be replaced by a new one for the same key pair without any trust entry changing: the fingerprint is the same, the peers need nothing.
+
+- Every component renews its certificate when it **starts** if it ends within 30 days (or has ended; that is logged as a warning). A component that runs for a long time checks once a day (`CertificateWatcher`: daemon and its router, engine, management server) and renews the files. A running gRPC server keeps the certificate it was built with: **the new one is used from the next start** (`[Zu bestätigen]`: no hot reload, which the 30 days of notice allow for).
+- By hand, on the machine of the component: `cringle [--home DIR] cert status` shows subject, key fingerprint, end date and the days left of the identities of the daemon, the router and the management server in that home; `cringle [--home DIR] cert renew [--component daemon|router|management] [--force]` renews the due ones (all with `--force`). Both read the files; they need no server.
+- A new **key** (rotation) is not renewal: it needs a new trust exchange with every peer and is not done here.
+- The repository has no process of its own (it gets its identity from whoever starts it) and the Gradle plugin identity is renewed when it is loaded.

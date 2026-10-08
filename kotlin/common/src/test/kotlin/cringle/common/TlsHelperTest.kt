@@ -138,6 +138,21 @@ class TlsHelperTest {
     }
 
     @Test
+    fun trustSurvivesTheRenewalOfACertificate() {
+        val server = peer("server")
+        val client = peer("client")
+        trust(server, client)
+        trust(client, server)
+        val before = server.identity.certificate
+        // both peers renew (a new certificate, the same key) and are started again: the trust entries made earlier still hold
+        server.identity.renew()
+        client.identity.renew()
+        assertTrue(before != server.identity.certificate)
+        val port = serve(TlsHelper.serverCredentials(server.identity, server.trust))
+        assertEquals("hello", call(port, TlsHelper.channelCredentials(client.identity, client.trust)))
+    }
+
+    @Test
     fun aServerThatTheClientDoesNotTrustIsRefused() {
         val server = peer("server")
         val client = peer("client")
