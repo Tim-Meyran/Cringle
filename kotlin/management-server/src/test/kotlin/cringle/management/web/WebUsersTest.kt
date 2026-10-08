@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package cringle.management.web
+
+import cringle.contract.UserRole
+import cringle.management.ManagementStore
+import cringle.management.test.ManagementTls
+import cringle.router.users.FileUserStore
+import cringle.router.users.UserManager
+import java.nio.file.Path
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+
+@Tag("integration")
+class WebUsersTest {
+    @TempDir
+    lateinit var dir: Path
+
+    private val closeables = ArrayList<AutoCloseable>()
+    private lateinit var users: UserManager
+    private lateinit var server: WebServer
+    private lateinit var key: String
+    private lateinit var admin: WebTestClient
+    private lateinit var viewer: WebTestClient
+
+    @BeforeEach
+    fun start() {
+        users = UserManager(FileUserStore(dir.resolve("users.json")))
+        val adminToken = users.bootstrap()!!
+        val viewerToken = users.createToken(users.createUser("vera", setOf(UserRole.VIEWER)).user.id, "web", null).secret
+        val tls = ManagementTls(dir.resolve("tls"))
+        val core = tls.core(ManagementStore(dir.resolve("state.json")))
+        closeables += core
+        server = WebServer(core, users, 0, failedLoginDelay = java.time.Duration.ZERO).start()
+        closeables += server
+        key = tls.identity.publicKeyFingerprint
+        admin = WebTestClient(server.port, key).login(adminToken)
+        viewer = WebTestClient(server.port, key).login(viewerToken)
+    }
+
+    @AfterEach
+    fun stop() {
+        closeables.reversed().forEach { runCatching { it.close() } }
+    }
+
+    private fun idOf(name: String) = users.listUsers().first { it.user.name == name }.user.id
+
+    @Test
+    fun aCreatedUserGetsATokenThatLogsIn() {
+        assertTrue(admin.post("/groups", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<td>ops</td><td>operator</td>"))
+        val created = admin.post("/users", mapOf("name" to "bob", "role-VIEWER" to "on", "groups" to "ops")).body()
+        assertTrue(created.contains("<td>bob</td><td>viewer, operator</td><td>ops</td>") || created.contains("<td>bob</td><td>operator, viewer</td><td>ops</td>"), created)
+
+        val answer = admin.post("/users/${idOf("bob")}/tokens", mapOf("label" to "laptop", "hours" to "1")).body()
+        val token = Regex("<code>([^<]+)</code> \\(shown once").find(answer)!!.groupValues[1]
+        assertNotNull(users.authenticate(token))
+        // the value is not kept: a later listing does not show it
+        assertFalse(admin.get("/users/list").body().contains(token))
+        WebTestClient(server.port, key).login(token)
+
+        val tokenId = users.listTokens(idOf("bob")).single().id
+        admin.post("/tokens/$tokenId/revoke")
+        assertNull(users.authenticate(token))
+        assertTrue(admin.get("/users/list").body().contains("revoked"))
+    }
+
+    @Test
+    fun theLastAdminCannotBeDeletedAndInputIsChecked() {
+        val adminId = users.listUsers().first { UserRole.ADMIN in it.effectiveRoles }.user.id
+        val refused = admin.post("/users/$adminId/delete").body()
+        assertTrue(refused.contains("class=\"error\"") && refused.contains("the last admin cannot be deleted"), refused)
+        assertTrue(admin.post("/users", mapOf("name" to "")).body().contains("class=\"error\""))
+        assertTrue(admin.post("/users", mapOf("name" to "x", "groups" to "nope")).body().contains("unknown group"))
+        assertTrue(admin.post("/users/${idOf("vera")}/tokens", mapOf("hours" to "abc")).body().contains("number of hours"))
+        assertFalse(admin.post("/users/${idOf("vera")}/delete").body().contains("<td>vera</td>"))
+    }
+
+    @Test
+    fun valuesAreEscaped() {
+        val page = admin.post("/users", mapOf("name" to "<b>x</b>", "role-VIEWER" to "on")).body()
+        assertTrue(page.contains("&lt;b&gt;x&lt;/b&gt;") && !page.contains("<b>x</b>"), page)
+    }
+
+    @Test
+    fun aUserWithoutManageUsersGetsNoPageAndNoNavigationEntry() {
+        assertEquals(403, viewer.get("/users").statusCode())
+        assertEquals(403, viewer.get("/groups").statusCode())
+        assertEquals(403, viewer.post("/users", mapOf("name" to "evil")).statusCode())
+        assertEquals(403, viewer.post("/tokens/x/revoke").statusCode())
+        val home = viewer.get("/").body()
+        assertFalse(home.contains("href=\"/users\""), home)
+        assertTrue(admin.get("/").body().contains("href=\"/users\""))
+    }
+}
