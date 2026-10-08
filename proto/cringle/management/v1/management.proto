@@ -76,6 +76,16 @@ service ManagementService {
   // Stops and removes all fabrics of a project.
   rpc Undeploy(UndeployRequest) returns (UndeployResponse);
 
+  // --- Bindings of service dependencies (Architecture chapter 13.2) ---
+
+  // Binds the service dependency `service` of the project `consumer_project` to a fabric deployed under this
+  // ManagementServer; replaces an earlier binding of the same pair. Used by Deploy (applied in a later change).
+  rpc Bind(Binding) returns (Binding);
+
+  rpc Unbind(UnbindRequest) returns (UnbindResponse);
+
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+
   // Removes unused package versions from the cache of a machine, or of all machines if machine_id is empty.
   rpc CleanupCache(CleanupCacheRequest) returns (CleanupCacheResponse);
 
@@ -289,6 +299,30 @@ message DeployProjectResponse {
   // The lock file that was written (also stored by the ManagementServer).
   string lock = 3;
   repeated ManagedFabric fabrics = 4;
+}
+
+// A service dependency of a project bound to the fabric that provides the service.
+message Binding {
+  string consumer_project = 1;
+  string service = 2;
+  // Fabric ids as `ListFabrics` shows them. Exactly one for now; several (failover) follow.
+  repeated string targets = 3;
+}
+
+message UnbindRequest {
+  string consumer_project = 1;
+  string service = 2;
+}
+
+message UnbindResponse {}
+
+message ListBindingsRequest {
+  // Empty lists the bindings of all projects.
+  string consumer_project = 1;
+}
+
+message ListBindingsResponse {
+  repeated Binding bindings = 1;
 }
 
 message UndeployRequest {

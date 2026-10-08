@@ -124,6 +124,36 @@ public class ManagementCore(
 
     private fun snapshot(): ManagementData = synchronized(lock) { data }
 
+    /**
+     * Binds the service dependency [service] of [project] to the fabric [targets] (#171); replaces an earlier binding of
+     * the pair. A target has to be a fabric that was deployed through this ManagementServer. Several targets are not
+     * accepted yet.
+     */
+    public fun bind(project: String, service: String, targets: List<String>): BindingRecord {
+        if (project.isBlank()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a project name is required")
+        cringle.packaging.PackageNames.nameProblem(service)?.let { throw ManagementException(Status.Code.INVALID_ARGUMENT, "service '$service': $it") }
+        if (targets.size != 1) throw ManagementException(Status.Code.INVALID_ARGUMENT, "a binding has exactly one target fabric for now, got ${targets.size}")
+        val record = BindingRecord(project, service, targets)
+        return update { d ->
+            if (d.fabrics.none { it.fabricId == targets[0] }) throw ManagementException(Status.Code.NOT_FOUND, "fabric '${targets[0]}' is not known")
+            d.copy(bindings = d.bindings.filterNot { it.consumerProject == project && it.service == service } + record) to record
+        }
+    }
+
+    /** Removes the binding of [service] for [project]. */
+    public fun unbind(project: String, service: String) {
+        update { d ->
+            if (d.bindings.none { it.consumerProject == project && it.service == service }) {
+                throw ManagementException(Status.Code.NOT_FOUND, "service '$service' of project '$project' is not bound")
+            }
+            d.copy(bindings = d.bindings.filterNot { it.consumerProject == project && it.service == service }) to Unit
+        }
+    }
+
+    /** The bindings of [project], or of all projects if it is blank, sorted by project and service. */
+    public fun listBindings(project: String): List<BindingRecord> =
+        snapshot().bindings.filter { project.isBlank() || it.consumerProject == project }.sortedWith(compareBy({ it.consumerProject }, { it.service }))
+
     private fun channel(address: String): ManagedChannel = channels.computeIfAbsent(address) {
         io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder.forTarget(address).sslContext(TlsHelper.channelCredentials(identity, trustStore)).build()
     }
