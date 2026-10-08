@@ -268,7 +268,7 @@ abstract class ServiceTestBase {
         s.bind(Binding.newBuilder().setConsumerProject(project).setService("orders").addAllTargets(targets.toList().ifEmpty { listOf("orders-service-service-1") }).build())
     }
 
-    protected fun deploy(project: String) = runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject(project).build()) }
+    protected fun deploy(project: String, noBlueGreen: Boolean = false) = runBlocking { s.deploy(DeployProjectRequest.newBuilder().setProject(project).setNoBlueGreen(noBlueGreen).build()) }
 
     protected fun lines(file: Path = received): Set<String> = if (Files.exists(file)) Files.readAllLines(file).toSet() else emptySet()
 

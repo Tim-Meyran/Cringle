@@ -21,7 +21,7 @@ import org.junit.jupiter.api.assertThrows
 /** The ManagementServer reads and controls the data warehouse of the engines (#194). */
 @Tag("integration")
 class DwhManagementTest : ServiceTestBase() {
-    private val fabric = "recorded-app-app-1"
+    private var fabric = "recorded-app-app-1"
     private val recorded = "c.out -> s.in"
     private val other = "c2.out -> s2.in"
 
@@ -79,9 +79,9 @@ class DwhManagementTest : ServiceTestBase() {
         await("records of the other tether") { query(other).isNotEmpty() }
         assertEquals(5000, partitions().single { it.name == other }.retention.maxBytes)
 
-        // deployed again: a new fabric of the same id gets the mode again
+        // deployed again (stop-then-start keeps the id): a new fabric of the same id gets the mode again
         val before = query(other).size
-        deploy("recorded-app")
+        deploy("recorded-app", noBlueGreen = true)
         await("more records of the other tether after the redeploy") { query(other).size > before }
 
         // the engine restarts and the ManagementServer restores the fabric
@@ -99,6 +99,19 @@ class DwhManagementTest : ServiceTestBase() {
         val stopped = query(other).size
         Thread.sleep(1500)
         assertEquals(stopped, query(other).size)
+    }
+
+    @Test
+    fun theRecordingModeIsCarriedToTheNewFabricOfABlueGreenUpdate() {
+        deploy("recorded-app")
+        runBlocking { s.setRecording(SetRecordingRequest.newBuilder().setFabric(fabric).setAll(true).build()) }
+        await("records of the other tether") { query(other).isNotEmpty() }
+        // the update runs the new fabric under the other id; it records everything from the start, the old id is gone
+        assertEquals("blue-green", deploy("recorded-app").strategy)
+        val old = fabric
+        fabric = "recorded-app-app-1b"
+        await("records of the other tether of the new fabric") { query(other).isNotEmpty() }
+        assertEquals(Status.Code.NOT_FOUND, assertThrows<StatusException> { runBlocking { s.listDwhPartitions(ListDwhPartitionsRequest.newBuilder().setFabric(old).build()) } }.status.code)
     }
 
     @Test
