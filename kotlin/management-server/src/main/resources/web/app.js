@@ -191,3 +191,13 @@ document.addEventListener('htmx:responseError', function (event) {
     });
   }
 })();
+
+// A fingerprint (code.fp, data-copy) is shown shortened; a click copies the whole value.
+document.addEventListener('click', function (event) {
+  var el = event.target.closest && event.target.closest('[data-copy]');
+  if (!el || !navigator.clipboard) return;
+  navigator.clipboard.writeText(el.getAttribute('data-copy')).then(function () {
+    el.classList.add('copied');
+    setTimeout(function () { el.classList.remove('copied'); }, 1200);
+  });
+});

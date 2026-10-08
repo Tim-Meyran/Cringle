@@ -23,7 +23,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
         val r = web.router
         web.navigation += listOf(NavItem("Deployments", "/deployments", group = "Operate"), NavItem("Logs", "/logs", group = "Observe"), NavItem("Metrics", "/metrics", group = "Observe"), NavItem("Data warehouse", "/dwh", group = "Observe"))
 
-        r.get("/deployments", Permission.READ) { web.render("Deployments", it, section("Deployments", "deployments", deployments(it.session!!, null, null))) }
+        r.get("/deployments", Permission.READ) { web.render("Deployments", it, section("Deployments", "Projects that run on engines, and how their service dependencies are bound.", "deployments", deployments(it.session!!, null, null))) }
         r.get("/deployments/list", Permission.READ) { fragment(deployments(it.session!!, null, null)) }
         r.post("/deployments", Permission.OPERATE) { req ->
             var done: String? = null
@@ -52,10 +52,10 @@ internal class DeploymentPages(private val core: ManagementCore) {
         r.get("/logs", Permission.READ) { web.render("Logs", it, logsPage()) }
         r.get("/logs/list", Permission.READ) { req -> fragment(logs(req.query)) }
 
-        r.get("/metrics", Permission.READ) { web.render("Metrics", it, section("Metrics", "metrics", metrics())) }
+        r.get("/metrics", Permission.READ) { web.render("Metrics", it, section("Metrics", "What the engines and their fabrics do right now. Open an engine for its fabrics, blocks and tethers.", "metrics", metrics())) }
         r.get("/metrics/list", Permission.READ) { fragment(metrics()) }
 
-        r.get("/dwh", Permission.READ) { web.render("Data warehouse", it, html(section("Data warehouse", "dwh", dwh(it.session!!, null, null)), raw("<div id=\"records\"></div>"))) }
+        r.get("/dwh", Permission.READ) { web.render("Data warehouse", it, html(section("Data warehouse", "What the engines recorded: block data and tether messages, with their retention.", "dwh", dwh(it.session!!, null, null)), raw("<div id=\"records\"></div>"))) }
         r.get("/dwh/list", Permission.READ) { fragment(dwh(it.session!!, null, null)) }
         r.get("/dwh/records", Permission.READ) { req -> fragment(records(req.query)) }
         r.post("/dwh/recording", Permission.OPERATE) { req ->
@@ -82,51 +82,71 @@ internal class DeploymentPages(private val core: ManagementCore) {
         val states = core.listFabrics(null, null).associateBy { it.info.fabricId.value }
         val rows = core.deployedFabrics().groupBy { it.project to it.version }.map { (key, fabrics) ->
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td>{}</tr>",
                 key.first, key.second,
-                fabrics.map { f -> h("<div><a href=\"/fabrics/{}/{}/{}\">{}</a> on {}/{}: {}</div>", f.machine, f.engineId, f.fabricId, f.fabricId, f.machine, f.engineId, states[f.fabricId]?.info?.state?.pretty() ?: "unknown") },
-                button(session, Permission.OPERATE, "Undeploy", "/deployments/${key.first}/undeploy", "Undeploy ${key.first}?"),
+                fabrics.map { f -> h("<div class=\"fabric-line\"><a href=\"/fabrics/{}/{}/{}\">{}</a> <span class=\"muted\">on {}/{}</span> {}</div>", f.machine, f.engineId, f.fabricId, f.fabricId, f.machine, f.engineId, stateBadge(states[f.fabricId]?.info?.state?.pretty() ?: "unknown")) },
+                actionsCell(button(session, Permission.OPERATE, "Undeploy", "/deployments/${key.first}/undeploy", "Undeploy ${key.first}? Its fabrics are stopped and removed.")),
             )
         }
         val deployForm = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
             val projects = core.repository().listPackages(ListPackagesRequest.newBuilder().setKind(PackageKind.PACKAGE_KIND_PROJECT).build()).packagesList.map { it.name }.distinct().sorted()
-            html(
-                raw("<form hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><select name=\"project\">"),
-                projects.map { h("<option>{}</option>", it) },
-                raw("</select> <input name=\"version\" placeholder=\"version range (default: highest)\"> <label><input type=\"checkbox\" name=\"start\" checked> start</label> <label><input type=\"checkbox\" name=\"relock\"> relock</label> <button>Deploy</button></form>"),
-            )
+            if (projects.isEmpty()) {
+                raw("<p class=\"empty\">The repository has no project yet. Build one in the blueprint editor (Drafts) or publish a package (Packages).</p>")
+            } else {
+                h(
+                    "<form class=\"form-row\" hx-post=\"/deployments\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"start\" checked> Start</label><label class=\"check\"><input type=\"checkbox\" name=\"relock\"> Resolve again (relock)</label><button class=\"btn primary\">Deploy</button></form>",
+                    field("Project", html(raw("<select name=\"project\">"), projects.map { h("<option>{}</option>", it) }, raw("</select>"))),
+                    field("Version range", raw("<input name=\"version\" placeholder=\"highest\">"), "empty: the highest release"),
+                )
+            }
         }
         val bindingRows = core.listBindings("").map {
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                it.consumerProject, it.service, it.targets.joinToString(" > "),
-                button(session, Permission.OPERATE, "Unbind", "/bindings/${it.consumerProject}/${it.service}/unbind", "Unbind ${it.service} of ${it.consumerProject}?"),
+                "<tr><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                it.consumerProject, it.service, it.targets.joinToString(" \u203a "),
+                actionsCell(button(session, Permission.OPERATE, "Unbind", "/bindings/${it.consumerProject}/${it.service}/unbind", "Unbind ${it.service} of ${it.consumerProject}?")),
             )
         }
         val bindForm = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/bindings\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"project\" placeholder=\"consumer project\" required> <input name=\"service\" placeholder=\"service\" required> <input name=\"fabrics\" placeholder=\"fabrics in order, comma separated\" required> <button>Bind</button></form>")
+            h(
+                "<form class=\"form-row\" hx-post=\"/bindings\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}<button class=\"btn primary\">Bind</button></form>",
+                field("Consumer project", raw("<input name=\"project\" required>")),
+                field("Service", raw("<input name=\"service\" required>")),
+                field("Fabrics", raw("<input name=\"fabrics\" required>"), "in order of preference, comma separated"),
+            )
         }
         return html(
             notice(error), info(done),
-            raw("<table><tr><th>Project</th><th>Version</th><th>Fabrics</th><th></th></tr>"), rows, raw("</table>"), deployForm,
-            raw("<h2>Bindings of services</h2><table><tr><th>Project</th><th>Service</th><th>Fabrics (first is used first)</th><th></th></tr>"), bindingRows, raw("</table>"), bindForm,
+            dataTable(listOf("Project", "Version", "Fabrics", ""), rows, raw("Nothing is deployed yet.")),
+            formPanel("Deploy a project", "A project of the repository is placed on engines by the roles and labels of its fabric configs.", deployForm),
+            raw("<h2>Bindings of service dependencies</h2>"),
+            dataTable(listOf("Project", "Service", "Fabrics (the first is used first)", ""), bindingRows, raw("No binding. A project that depends on a service of another project needs one before it can be deployed.")),
+            formPanel("Bind a service", "Connects the service dependency of a project to the fabrics that provide it; the next fabric takes over when the first fails.", bindForm),
         )
     }
 
     // --- logs ---
 
-    private fun logsPage(): Html = raw(
-        """<h1>Logs</h1><div x-data="{auto: false, timer: null}">
-<form x-ref="filters" hx-get="/logs/list" hx-target="#logs" hx-swap="morph:innerHTML" hx-trigger="submit, load, refresh">
-<input name="machine" placeholder="machine"> <input name="engine" placeholder="engine"> <input name="fabric" placeholder="fabric"> <input name="block" placeholder="block">
-<select name="level"><option value="">all levels</option><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option></select>
-<input name="minutes" type="number" min="1" placeholder="last minutes"> <input name="limit" type="number" min="1" value="200">
-<button>Show</button> <label><input type="checkbox" x-model="auto" @change="clearInterval(timer); if (auto) timer = setInterval(() => htmx.trigger(${'$'}refs.filters, 'refresh'), 5000)"> refresh every 5 s</label>
-</form></div><div id="logs"></div>""",
+    private fun logsPage(): Html = html(
+        pageHeader("Logs", "What the blocks and engines wrote. Newest at the bottom; lines kept by the daemon of a stopped engine are marked collected."),
+        raw(
+            """<section class="panel" x-data="{auto: false, timer: null}">
+<form class="form-row" x-ref="filters" hx-get="/logs/list" hx-target="#logs" hx-swap="morph:innerHTML" hx-trigger="submit, load, refresh">
+<label class="field"><span>Machine</span><input name="machine" placeholder="all"></label>
+<label class="field"><span>Engine</span><input name="engine" placeholder="all"></label>
+<label class="field"><span>Fabric</span><input name="fabric" placeholder="all"></label>
+<label class="field"><span>Block</span><input name="block" placeholder="all"></label>
+<label class="field"><span>Level</span><select name="level"><option value="">all</option><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option></select></label>
+<label class="field"><span>Last minutes</span><input name="minutes" type="number" min="1" placeholder="any" size="6"></label>
+<label class="field"><span>Lines</span><input name="limit" type="number" min="1" value="200" size="6"></label>
+<button class="btn primary">Show</button>
+<label class="check"><input type="checkbox" x-model="auto" @change="clearInterval(timer); if (auto) timer = setInterval(() => htmx.trigger(${'$'}refs.filters, 'refresh'), 5000)"> Refresh every 5 s</label>
+</form></section><div id="logs"></div>""",
+        ),
     )
 
     private suspend fun logs(q: Map<String, String>): Html {
@@ -141,16 +161,19 @@ internal class DeploymentPages(private val core: ManagementCore) {
         }
         return html(
             result.problems.map { notice(it) },
-            raw("<table><tr><th>Time</th><th>Engine</th><th>Fabric</th><th>Block</th><th>Level</th><th>Message</th><th>Source</th></tr>"),
-            result.entries.map {
-                val e = it.entry
-                h(
-                    "<tr><td>{}</td><td>{}/{}{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                    Instant.ofEpochSecond(e.timestamp.seconds, e.timestamp.nanos.toLong()), it.machine, it.engineId, if (it.collected) " (collected)" else "",
-                    e.fabric, e.block, e.level.name.removePrefix("LOG_LEVEL_"), e.message, e.source,
-                )
-            },
-            raw("</table>"),
+            dataTable(
+                listOf("Time", "Engine", "Fabric", "Block", "Level", "Message", "Source"),
+                result.entries.map {
+                    val e = it.entry
+                    val level = e.level.name.removePrefix("LOG_LEVEL_")
+                    h(
+                        "<tr class=\"log\"><td class=\"nowrap\">{}</td><td>{}/{}{}</td><td>{}</td><td>{}</td><td>{}</td><td class=\"message\">{}</td><td>{}</td></tr>",
+                        Instant.ofEpochSecond(e.timestamp.seconds, e.timestamp.nanos.toLong()).toString().replace("T", " ").removeSuffix("Z"), it.machine, it.engineId, if (it.collected) h(" {}", badge("collected")) else Html(""),
+                        e.fabric, e.block, badge(level.lowercase(), when (level) { "ERROR" -> Tone.BAD; "WARN" -> Tone.WARN; "INFO" -> Tone.INFO; else -> Tone.NEUTRAL }), e.message, if (e.source.isEmpty()) Html("") else h("<code>{}</code>", e.source),
+                    )
+                },
+                raw("No log lines for this filter."),
+            ),
         )
     }
 
@@ -165,7 +188,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
                 val x = m.metrics
                 html(
                     h(
-                        "<details class=\"engine\"><summary><strong>{}/{}</strong>: cpu {}, heap {} / {} MB, {} threads, {} fabrics</summary><ul>",
+                        "<details class=\"engine\"><summary><strong>{}/{}</strong><span class=\"stat\">cpu {}</span><span class=\"stat\">heap {} / {} MB</span><span class=\"stat\">{} threads</span><span class=\"stat\">{} fabrics</span></summary><ul>",
                         m.machine, m.engineId, if (x.processCpuLoad < 0) "?" else "%.0f %%".format(x.processCpuLoad * 100), x.heapUsedBytes / 1_048_576, x.heapMaxBytes / 1_048_576, x.threadCount, x.fabricsCount,
                     ),
                     x.fabricsList.map { f ->
@@ -179,7 +202,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
                     raw("</ul></details>"),
                 )
             },
-            if (result.metrics.isEmpty() && result.problems.isEmpty()) raw("<p>No engine is running.</p>") else Html(""),
+            if (result.metrics.isEmpty() && result.problems.isEmpty()) raw("<p class=\"empty\">No engine is running. Start one on the Engines page.</p>") else Html(""),
         )
     }
 
@@ -199,6 +222,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
 
     private suspend fun dwh(session: Session, error: String?, done: String?): Html {
         val (partitions, problems) = core.listDwhPartitions("")
+        val canOperate = session.can(Permission.OPERATE)
         val rows = partitions.map { (_, _, p) ->
             val kind = if (p.kind == DwhKind.DWH_KIND_BLOCK) "block" else "tether"
             val retention = html(
@@ -206,26 +230,38 @@ internal class DeploymentPages(private val core: ManagementCore) {
                 if (p.retention.maxBytes > 0) "${p.retention.maxBytes} bytes" else "no size limit",
             )
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><button hx-get=\"/dwh/records\" hx-vals='{\"fabric\": \"{}\", \"kind\": \"{}\", \"name\": \"{}\"}' hx-target=\"#records\" hx-swap=\"morph:innerHTML\">Records</button> {}</td></tr>",
-                p.fabric, kind, p.name, p.bytes, retention, p.fabric, kind, p.name,
-                if (!session.can(Permission.OPERATE)) {
-                    Html("")
-                } else {
-                    h(
-                        "<form hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\"><input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set retention</button></form>",
-                        p.fabric, kind, p.name,
-                    )
-                },
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"num\">{}</td><td>{}</td>{}</tr>",
+                p.fabric, kind, p.name, p.bytes, retention,
+                actionsCell(
+                    h("<button hx-get=\"/dwh/records\" hx-vals='{\"fabric\": \"{}\", \"kind\": \"{}\", \"name\": \"{}\"}' hx-target=\"#records\" hx-swap=\"morph:innerHTML\">Records</button>", p.fabric, kind, p.name),
+                    if (!canOperate) {
+                        Html("")
+                    } else {
+                        h(
+                            "<details class=\"popover\"><summary>Retention</summary><form class=\"popover-body\" hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\">{}{}<button class=\"btn primary small\">Save retention</button></form></details>",
+                            p.fabric, kind, p.name,
+                            field("Max age (hours)", raw("<input name=\"maxAgeHours\" placeholder=\"no limit\">")),
+                            field("Max size (bytes)", raw("<input name=\"maxBytes\" placeholder=\"no limit\">")),
+                        )
+                    },
+                ),
             )
         }
-        val recordForm = if (!session.can(Permission.OPERATE)) {
+        val recordForm = if (!canOperate) {
             Html("")
         } else {
-            raw("<form hx-post=\"/dwh/recording\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"fabric\" placeholder=\"fabric\" required> <select name=\"mode\"><option value=\"on\">record all tethers</option><option value=\"off\">record only tethers with record</option></select> <input name=\"maxAgeHours\" placeholder=\"max age (hours)\" size=\"14\"> <input name=\"maxBytes\" placeholder=\"max bytes\" size=\"12\"> <button>Set recording</button></form>")
+            h(
+                "<form class=\"form-row\" hx-post=\"/dwh/recording\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}{}<button class=\"btn primary\">Apply</button></form>",
+                field("Fabric", raw("<input name=\"fabric\" required>")),
+                field("Record", raw("<select name=\"mode\"><option value=\"on\">all typed tethers</option><option value=\"off\">only tethers with a record setting</option></select>")),
+                field("Max age (hours)", raw("<input name=\"maxAgeHours\" placeholder=\"no limit\">")),
+                field("Max size (bytes)", raw("<input name=\"maxBytes\" placeholder=\"no limit\">")),
+            )
         }
         return html(
             notice(error), info(done), problems.map { notice(it) },
-            raw("<table><tr><th>Fabric</th><th>Kind</th><th>Name</th><th>Bytes</th><th>Retention</th><th></th></tr>"), rows, raw("</table>"), recordForm,
+            dataTable(listOf("Fabric", "Kind", "Name", "Bytes", "Retention", ""), rows, raw("Nothing is recorded yet. Mark a tether with `record` in its blueprint, or switch the recording of a fabric on below.")),
+            formPanel("Recording", "Switches the recording of a fabric on or off; the retention is the default for the tethers that have none of their own.", recordForm),
         )
     }
 
@@ -239,9 +275,11 @@ internal class DeploymentPages(private val core: ManagementCore) {
         }
         return html(
             h("<h2>{} {} of {}</h2>", q["kind"], q["name"], q["fabric"]),
-            raw("<table><tr><th>Time</th><th>Payload</th><th>Tags</th></tr>"),
-            result.recordsList.map { h("<tr><td>{}</td><td><code>{}</code></td><td>{}</td></tr>", Instant.ofEpochSecond(it.timestamp.seconds, it.timestamp.nanos.toLong()), it.payloadJson, it.tagsMap.entries.joinToString(", ") { t -> "${t.key}=${t.value}" }) },
-            raw("</table>"),
+            dataTable(
+                listOf("Time", "Payload", "Tags"),
+                result.recordsList.map { h("<tr><td class=\"nowrap\">{}</td><td><code>{}</code></td><td>{}</td></tr>", Instant.ofEpochSecond(it.timestamp.seconds, it.timestamp.nanos.toLong()).toString().replace("T", " ").removeSuffix("Z"), it.payloadJson, it.tagsMap.entries.joinToString(", ") { t -> "${t.key}=${t.value}" }) },
+                raw("No records in this partition yet."),
+            ),
         )
     }
 }

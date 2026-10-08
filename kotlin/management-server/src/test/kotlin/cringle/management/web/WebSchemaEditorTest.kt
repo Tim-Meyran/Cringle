@@ -55,7 +55,7 @@ class WebSchemaEditorTest {
 
     @Test
     fun aSchemaIsCreatedEditedSavedAndPublished() {
-        assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders")).body().contains("<td>schema</td><td>acme-orders</td>"))
+        assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders")).body().contains("<strong>acme-orders</strong>"))
         assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders")).body().contains("ALREADY_EXISTS"))
         assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "Bad Name")).body().contains("class=\"error\""))
 
@@ -82,7 +82,7 @@ class WebSchemaEditorTest {
         val packages = runBlocking { core.repository().listPackages(ListPackagesRequest.getDefaultInstance()).packagesList }
         assertEquals(listOf("acme-orders 1.2.0"), packages.map { "${it.name} ${it.version}" })
 
-        assertFalse(admin.post("/drafts/schema/acme-orders/delete").body().contains("<td>acme-orders</td>"))
+        assertFalse(admin.post("/drafts/schema/acme-orders/delete").body().contains("<strong>acme-orders</strong>"))
     }
 
     @Test

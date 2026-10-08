@@ -63,7 +63,7 @@ class WebBlueprintTest {
         closeables += server
         admin = WebTestClient(server.port, tls.identity.publicKeyFingerprint).login(token)
         viewer = WebTestClient(server.port, tls.identity.publicKeyFingerprint).login(viewerToken)
-        assertTrue(admin.post("/drafts", mapOf("kind" to "project", "name" to "flow-app")).body().contains("<td>project</td><td>flow-app</td>"))
+        assertTrue(admin.post("/drafts", mapOf("kind" to "project", "name" to "flow-app")).body().contains("<strong>flow-app</strong>"))
     }
 
     @AfterEach

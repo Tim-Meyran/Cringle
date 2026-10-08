@@ -17,7 +17,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         val r = web.router
         web.navigation += listOf(NavItem("Machines", "/machines"), NavItem("Engines", "/engines"), NavItem("Fabrics", "/fabrics"))
 
-        r.get("/machines", Permission.READ) { web.render("Machines", it, section("Machines", "machines", machines(it.session!!, null))) }
+        r.get("/machines", Permission.READ) { web.render("Machines", it, section("Machines", "The computers that run a daemon and so the engines.", "machines", machines(it.session!!, null))) }
         r.get("/machines/list", Permission.READ) { fragment(machines(it.session!!, null)) }
         r.post("/machines", Permission.ADMINISTER) { req ->
             val message = attempt { core.addMachine(req.form["id"].orEmpty().trim(), req.form["address"].orEmpty().trim(), null, null) }
@@ -27,7 +27,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             fragment(machines(req.session!!, attempt { core.removeMachine(req.params.getValue("id")) }))
         }
 
-        r.get("/engines", Permission.READ) { web.render("Engines", it, section("Engines", "engines", engines(it.session!!, null))) }
+        r.get("/engines", Permission.READ) { web.render("Engines", it, section("Engines", "The processes that run fabrics. Roles and labels decide where a project is placed.", "engines", engines(it.session!!, null))) }
         r.get("/engines/list", Permission.READ) { fragment(engines(it.session!!, null)) }
         r.post("/engines", Permission.OPERATE) { req ->
             val message = attempt {
@@ -56,7 +56,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             fragment(engines(req.session!!, message))
         }
 
-        r.get("/fabrics", Permission.READ) { web.render("Fabrics", it, section("Fabrics", "fabrics", fabrics(it.session!!, null))) }
+        r.get("/fabrics", Permission.READ) { web.render("Fabrics", it, section("Fabrics", "The running copies of blueprints, one per engine.", "fabrics", fabrics(it.session!!, null))) }
         r.get("/fabrics/list", Permission.READ) { fragment(fabrics(it.session!!, null)) }
         for (action in listOf("start", "stop", "remove")) {
             r.post("/fabrics/{machine}/{engine}/{fabric}/$action", Permission.OPERATE) { req ->
@@ -77,15 +77,17 @@ internal class OverviewPages(private val core: ManagementCore) {
             val content = try {
                 val f = core.getFabric(req.params.getValue("machine"), req.params.getValue("engine"), req.params.getValue("fabric"))
                 html(
-                    h("<h1>Fabric {}</h1>", f.info.fabricId.value),
-                    h("<p>Engine {} on {}; blueprint {}; state {}; wanted: {}</p>", f.engineId, f.machine, f.info.blueprint, f.info.state.pretty(), if (f.desiredRunning) "running" else "stopped"),
-                    if (f.info.failure.isNotEmpty()) h("<p class=\"error\">{}</p>", f.info.failure) else Html(""),
-                    raw("<table><tr><th>Block</th><th>State</th><th>Restarts</th><th>Last error</th></tr>"),
-                    f.info.blocksList.map { h("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", it.blockId.value, it.state.name.removePrefix("BLOCK_RUNTIME_STATE_").lowercase(), it.restarts, it.lastError) },
-                    raw("</table><p><a href=\"/fabrics\">Back</a></p>"),
+                    pageHeader("Fabric ${f.info.fabricId.value}", "Blueprint ${f.info.blueprint} on engine ${f.engineId} of machine ${f.machine}.", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")),
+                    h("<section class=\"panel facts\"><dl><dt>State</dt><dd>{}</dd><dt>Wanted</dt><dd>{}</dd></dl>{}</section>", stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"), if (f.info.failure.isNotEmpty()) h("<p class=\"notice error\" role=\"alert\">{}</p>", f.info.failure) else Html("")),
+                    raw("<h2>Blocks</h2>"),
+                    dataTable(
+                        listOf("Block", "State", "Restarts", "Last error"),
+                        f.info.blocksList.map { b -> h("<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"error\">{}</td></tr>", b.blockId.value, stateBadge(b.state.name.removePrefix("BLOCK_RUNTIME_STATE_").lowercase()), b.restarts, b.lastError) },
+                        raw("This fabric has no block."),
+                    ),
                 )
             } catch (e: Exception) {
-                h("<h1>Fabric</h1><p class=\"error\">{}</p>", describe(e))
+                html(pageHeader("Fabric", "", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")), h("<p class=\"notice error\" role=\"alert\">{}</p>", describe(e)))
             }
             web.render("Fabric", req, content)
         }
@@ -94,17 +96,25 @@ internal class OverviewPages(private val core: ManagementCore) {
     private suspend fun machines(session: Session, message: String?): Html {
         val rows = core.listMachines().map {
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"error\">{}</td><td>{}</td></tr>",
-                it.record.id, it.record.daemonAddress, if (it.reachable) "reachable" else "not reachable", it.lastError,
-                button(session, Permission.ADMINISTER, "Remove", "/machines/${it.record.id}/remove", "Forget machine ${it.record.id}?"),
+                "<tr><td><strong>{}</strong></td><td><code>{}</code></td><td>{}{}</td>{}</tr>",
+                it.record.id, it.record.daemonAddress, stateBadge(if (it.reachable) "reachable" else "not reachable"), if (it.lastError.isEmpty()) Html("") else h("<small class=\"error\"> {}</small>", it.lastError),
+                actionsCell(button(session, Permission.ADMINISTER, "Remove", "/machines/${it.record.id}/remove", "Forget machine ${it.record.id}?")),
             )
         }
         val form = if (!session.can(Permission.ADMINISTER)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/machines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"id\" placeholder=\"machine id\" required> <input name=\"address\" placeholder=\"daemon host:port\" required> <button>Add machine</button></form>")
+            h(
+                "<form class=\"form-row\" hx-post=\"/machines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary\">Add machine</button></form>",
+                field("Machine id", raw("<input name=\"id\" placeholder=\"m1\" required>")),
+                field("Daemon address", raw("<input name=\"address\" placeholder=\"host:port\" required>")),
+            )
         }
-        return html(notice(message), raw("<table><tr><th>Machine</th><th>Daemon</th><th>State</th><th>Last error</th><th></th></tr>"), rows, raw("</table>"), form)
+        return html(
+            notice(message),
+            dataTable(listOf("Machine", "Daemon", "State", ""), rows, raw("No machine yet. Add the first one below: every engine runs on a machine that has a daemon.")),
+            formPanel("Add a machine", "The daemon has to run there and has to trust this server, and the other way round.", form),
+        )
     }
 
     private suspend fun engines(session: Session, message: String?): Html {
@@ -112,20 +122,31 @@ internal class OverviewPages(private val core: ManagementCore) {
             val base = "/engines/${e.machine}/${e.process.engineId.value}"
             val running = e.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}{}{}</td></tr>",
-                e.machine, e.process.engineId.value, e.process.state.pretty(), e.roles.joinToString(", "), e.labels.entries.joinToString(", ") { "${it.key}=${it.value}" },
-                if (running) Html("") else button(session, Permission.OPERATE, "Start", "$base/start"),
-                if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else Html(""),
-                button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete engine ${e.process.engineId.value}?"),
-                tagsForm(session, base, e.roles, e.labels),
+                "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                e.machine, e.process.engineId.value, stateBadge(e.process.state.pretty()),
+                if (e.roles.isEmpty()) h("<span class=\"muted\">none</span>") else e.roles.map { h("<span class=\"tag\">{}</span> ", it) },
+                if (e.labels.isEmpty()) h("<span class=\"muted\">none</span>") else e.labels.entries.map { h("<span class=\"tag\">{}={}</span> ", it.key, it.value) },
+                actionsCell(
+                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else button(session, Permission.OPERATE, "Start", "$base/start"),
+                    tagsForm(session, base, e.roles, e.labels),
+                    button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete engine ${e.process.engineId.value}?"),
+                ),
             )
         }
         val form = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"machine\" placeholder=\"machine id\" required> <input name=\"id\" placeholder=\"engine id (optional)\"> <label><input type=\"checkbox\" name=\"autostart\"> autostart</label> <button>Create engine</button></form>")
+            h(
+                "<form class=\"form-row\" hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"autostart\"> Start with the daemon</label><button class=\"btn primary\">Create engine</button></form>",
+                field("Machine", raw("<input name=\"machine\" placeholder=\"m1\" required>")),
+                field("Engine id", raw("<input name=\"id\" placeholder=\"optional\">")),
+            )
         }
-        return html(notice(message), raw("<table><tr><th>Machine</th><th>Engine</th><th>State</th><th>Roles</th><th>Labels</th><th></th></tr>"), rows, raw("</table>"), form)
+        return html(
+            notice(message),
+            dataTable(listOf("Machine", "Engine", "State", "Roles", "Labels", ""), rows, raw("No engine yet. Create one below, then start it.")),
+            formPanel("Create an engine", "An engine is created on a machine and started separately. Roles and labels are set afterwards under Tags.", form),
+        )
     }
 
     private fun tagsForm(session: Session, base: String, roles: List<String>, labels: Map<String, String>): Html =
@@ -133,8 +154,10 @@ internal class OverviewPages(private val core: ManagementCore) {
             Html("")
         } else {
             h(
-                "<details><summary>Tags</summary><form hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"roles\" value=\"{}\" placeholder=\"roles, comma separated\"> <input name=\"labels\" value=\"{}\" placeholder=\"key=value, ...\"> <button>Save</button></form></details>",
-                base, roles.joinToString(","), labels.entries.joinToString(",") { "${it.key}=${it.value}" },
+                "<details class=\"popover\"><summary>Tags</summary><form class=\"popover-body\" hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary small\">Save tags</button></form></details>",
+                base,
+                field("Roles", h("<input name=\"roles\" value=\"{}\" placeholder=\"role, role\">", roles.joinToString(", ")), "comma separated"),
+                field("Labels", h("<input name=\"labels\" value=\"{}\" placeholder=\"key=value, key=value\">", labels.entries.joinToString(", ") { "${it.key}=${it.value}" }), "key=value, comma separated"),
             )
         }
 
@@ -144,14 +167,18 @@ internal class OverviewPages(private val core: ManagementCore) {
             val base = "/fabrics/${f.machine}/${f.engineId}/$id"
             val running = f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING || f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_STARTING
             h(
-                "<tr><td><a href=\"{}\">{}</a></td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}{}</td></tr>",
-                base, id, f.machine, f.engineId, f.info.blueprint, f.info.state.pretty(), if (f.desiredRunning) "running" else "stopped",
-                if (running) Html("") else button(session, Permission.OPERATE, "Start", "$base/start"),
-                if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else Html(""),
-                button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?"),
+                "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"),
+                actionsCell(
+                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else button(session, Permission.OPERATE, "Start", "$base/start"),
+                    button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?"),
+                ),
             )
         }
-        return html(notice(message), raw("<table><tr><th>Fabric</th><th>Engine</th><th>Blueprint</th><th>State</th><th>Wanted</th><th></th></tr>"), rows, raw("</table>"))
+        return html(
+            notice(message),
+            dataTable(listOf("Fabric", "Engine", "Blueprint", "State", "Wanted", ""), rows, raw("No fabric yet. Fabrics come from a deployed project: see Deployments.")),
+        )
     }
 
     private fun parseRoles(text: String): List<String> = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }

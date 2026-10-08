@@ -29,7 +29,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val r = web.router
         web.navigation += NavItem("Drafts", "/drafts", group = "Build")
 
-        r.get("/drafts", Permission.READ) { web.render("Drafts", it, section("Drafts", "drafts", list(it.session!!, null, null))) }
+        r.get("/drafts", Permission.READ) { web.render("Drafts", it, section("Drafts", "Work in progress: schemas and blueprints you build here. A draft is published as a package when it is ready.", "drafts", list(it.session!!, null, null))) }
         r.get("/drafts/list", Permission.READ) { fragment(list(it.session!!, null, null)) }
         r.post("/drafts", Permission.OPERATE) { req ->
             val error = attempt {
@@ -81,19 +81,29 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val rows = drafts.list().map { d ->
             val base = "/drafts/${d.kind}/${d.name}"
             h(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}{}</td></tr>",
-                d.kind, d.name, d.version, d.revision,
-                h("<a href=\"/{}/{}\">Edit</a> ", if (d.kind == "schema") "schemas" else "blueprints", d.name),
-                button(session, Permission.OPERATE, "Publish", "$base/publish", "Publish ${d.kind} ${d.name} ${d.version} to the repository?"),
-                button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete the draft ${d.name}?"),
+                "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td class=\"num\">{}</td>{}</tr>",
+                badge(if (d.kind == "schema") "schema" else "blueprint", if (d.kind == "schema") Tone.INFO else Tone.NEUTRAL), d.name, d.version, d.revision,
+                actionsCell(
+                    h("<a class=\"btn small\" href=\"/{}/{}\">{}</a>", if (d.kind == "schema") "schemas" else "blueprints", d.name, if (session.can(Permission.OPERATE)) "Edit" else "Open"),
+                    button(session, Permission.OPERATE, "Publish", "$base/publish", "Publish ${d.kind} ${d.name} ${d.version} to the repository?"),
+                    button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete the draft ${d.name}?"),
+                ),
             )
         }
         val form = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><select name=\"kind\"><option value=\"schema\">schema</option><option value=\"project\">project (blueprint)</option></select> <input name=\"name\" placeholder=\"name, e.g. acme-orders\" required> <button>Create draft</button></form>")
+            h(
+                "<form class=\"form-row\" hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary\">Create draft</button></form>",
+                field("What", raw("<select name=\"kind\"><option value=\"schema\">Schema</option><option value=\"project\">Project with a blueprint</option></select>")),
+                field("Name", raw("<input name=\"name\" placeholder=\"acme-orders\" required>"), "lower case letters, digits, - and ."),
+            )
         }
-        return html(notice(error), info(done), raw("<table><tr><th>Kind</th><th>Name</th><th>Version</th><th>Revision</th><th></th></tr>"), rows, raw("</table>"), form)
+        return html(
+            notice(error), info(done),
+            dataTable(listOf("Kind", "Name", "Version", "Revision", ""), rows, raw("No draft yet. Create a schema for your data types or a project with a blueprint below.")),
+            formPanel("Create a draft", "The editors open from the list. Nothing reaches the repository before you publish.", form),
+        )
     }
 
     private suspend fun publish(kind: String, name: String): String {
@@ -123,7 +133,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val base = "/schemas/${draft.name}"
         val canSave = session.can(Permission.OPERATE)
         return html(
-            h("<h1>Schema {}</h1>", draft.name),
+            pageHeader("Schema ${draft.name}", "Types for the data that blocks exchange. The document below is checked while you type.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")),
             raw("<datalist id=\"standard-types\"><option>cringle.std/String</option><option>cringle.std/Boolean</option><option>cringle.std/Int</option><option>cringle.std/Double</option><option>cringle.std/Bytes</option><option>cringle.std/Timestamp</option><option>cringle.std/Empty</option><option>cringle.std/Error</option></datalist>"),
             h(
                 "<form id=\"editor\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
@@ -146,8 +156,8 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
 </div></fieldset></template>
 <button type="button" @click="types.push({name: '', kind: 'record', fields: [], values: ''}); ${'$'}dispatch('cringle-changed')">Add type</button>""",
             ),
-            if (canSave) h("<button type=\"button\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
-            raw("</form><div id=\"preview\"></div><p><a href=\"/drafts\">Back to the drafts</a></p>"),
+            if (canSave) h("<button type=\"button\" class=\"btn primary\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
+            raw("</form><div id=\"preview\"></div>"),
         )
     }
 

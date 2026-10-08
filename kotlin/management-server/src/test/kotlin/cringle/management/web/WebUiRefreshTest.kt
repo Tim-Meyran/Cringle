@@ -85,4 +85,14 @@ class WebUiRefreshTest {
         val fragment = ui.get("/metrics/list").body()
         assertFalse(fragment.contains("x-show") || fragment.contains("x-data"), fragment)
     }
+
+    @Test
+    fun anEmptyListSaysWhatToDoNext() {
+        val machines = ui.get("/machines/list").body()
+        assertTrue(machines.contains("class=\"empty\"") && machines.contains("Add the first one"), machines)
+        assertFalse(machines.contains("<table"), "no empty table")
+        assertTrue(ui.get("/engines/list").body().contains("No engine yet"))
+        assertTrue(ui.get("/groups/list").body().contains("No group yet"))
+        assertTrue(ui.get("/trust/list").body().contains("class=\"empty\""))
+    }
 }

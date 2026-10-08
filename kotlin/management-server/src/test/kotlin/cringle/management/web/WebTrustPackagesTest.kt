@@ -64,14 +64,14 @@ class WebTrustPackagesTest : ServiceTestBase() {
     fun packagesAreListedUploadedAndTheirTrustIsSet() {
         web()
         val list = admin.get("/packages").body()
-        assertTrue(list.contains("<td>acme-svc</td>") && list.contains("trusted"), list)
+        assertTrue(list.contains("<strong>acme-svc</strong>") && list.contains("trusted"), list)
         assertTrue(admin.post("/packages/acme-svc/trust", mapOf("trust" to "untrusted")).body().contains("untrusted"))
-        assertTrue(admin.post("/packages/acme-svc/trust", mapOf("trust" to "trusted")).body().contains("<td>trusted</td>"))
+        assertTrue(admin.post("/packages/acme-svc/trust", mapOf("trust" to "trusted")).body().contains("badge ok\">trusted"))
         assertTrue(admin.post("/packages/acme-svc/trust", mapOf("trust" to "maybe")).body().contains("INVALID_ARGUMENT"))
 
         val file = TestPluginBuilder("acme-uploaded", "1.0.0").build(Files.createDirectories(dir.resolve("upload"))).file
         val uploaded = admin.postFile("/packages/upload", "file", "acme-uploaded.cringle", Files.readAllBytes(file)).body()
-        assertTrue(uploaded.contains("Published acme-uploaded 1.0.0") && uploaded.contains("<td>acme-uploaded</td>"), uploaded)
+        assertTrue(uploaded.contains("Published acme-uploaded 1.0.0") && uploaded.contains("<strong>acme-uploaded</strong>"), uploaded)
         assertTrue(admin.postFile("/packages/upload", "file", "broken.cringle", "not a package".toByteArray()).body().contains("class=\"error\""))
     }
 
