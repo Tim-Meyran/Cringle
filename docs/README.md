@@ -8,6 +8,7 @@
 | [trust.md](trust.md) | Identität, Trust Store und mTLS der Komponenten, Enrollment, `cringle trust`. Englisch. |
 | [cli.md](cli.md) | Die Kommandozeile `cringle`: Verbindung mit gepinntem TLS, Befehle. Englisch. |
 | [management-server.md](management-server.md) | ManagementServer: Zustand, Deployment, Kanäle und Trust. Englisch. |
+| [webui.md](webui.md) | WebUI des ManagementServers (htmx, Alpine.js, Drawflow): Start, Login, Sicherheit, Aufbau von Seiten. Englisch. |
 | [daemon-service.md](daemon-service.md) | Daemon als Dienst, Engine-Identität und Trust-Dateien. Englisch. |
 | [gradle-plugin.md](gradle-plugin.md) | Gradle-Plugins `cringle.plugin` und `cringle.project`, `cringlePublish`. Englisch. |
 | [releasing.md](releasing.md) | Release-Archive und Installer. Englisch. |

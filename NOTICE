@@ -2,3 +2,8 @@ Cringle
 Copyright 2026 The Cringle Authors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party files served by the WebUI of the ManagementServer (kotlin/management-server/src/main/resources/web/vendor), taken unchanged from the npm packages:
+- htmx 2.0.4 (htmx.org), 0BSD license
+- Alpine.js 3.14.8 (alpinejs), MIT license
+- Drawflow 0.0.60 (drawflow), MIT license
