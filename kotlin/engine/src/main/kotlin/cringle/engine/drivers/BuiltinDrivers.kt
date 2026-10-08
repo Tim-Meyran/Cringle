@@ -22,6 +22,8 @@ public class BuiltinDrivers(
     public val tcp: TcpService = TcpService(),
     /** The engine-wide serial service; a caller that wants to see the warnings of its drivers passes its own. */
     public val serial: SerialService = SerialService(),
+    /** The data warehouse of the engine (`<engine dir>/dwh`, #188). */
+    public val dwh: cringle.engine.dwh.Dwh = cringle.engine.dwh.Dwh(engineDir.resolve("dwh")),
 ) : AutoCloseable {
     /** The engine-wide log service and store. */
     public val logging: LoggingService = LoggingService(engineDir)
@@ -54,6 +56,7 @@ public class BuiltinDrivers(
                     BuiltinDriverTypes.FILESYSTEM.id -> FilesystemSandbox(paths.blockWorking(blockId.value))
                     BuiltinDriverTypes.TCP.id -> services.tcp.driverFor(fabricId, blockId.value).also { tcp += it }
                     BuiltinDriverTypes.SERIAL.id -> services.serial.driverFor(fabricId, blockId.value).also { serial += it }
+                    BuiltinDriverTypes.DWH.id -> cringle.engine.dwh.BlockDwhDriver(services.dwh, fabricId, blockId.value)
                     else -> throw IllegalArgumentException(
                         "block '${blockId.value}' requires unknown driver '$id' (built-in: ${BuiltinDriverTypes.ALL.keys.joinToString()})",
                     )

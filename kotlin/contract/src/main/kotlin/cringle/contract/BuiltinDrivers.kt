@@ -20,11 +20,14 @@ public object BuiltinDriverTypes {
     /** [SerialDriver]. */
     public val SERIAL: DriverType = DriverType("serial", IsolationLevel.SHARED)
 
+    /** [DwhDriver]. */
+    public val DWH: DriverType = DriverType("dwh", IsolationLevel.SHARED)
+
     /** [UserManagementDriver]; provided by the daemon, not by every engine. */
     public val USER_MANAGEMENT: DriverType = DriverType("user-management", IsolationLevel.SHARED)
 
     /** The types every engine ships, by id. */
-    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP, SERIAL).associateBy { it.id }
+    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP, SERIAL, DWH).associateBy { it.id }
 }
 
 /** Severity of a log entry. */

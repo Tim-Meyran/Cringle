@@ -109,7 +109,7 @@ public class Engine private constructor(
     }
 
     /** The data warehouse of this engine (`<engine dir>/dwh`, #188); its retention is applied every [DWH_RETENTION_INTERVAL_SECONDS] seconds. */
-    public val dwh: cringle.engine.dwh.Dwh = cringle.engine.dwh.Dwh(dir.resolve("dwh"))
+    public val dwh: cringle.engine.dwh.Dwh get() = drivers.dwh
     private var retention: java.util.concurrent.ScheduledExecutorService? = null
 
     private val lock = Any()
