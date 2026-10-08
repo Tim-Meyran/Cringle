@@ -47,6 +47,13 @@ internal object JsonReading {
         return n ?: throw PackageFormatException("$path.$key", "must be an integer")
     }
 
+    fun optLong(o: JsonObject, key: String, path: String): Long? {
+        val value = o[key] ?: return null
+        val p = value as? JsonPrimitive
+        val n = if (p == null || p.isString || value is JsonNull) null else p.content.toLongOrNull()
+        return n ?: throw PackageFormatException("$path.$key", "must be an integer")
+    }
+
     fun stringList(o: JsonObject, key: String, path: String): List<String> {
         val value = o[key] ?: return emptyList()
         val array = value as? JsonArray ?: throw PackageFormatException("$path.$key", "must be an array of strings")

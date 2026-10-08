@@ -27,6 +27,13 @@ service EngineManagementService {
   // The numbers of the Engine and of its fabrics, blocks and tethers (Architecture 16.2). Counters are cumulative.
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 
+  // Switches the recording of all typed tethers of a fabric into the data warehouse on or off (Architecture 16.5). Tethers whose
+  // blueprint definition has a `record` are recorded in any case.
+  rpc SetRecording(SetRecordingRequest) returns (SetRecordingResponse);
+
+  // Sets the retention of a partition of the data warehouse (a block or a tether of a fabric).
+  rpc SetDwhRetention(SetDwhRetentionRequest) returns (SetDwhRetentionResponse);
+
   rpc SetServiceCallers(SetServiceCallersRequest) returns (SetServiceCallersResponse);
 
   // Replaces the instances of a service that the running fabric calls (its binding), without a redeploy. The tether
@@ -80,6 +87,37 @@ message GetStatusResponse {
   // Port of the tether service for tethers between Engines (spec/tether.md); 0 if the Engine has none.
   int32 tether_port = 8;
 }
+
+// How much of a recorded partition is kept; 0 means no limit.
+message DwhRetention {
+  int64 max_age_ms = 1;
+  int64 max_bytes = 2;
+}
+
+message SetRecordingRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  bool all = 2;
+  // The retention of the partitions of tethers that the mode records and that have no `record` of their own.
+  DwhRetention default_retention = 3;
+}
+
+message SetRecordingResponse {}
+
+enum DwhKind {
+  DWH_KIND_UNSPECIFIED = 0;
+  DWH_KIND_BLOCK = 1;
+  DWH_KIND_TETHER = 2;
+}
+
+message SetDwhRetentionRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  DwhKind kind = 2;
+  // The block id, or the id of the tether as `ListDwhPartitions` shows it.
+  string name = 3;
+  DwhRetention retention = 4;
+}
+
+message SetDwhRetentionResponse {}
 
 message GetMetricsRequest {}
 

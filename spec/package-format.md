@@ -112,6 +112,9 @@ version of its own and no engine, role or label fields, so it always runs entire
   required), `baudRate` (integer > 0, default 9600), `dataBits` (5 to 8, default 8), `parity` (`NONE` default,
   `EVEN` or `ODD`) and `stopBits` (1 or 2, default 1). It supports only `DROP` and carries no schema. Only a
   `SERIAL` tether may set `serial`.
+- `record` (optional object) marks the tether for recording in the data warehouse of its engine: `{"maxAge": <milliseconds>,
+  "maxBytes": <bytes>}`, both optional and positive, are the retention of the recorded partition; `{}` records without limits. Only
+  typed tethers (`MESSAGE`, `REQUEST_RESPONSE`, `STREAM`) can be recorded.
 - A tether to a port on **another engine** has one local endpoint and a `remote` object instead of the other one.
   The local endpoint is `from` (an `OUT` port) when the remote end receives, and `to` (an `IN` port) when it sends;
   the missing endpoint is omitted. `remote` is `{"fingerprint", "fabric", "block", "port"}` plus `"address"` and

@@ -73,6 +73,8 @@ public class FabricSpec(
     public val watchdog: WatchdogConfig = WatchdogConfig(),
     /** Closed when the runtime is closed (for example the fabric's class loaders). */
     public val onClose: AutoCloseable? = null,
+    /** Records the tethers of the fabric in the data warehouse (#193); closed with the fabric. */
+    public val recorder: cringle.engine.dwh.TetherRecorder? = null,
 )
 
 /**
@@ -265,6 +267,11 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         )
     }
 
+    /** Switches the recording of all typed tethers of this fabric on or off (see [cringle.engine.dwh.TetherRecorder.setMode]). */
+    public fun setRecording(all: Boolean, default: cringle.packaging.RecordConfig?) {
+        (spec.recorder ?: throw FabricException("fabric '${spec.id}' has no data warehouse to record into")).setMode(all, default)
+    }
+
     /** Replaces the instances of the services that the sending tethers call; see [TetherNetwork.updateServiceBindings]. */
     public fun updateServiceBindings(remotes: Map<String, cringle.packaging.RemoteEndpoint>) {
         network?.updateServiceBindings(remotes)
@@ -286,6 +293,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             runBlocking { stop() }
         } finally {
             network?.release()
+            spec.recorder?.close()
             watchdog?.shutdownNow()
             scope.cancel()
             executor.shutdown()
