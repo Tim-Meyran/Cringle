@@ -207,6 +207,34 @@ private fun parseSince(text: String): Timestamp {
     return Timestamp.newBuilder().setSeconds(instant.epochSecond).setNanos(instant.nano).build()
 }
 
+/** A duration such as `90s`, `30m`, `2h`, `7d`, in milliseconds. */
+private fun parseDurationMs(text: String, option: String): Long {
+    val m = Regex("(\\d+)([smhd])").matchEntire(text) ?: throw UsageException("--$option must be a duration like 90s, 30m, 2h or 7d")
+    return m.groupValues[1].toLong() * 1000 * when (m.groupValues[2]) { "s" -> 1L; "m" -> 60L; "h" -> 3600L; else -> 86_400L }
+}
+
+/** A size such as `500k`, `10m`, `2g` or plain bytes, in bytes. */
+private fun parseBytes(text: String, option: String): Long {
+    val m = Regex("(\\d+)([kmg]?)", RegexOption.IGNORE_CASE).matchEntire(text) ?: throw UsageException("--$option must be a size like 500k, 10m, 2g or a number of bytes")
+    return m.groupValues[1].toLong() * when (m.groupValues[2].lowercase()) { "k" -> 1024L; "m" -> 1024L * 1024; "g" -> 1024L * 1024 * 1024; else -> 1L }
+}
+
+private fun dwhKind(text: String): cringle.engine.v1.DwhKind = when (text.lowercase()) {
+    "block" -> cringle.engine.v1.DwhKind.DWH_KIND_BLOCK
+    "tether" -> cringle.engine.v1.DwhKind.DWH_KIND_TETHER
+    else -> throw UsageException("the kind of a partition is block or tether")
+}
+
+private val retentionOptions = listOf(
+    opt("max-age", "keep records for this long: 90s, 30m, 2h, 7d (default: no limit)", "DURATION"),
+    opt("max-size", "keep at most this much: 500k, 10m, 2g or bytes (default: no limit)", "SIZE"),
+)
+
+private fun retentionOf(a: Parsed): cringle.engine.v1.DwhRetention = cringle.engine.v1.DwhRetention.newBuilder()
+    .setMaxAgeMs(a.option("max-age")?.let { parseDurationMs(it, "max-age") } ?: 0)
+    .setMaxBytes(a.option("max-size")?.let { parseBytes(it, "max-size") } ?: 0)
+    .build()
+
 private val tagOptions = listOf(
     opt("role", "role of the engine (repeatable)", "ROLE", repeatable = true),
     opt("label", "label of the engine as key=value (repeatable)", "KEY=VALUE", repeatable = true),
@@ -415,6 +443,54 @@ internal val COMMANDS: List<Command> = listOf(
         val lines = entries.map { "${it["time"]} ${it["level"].toString().uppercase().padEnd(5)} ${it["machine"]}/${it["engine"]} ${it["fabric"]}/${it["block"]}${(it["source"] as String).let { s -> if (s.isEmpty()) "" else " [$s]" }}: ${it["message"]}" } +
             r.problemsList.map { "warning: could not read logs of $it" }
         Output.Lines(lines, entries)
+    },
+
+    // --- data warehouse ---
+    Command(listOf("dwh", "list"), "[fabric]", "List the partitions of the data warehouse with size and retention, of one fabric or of all", minArgs = 0, maxArgs = 1) { env, a ->
+        val r = env.m.listDwhPartitions(cringle.management.v1.ListDwhPartitionsRequest.newBuilder().setFabric(a.positional.firstOrNull().orEmpty()).build())
+        r.problemsList.forEach { env.warn("could not read the data warehouse of $it") }
+        Output.Rows(
+            r.partitionsList.map {
+                linkedMapOf<String, Any?>(
+                    "machine" to it.machineId, "engine" to it.engineId.value, "fabric" to it.partition.fabric,
+                    "kind" to it.partition.kind.pretty("DWH_KIND_"), "name" to it.partition.name, "bytes" to it.partition.bytes,
+                    "maxAgeMs" to it.partition.retention.maxAgeMs, "maxBytes" to it.partition.retention.maxBytes,
+                )
+            },
+            "no partitions",
+        )
+    },
+    Command(
+        listOf("dwh", "query"), "<fabric> <block|tether> <name>", "Show the records of a partition: the newest, oldest first",
+        listOf(opt("since", "only records since a time (2026-01-01T10:00:00Z) or a duration ago (30m, 2h, 1d)", "TIME"), opt("until", "only records until a time or a duration ago", "TIME"), opt("limit", "at most this many (default 1000)", "N")),
+        minArgs = 3,
+    ) { env, a ->
+        val b = cringle.management.v1.QueryDwhRequest.newBuilder().setFabric(a.positional[0]).setKind(dwhKind(a.positional[1])).setName(a.positional[2]).setLimit((a.long("limit") ?: 0).toInt())
+        a.option("since")?.let { b.since = parseSince(it) }
+        a.option("until")?.let { b.until = parseSince(it) }
+        val r = env.m.queryDwh(b.build())
+        Output.Rows(
+            r.recordsList.map {
+                linkedMapOf<String, Any?>("time" to it.timestamp.iso(), "tags" to it.tagsMap.toSortedMap(), "payload" to kotlinx.serialization.json.Json.parseToJsonElement(it.payloadJson))
+            },
+            "no records",
+        )
+    },
+    Command(
+        listOf("dwh", "record"), "<fabric> on|off", "Switch the recording of all typed tethers of a fabric on or off (tethers with a record of their own are recorded anyway)",
+        retentionOptions, 2,
+    ) { env, a ->
+        val on = when (a.positional[1].lowercase()) { "on" -> true; "off" -> false; else -> throw UsageException("give on or off") }
+        env.m.setRecording(cringle.management.v1.SetRecordingRequest.newBuilder().setFabric(a.positional[0]).setAll(on).setDefaultRetention(retentionOf(a)).build())
+        Output.Message("recording of ${a.positional[0]} is ${if (on) "on" else "off"}")
+    },
+    Command(
+        listOf("dwh", "retention"), "<fabric> <block|tether> <name>", "Set the retention of a partition (no option: no limit)", retentionOptions, 3,
+    ) { env, a ->
+        env.m.setDwhRetention(
+            cringle.management.v1.SetDwhRetentionRequest.newBuilder().setFabric(a.positional[0]).setKind(dwhKind(a.positional[1])).setName(a.positional[2]).setRetention(retentionOf(a)).build(),
+        )
+        Output.Message("retention of ${a.positional[2]} of ${a.positional[0]} is set")
     },
 
     // --- metrics ---

@@ -183,6 +183,25 @@ abstract class ServiceTestBase {
         repository.publish(consumerProject("shop", "from-shop", "a", work, plugin.pkg).file)
         repository.publish(consumerProject("billing", "from-billing", "b", work, plugin.pkg).file)
         repository.publish(consumerProject("remote-shop", "from-remote-shop", "m2", work, plugin.pkg).file)
+        // two local tethers inside one fabric; the first has a `record`, the second has not (#194)
+        fun caller(id: String) = BlueprintBlock(id, "acme-svc/caller", config = JsonObject(mapOf("message" to JsonPrimitive("ping-$id"))))
+        fun sink(id: String, file: String) = BlueprintBlock(id, "acme-svc/sink", config = JsonObject(mapOf("file" to JsonPrimitive(dir.resolve(file).toString()))))
+        repository.publish(
+            TestProjectBuilder("recorded-app", "1.0.0")
+                .dependency("acme-svc", "^1.0.0")
+                .blueprint(
+                    Blueprint(
+                        "app",
+                        listOf(caller("c"), sink("s", "recorded1.txt"), caller("c2"), sink("s2", "recorded2.txt")),
+                        listOf(
+                            TetherDef(TetherType.MESSAGE, Endpoint("c", "out"), Endpoint("s", "in"), cringle.packaging.DeliveryPolicy.DROP, record = cringle.packaging.RecordConfig(java.time.Duration.ofDays(3), 1_000_000)),
+                            TetherDef(TetherType.MESSAGE, Endpoint("c2", "out"), Endpoint("s2", "in")),
+                        ),
+                    ),
+                )
+                .fabric(FabricConfig("app", 1, listOf("a"), emptyMap()))
+                .build(work, listOf(plugin.pkg)).file,
+        )
         repository.setTrust("acme-svc", cringle.repository.PluginTrust.TRUSTED)
 
         tls = ManagementTls(dir.resolve("tls"))

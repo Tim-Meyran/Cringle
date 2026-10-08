@@ -342,6 +342,7 @@ public class ManagementCore(
         update { d ->
             d.copy(fabrics = d.fabrics.filter { !(it.machine == machineId && it.engineId == id && it.fabricId == fabricId) } + FabricRecord(machineId, id, fabricId, request.toByteArray(), false)) to Unit
         }
+        applyRecording(api, fabricId)
         if (start) {
             info = api.startFabric(fabricRef(fabricId))
             setDesired(machineId, id, fabricId, true)
@@ -442,6 +443,78 @@ public class ManagementCore(
         return MetricsResult(result.sortedWith(compareBy({ it.machine }, { it.engineId })), problems)
     }
 
+    // --- Data warehouse (#194) ---
+
+    private fun fabricRecord(fabricId: String): FabricRecord =
+        snapshot().fabrics.firstOrNull { it.fabricId == fabricId }
+            ?: throw ManagementException(Status.Code.NOT_FOUND, "fabric '$fabricId' is not known to the ManagementServer")
+
+    /** The records of a partition of the fabric [request.fabric], asked from the Engine it runs on. */
+    public suspend fun queryDwh(request: cringle.management.v1.QueryDwhRequest): cringle.engine.v1.QueryDwhResponse {
+        val record = fabricRecord(request.fabric)
+        val engineRequest = cringle.engine.v1.QueryDwhRequest.newBuilder()
+            .setFabricId(FabricId.newBuilder().setValue(request.fabric)).setKind(request.kind).setName(request.name).setLimit(request.limit)
+        if (request.hasSince()) engineRequest.since = request.since
+        if (request.hasUntil()) engineRequest.until = request.until
+        return runningEngine(record.machine, record.engineId).queryDwh(engineRequest.build())
+    }
+
+    /** The partitions of the fabric [fabric], or of all fabrics on all running Engines if it is empty. */
+    public suspend fun listDwhPartitions(fabric: String): Pair<List<Triple<String, String, cringle.engine.v1.DwhPartitionInfo>>, List<String>> {
+        val request = cringle.engine.v1.ListDwhPartitionsRequest.newBuilder().setFabric(fabric).build()
+        if (fabric.isNotEmpty()) {
+            val record = fabricRecord(fabric)
+            val answer = runningEngine(record.machine, record.engineId).listDwhPartitions(request)
+            return answer.partitionsList.map { Triple(record.machine, record.engineId, it) } to emptyList()
+        }
+        val problems = ArrayList<String>()
+        val result = ArrayList<Triple<String, String, cringle.engine.v1.DwhPartitionInfo>>()
+        for (e in listEngines(null)) {
+            if (e.process.state != EngineProcessState.ENGINE_PROCESS_STATE_RUNNING) continue
+            val eid = e.process.engineId.value
+            try {
+                runningEngine(e.machine, eid).listDwhPartitions(request).partitionsList.forEach { result += Triple(e.machine, eid, it) }
+            } catch (ex: StatusException) {
+                problems += "${e.machine}/$eid: ${ex.status.description ?: ex.status.code.name}"
+            } catch (ex: ManagementException) {
+                problems += "${e.machine}/$eid: ${ex.message}"
+            }
+        }
+        return result to problems
+    }
+
+    /** Switches the recording of the tethers of [fabric] on or off and remembers it, so that a fabric that is deployed again or restored gets it again. */
+    public suspend fun setRecording(fabric: String, all: Boolean, default: cringle.engine.v1.DwhRetention?) {
+        val record = fabricRecord(fabric)
+        val request = cringle.engine.v1.SetRecordingRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).setAll(all)
+        if (default != null) request.defaultRetention = default
+        runningEngine(record.machine, record.engineId).setRecording(request.build())
+        update { d ->
+            val others = d.recordings.filterNot { it.fabricId == fabric }
+            d.copy(recordings = if (all) others + RecordingRecord(fabric, default?.maxAgeMs ?: 0, default?.maxBytes ?: 0) else others) to Unit
+        }
+    }
+
+    /** Sets the retention of a partition of [fabric] on its Engine. */
+    public suspend fun setDwhRetention(request: cringle.management.v1.SetDwhRetentionRequest) {
+        val record = fabricRecord(request.fabric)
+        runningEngine(record.machine, record.engineId).setDwhRetention(
+            cringle.engine.v1.SetDwhRetentionRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(request.fabric))
+                .setKind(request.kind).setName(request.name).setRetention(request.retention).build(),
+        )
+    }
+
+    /** Applies the remembered recording mode of [fabricId] to the fabric that was just deployed on [api]. */
+    private suspend fun applyRecording(api: EngineManagementServiceCoroutineStub, fabricId: String) {
+        val mode = snapshot().recordings.firstOrNull { it.fabricId == fabricId } ?: return
+        runCatching {
+            api.setRecording(
+                cringle.engine.v1.SetRecordingRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabricId)).setAll(true)
+                    .setDefaultRetention(cringle.engine.v1.DwhRetention.newBuilder().setMaxAgeMs(mode.maxAgeMs).setMaxBytes(mode.maxBytes)).build(),
+            )
+        }
+    }
+
     // --- Recovery ---
 
     /**
@@ -487,6 +560,7 @@ public class ManagementCore(
                             var changed = false
                             if (current == null) {
                                 current = api.deployFabric(withToken(DeployFabricRequest.parseFrom(f.deploy)))
+                                applyRecording(api, f.fabricId)
                                 changed = true
                             }
                             if (f.desiredRunning && current.state != FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING) {

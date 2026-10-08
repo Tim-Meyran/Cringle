@@ -465,4 +465,22 @@ class CliTest {
         val entry = (json(ok("logs", "--json")) as JsonArray).single() as JsonObject
         assertEquals("proc.log", field(entry, "source"))
     }
+
+    @Test
+    fun dwhCommandsReportEmptyUnknownAndWrongInput() {
+        machine()
+        ok("engine", "create", "m1", "--id", "e1")
+        ok("engine", "start", "m1", "e1")
+        assertEquals("no partitions", ok("dwh", "list").out)
+        assertEquals("[]", ok("dwh", "list", "--json").out.replace("\\s".toRegex(), ""))
+        // an unknown fabric is refused by the server, wrong input by the CLI (exit code 2)
+        assertTrue(cli("dwh", "list", "nope").code != 0 && cli("dwh", "list", "nope").code != 2)
+        assertTrue(cli("dwh", "record", "nope", "on").code != 0 && cli("dwh", "record", "nope", "on").code != 2)
+        assertTrue(cli("dwh", "query", "nope", "tether", "t").code != 0 && cli("dwh", "query", "nope", "tether", "t").code != 2)
+        assertEquals(2, cli("dwh", "record", "f1", "maybe").code)
+        assertEquals(2, cli("dwh", "record", "f1", "on", "--max-age", "5x").code)
+        assertEquals(2, cli("dwh", "retention", "f1", "block", "b", "--max-size", "big").code)
+        assertEquals(2, cli("dwh", "query", "f1", "flavor", "t").code)
+        assertEquals(2, cli("dwh", "query", "f1", "tether").code)
+    }
 }

@@ -54,3 +54,15 @@ The standard output of an Engine process is read by the Daemon until the process
 ## Metrics (#191)
 
 `GetMetrics(engine)` returns the numbers of one running engine, or of all running engines (of all machines) if no engine is named (`docs/observability.md`, "Metrics"). An engine that cannot be asked is a line in `problems` and does not fail the call; a stopped or unknown engine that is named is `FAILED_PRECONDITION` or `NOT_FOUND`. The method needs the role viewer. `cringle metrics` shows one row per engine (CPU load, heap, threads, fabrics, errors), `--fabrics` one row per fabric, `--tethers` one row per tether, `--fabric` limits the last two to one fabric, `--json` prints the rows.
+
+## Data warehouse of the engines (#194)
+
+The ManagementServer reads and controls the data warehouse of the engines (`docs/observability.md`). A fabric is named by its id; the
+ManagementServer asks the engine it runs on (`NOT_FOUND` for a fabric it does not know, `FAILED_PRECONDITION` if that engine is not
+running): `QueryDwh(fabric, kind, name, since, until, limit)` returns the records of a block's or a tether's partition (payload as JSON
+text, tags), `ListDwhPartitions(fabric)` the partitions with size and retention (without a fabric: all running engines, an engine that
+cannot be asked is a line in `problems`), `SetRecording(fabric, all, default retention)` switches the recording of all typed tethers on or
+off, `SetDwhRetention(fabric, kind, name, retention)` sets the retention of a partition. `QueryDwh` and `ListDwhPartitions` need the role
+viewer, the other two the role operator. The recording mode is part of the state (`recordings` in `management.json`) and is applied again when
+a fabric of that id is deployed again or restored by `Recover`; it is removed when recording is switched off. CLI: `cringle dwh ...`
+(`docs/cli.md`).

@@ -34,6 +34,12 @@ service EngineManagementService {
   // Sets the retention of a partition of the data warehouse (a block or a tether of a fabric).
   rpc SetDwhRetention(SetDwhRetentionRequest) returns (SetDwhRetentionResponse);
 
+  // The records of a partition of the data warehouse (a block or a tether of a fabric): the newest `limit`, oldest first.
+  rpc QueryDwh(QueryDwhRequest) returns (QueryDwhResponse);
+
+  // The partitions of the data warehouse with size and retention, of one fabric or of all.
+  rpc ListDwhPartitions(ListDwhPartitionsRequest) returns (ListDwhPartitionsResponse);
+
   rpc SetServiceCallers(SetServiceCallersRequest) returns (SetServiceCallersResponse);
 
   // Replaces the instances of a service that the running fabric calls (its binding), without a redeploy. The tether
@@ -118,6 +124,44 @@ message SetDwhRetentionRequest {
 }
 
 message SetDwhRetentionResponse {}
+
+message QueryDwhRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  DwhKind kind = 2;
+  string name = 3;
+  google.protobuf.Timestamp since = 4;
+  google.protobuf.Timestamp until = 5;
+  // 0 means the default of 1000.
+  int32 limit = 6;
+}
+
+message DwhRecord {
+  google.protobuf.Timestamp timestamp = 1;
+  // The payload as JSON text.
+  string payload_json = 2;
+  map<string, string> tags = 3;
+}
+
+message QueryDwhResponse {
+  repeated DwhRecord records = 1;
+}
+
+message ListDwhPartitionsRequest {
+  // Empty: the partitions of all fabrics.
+  string fabric = 1;
+}
+
+message DwhPartitionInfo {
+  string fabric = 1;
+  DwhKind kind = 2;
+  string name = 3;
+  int64 bytes = 4;
+  DwhRetention retention = 5;
+}
+
+message ListDwhPartitionsResponse {
+  repeated DwhPartitionInfo partitions = 1;
+}
 
 message GetMetricsRequest {}
 
