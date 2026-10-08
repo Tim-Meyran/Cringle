@@ -83,6 +83,11 @@ class RegistryLinkTlsTest {
             awaitTrue("registration") { router.registry.engines().any { it.record.id == "e1" } }
             val view = router.registry.engines().single { it.record.id == "e1" }
             assertEquals(engineTls.identity.publicKeyFingerprint, view.record.fingerprint)
+            // the heartbeat carries a few numbers (#190)
+            awaitTrue("vitals") { router.registry.engines().single { it.record.id == "e1" }.vitals != null }
+            val vitals = router.registry.engines().single { it.record.id == "e1" }.vitals!!
+            assertTrue(vitals.memoryUsedBytes > 0 && vitals.memoryUsedBytes <= vitals.memoryMaxBytes, vitals.toString())
+            assertEquals(0, vitals.fabricCount)
         } finally {
             engine.stop()
         }

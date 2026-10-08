@@ -38,3 +38,15 @@ per partition:
 - Queries take a time range and a limit and return the newest records, oldest first.
 
 The block driver (#192), the recording of tether traffic (#193) and the access of the ManagementServer (#194) build on it.
+
+## Heartbeat (#190)
+
+The heartbeat an engine sends to its router every few seconds carries a few important numbers (Architecture 16.2) next to the fabric
+states (`EngineMetrics` of the heartbeat): CPU load of the process in percent (-1 if unknown), heap used and maximum, tether
+messages per second since the previous heartbeat (0 for the first one), the number of fabrics and of running fabrics, and the
+failures of blocks and tethers (cumulative). They come from the numbers of the metrics above; there is no sampling thread of its own.
+
+The router keeps the last numbers of every engine in memory only (they are not written to `registry.json`; a heartbeat without them
+keeps the last ones, an unregistered engine loses them) and returns them as `vitals` of the engine entry in `ListEngines`. The
+cached engines of remote routers carry the numbers their router reported at the last refresh. The full numbers stay a pull:
+`GetMetrics` of the engine (`cringle metrics`).

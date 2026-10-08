@@ -148,4 +148,23 @@ class RegistryTest {
         r.heartbeat("e1", emptyList())
         assertTrue(r.changes.value >= before + 2)
     }
+
+    @Test
+    fun `the numbers of a heartbeat are kept in memory, the last ones survive a heartbeat without them`() {
+        val file = dir.resolve("registry-vitals.json")
+        val r = registry(file)
+        r.register("e1", "Engine One", "127.0.0.1:1")
+        assertNull(r.engines().single().vitals)
+        val vitals = cringle.common.v1.EngineMetrics.newBuilder().setFabricCount(3).setRunningFabricCount(2).setErrorCount(5).setMemoryUsedBytes(10).build()
+        r.heartbeat("e1", listOf(fabric), vitals)
+        assertEquals(vitals, r.engines().single().vitals)
+        r.heartbeat("e1", listOf(fabric))
+        assertEquals(vitals, r.engines().single().vitals)
+        // not persisted: a registry that reads the file has none
+        assertNull(registry(file).engines().single().vitals)
+        // gone with the engine
+        r.unregister("e1")
+        r.register("e1", "Engine One", "127.0.0.1:1")
+        assertNull(r.engines().single().vitals)
+    }
 }

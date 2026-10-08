@@ -71,6 +71,8 @@ message EngineEntry {
   string fingerprint = 8;
   // Address of the tether service of the Engine (tethers between engines) as host:port; empty if the Engine has none.
   string tether_address = 9;
+  // The numbers of the last heartbeat (memory only, not persisted); unset if the Engine sent none.
+  cringle.common.v1.EngineMetrics vitals = 10;
 }
 
 message RegisterEngineRequest {

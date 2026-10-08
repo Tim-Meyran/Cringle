@@ -103,6 +103,7 @@ public class RemoteRouters(
                         e.fabricsList.map { FabricSummary(it.fabricId.value, it.blueprintName, it.state.name) },
                         fingerprint = e.fingerprint,
                         tetherAddress = e.tetherAddress,
+                        vitals = if (e.hasVitals()) e.vitals else null,
                     ) to if (e.reachability == cringle.router.v1.Reachability.REACHABILITY_REACHABLE) Reachability.REACHABLE else Reachability.UNREACHABLE
                 },
                 null,
@@ -234,6 +235,7 @@ public class RouterServer(
             .setName(v.record.name)
             .setManagementAddress(v.record.managementAddress)
             .setTetherAddress(v.record.tetherAddress)
+            .apply { v.vitals?.let { setVitals(it) } }
             .setReachability(
                 if (v.reachability == Reachability.REACHABLE) cringle.router.v1.Reachability.REACHABILITY_REACHABLE else cringle.router.v1.Reachability.REACHABILITY_UNREACHABLE,
             )
@@ -293,7 +295,7 @@ public class RouterServer(
         override suspend fun sendHeartbeat(request: SendHeartbeatRequest): SendHeartbeatResponse {
             val hb = request.heartbeat
             try {
-                registry.heartbeat(hb.engineId.value, hb.fabricStatesList.map { FabricSummary(it.fabricId.value, it.blueprintName, it.state.name) })
+                registry.heartbeat(hb.engineId.value, hb.fabricStatesList.map { FabricSummary(it.fabricId.value, it.blueprintName, it.state.name) }, if (hb.hasMetrics()) hb.metrics else null)
             } catch (e: EngineNotRegisteredException) {
                 throw StatusException(Status.NOT_FOUND.withDescription(e.message))
             }

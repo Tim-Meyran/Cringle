@@ -28,12 +28,18 @@ message FabricStateSummary {
   string blueprint_name = 3;
 }
 
-// Basic runtime metrics reported in engine heartbeats.
+// A few important numbers reported in engine heartbeats (Architecture 16.2); the full numbers are `GetMetrics` of the Engine.
 message EngineMetrics {
+  // CPU load of the Engine process in percent; -1 if unknown.
   double cpu_usage_percent = 1;
   int64 memory_used_bytes = 2;
   int64 memory_max_bytes = 3;
+  // Values that crossed the tethers of the Engine per second since the last heartbeat; 0 for the first one.
   int64 tether_messages_per_sec = 4;
+  int32 fabric_count = 5;
+  int32 running_fabric_count = 6;
+  // Failures of blocks and tethers since the fabrics were created (cumulative).
+  int64 error_count = 7;
 }
 
 // Engine heartbeat payload periodically sent to the registry.

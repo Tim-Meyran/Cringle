@@ -128,6 +128,10 @@ public class Engine private constructor(
         .addService(ManagementService())
         .build()
 
+    private val vitals = cringle.engine.metrics.VitalsSampler(
+        { fabrics.stats() },
+        { fabrics.list().count { it.state == cringle.engine.fabric.FabricState.RUNNING } },
+    )
     private var link: RegistryLink? = null
     private var started = false
 
@@ -218,6 +222,7 @@ public class Engine private constructor(
                 router,
                 heartbeatInterval,
                 { fabricStates() },
+                { vitals.sample() },
                 tls,
                 enrollmentSecret,
             ).also { it.start() }
