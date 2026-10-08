@@ -24,6 +24,9 @@ service EngineManagementService {
 
   // Replaces the Engines that may call the provided service ports of a fabric. Callers that stay are not touched, new
   // ones are accepted from now on, removed ones are refused and their open calls are ended.
+  // The numbers of the Engine and of its fabrics, blocks and tethers (Architecture 16.2). Counters are cumulative.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+
   rpc SetServiceCallers(SetServiceCallersRequest) returns (SetServiceCallersResponse);
 
   // Replaces the instances of a service that the running fabric calls (its binding), without a redeploy. The tether
@@ -76,6 +79,49 @@ message GetStatusResponse {
   string public_key_fingerprint = 7;
   // Port of the tether service for tethers between Engines (spec/tether.md); 0 if the Engine has none.
   int32 tether_port = 8;
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  EngineMetrics metrics = 1;
+}
+
+message EngineMetrics {
+  google.protobuf.Timestamp sampled_at = 1;
+  // CPU load of the Engine process, 0 to 1; -1 if unknown.
+  double process_cpu_load = 2;
+  int64 heap_used_bytes = 3;
+  int64 heap_max_bytes = 4;
+  int32 thread_count = 5;
+  repeated FabricMetrics fabrics = 6;
+}
+
+message FabricMetrics {
+  cringle.common.v1.FabricId fabric_id = 1;
+  // CPU time of the thread of the fabric in nanoseconds; -1 if unknown.
+  int64 cpu_time_ns = 2;
+  // Failures of its blocks and tethers.
+  int64 errors = 3;
+  repeated BlockMetrics blocks = 4;
+  repeated TetherMetrics tethers = 5;
+}
+
+message BlockMetrics {
+  string block_id = 1;
+  // Crashes and failed starts, restarts included.
+  int64 errors = 2;
+}
+
+message TetherMetrics {
+  string tether_id = 1;
+  string type = 2;
+  // Values that crossed the tether: messages, requests, responses, stream openings and items.
+  int64 messages = 3;
+  // Bytes that crossed a tether of bytes.
+  int64 bytes = 4;
+  // Validation and delivery failures.
+  int64 errors = 5;
 }
 
 message ConfigureRequest {

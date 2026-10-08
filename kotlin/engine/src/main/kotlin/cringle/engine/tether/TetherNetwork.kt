@@ -114,6 +114,10 @@ public class TetherNetwork private constructor(
     /** The number of stream channels the network still has to close; read by the tests. */
     internal val openStreamChannelCount: Int get() = streamChannels.size
 
+    /** The numbers of every tether of the blueprint (#187), in the order of [tethers]. */
+    public fun stats(): List<cringle.engine.metrics.TetherStats> =
+        connections.values.distinctBy { it.info.id }.map { cringle.engine.metrics.TetherStats(it.info.id, it.info.type, it.messages.get(), it.bytes.get(), it.errors.get()) }
+
     /** All tethers of the blueprint. */
     public val tethers: List<TetherInfo> = connections.values.map { it.info }.distinctBy { it.id }
 
@@ -178,7 +182,7 @@ public class TetherNetwork private constructor(
         c.remoteRequests.clear()
         for (st in c.remoteStreams.values) st.fail(reason)
         c.remoteStreams.clear()
-        onDeliveryFailure(c.info, reason)
+        reportFailure(c, reason)
     }
 
     /** What the other engine sends to the sending end of [c]: responses, stream items and errors. */
@@ -206,7 +210,7 @@ public class TetherNetwork private constructor(
                         c.remoteStreams.remove(id)?.fail(failure) != null -> {}
                         else -> {
                             if (id == 0L && RemoteErrors.code(frame.value) == RemoteErrors.STOPPING) c.remoteReason = failure.message
-                            onDeliveryFailure(c.info, failure)
+                            reportFailure(c, failure)
                         }
                     }
                 }
@@ -224,7 +228,7 @@ public class TetherNetwork private constructor(
             c.remoteRequests.clear()
             for (st in c.remoteStreams.values) st.fail(reason)
             c.remoteStreams.clear()
-            onDeliveryFailure(c.info, reason)
+            reportFailure(c, reason)
         }
     }
 
@@ -401,7 +405,7 @@ public class TetherNetwork private constructor(
                     throw e
                 } catch (e: Throwable) {
                     connection.close()
-                    onDeliveryFailure(c.info, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
+                    reportFailure(c, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
                 }
             }
         }
@@ -427,7 +431,7 @@ public class TetherNetwork private constructor(
             throw e
         } catch (e: Throwable) {
             connection.close()
-            onDeliveryFailure(c.info, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
+            reportFailure(c, TetherDeliveryException("tether ${c.info.id}: delivery to '${c.info.to.block}' failed: ${e.message}", e))
         }
     }
 
@@ -620,6 +624,11 @@ public class TetherNetwork private constructor(
         /** The accepted calls of the receiving end. */
         val sessions = CopyOnWriteArrayList<ReceiverInbound>()
 
+        /** Numbers for the metrics (#187). */
+        val messages = AtomicLong()
+        val bytes = AtomicLong()
+        val errors = AtomicLong()
+
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
@@ -699,11 +708,16 @@ public class TetherNetwork private constructor(
         }
     }
 
+    private fun reportFailure(c: Connection, failure: Throwable) {
+        c.errors.incrementAndGet()
+        onDeliveryFailure(c.info, failure)
+    }
+
     private fun fail(c: Connection, env: Envelope, to: Endpoint, e: Throwable, suffix: String?) {
         val detail = suffix?.let { " $it" }.orEmpty()
         val failure = TetherDeliveryException("tether ${c.info.id}: delivery to '${to.block}' failed$detail: ${e.message}", e)
         if (env is Envelope.Request) env.response.completeExceptionally(failure)
-        onDeliveryFailure(c.info, failure)
+        reportFailure(c, failure)
     }
 
     private fun retryDelay(retry: RetryConfig, failedAttempt: Int): Long {
@@ -748,6 +762,8 @@ public class TetherNetwork private constructor(
     }
 
     private suspend fun hook(c: Connection, kind: TrafficKind, payload: Any?) {
+        c.messages.incrementAndGet()
+        if (kind == TrafficKind.BYTES && payload is ByteArray) c.bytes.addAndGet(payload.size.toLong())
         config.observer?.observe(c.info, kind, payload)
         config.interceptor?.beforeDelivery(c.info, kind, payload)
     }
@@ -761,6 +777,7 @@ public class TetherNetwork private constructor(
         }
         val errors = v.validate(json, c.fromPort.schema)
         if (errors.isNotEmpty()) {
+            c.errors.incrementAndGet()
             val list = errors.map { "${it.path}: ${it.message}" }
             throw TetherValidationException(
                 "tether ${c.info.id}: $what violates schema ${c.fromPort.schema}:\n" + list.joinToString("\n") { "  $it" },

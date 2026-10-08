@@ -132,6 +132,8 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
     public fun status(id: String): FabricStatus = find(id).status.value
 
     /** Status of all fabrics in deployment order. */
+    public fun stats(): List<cringle.engine.metrics.FabricStats> = synchronized(fabrics) { fabrics.values.toList() }.map { it.stats() }
+
     public fun list(): List<FabricStatus> = synchronized(fabrics) { fabrics.values.map { it.status.value } }
 
     /** Stops and removes all fabrics. */
