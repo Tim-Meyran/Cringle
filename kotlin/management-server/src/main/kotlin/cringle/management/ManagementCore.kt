@@ -82,6 +82,12 @@ public data class FabricView(val machine: String, val engineId: String, val info
 /** A log entry with its origin. */
 public data class LogView(val machine: String, val engineId: String, val entry: LogEntry)
 
+/** The numbers of one Engine with its origin. */
+public data class MetricsView(val machine: String, val engineId: String, val metrics: cringle.engine.v1.EngineMetrics)
+
+/** The result of a metrics query over several Engines. */
+public data class MetricsResult(val metrics: List<MetricsView>, val problems: List<String>)
+
 /** The result of a log query over several Engines. */
 public data class LogResult(val entries: List<LogView>, val problems: List<String>)
 
@@ -412,6 +418,28 @@ public class ManagementCore(
         }
         val sorted = entries.sortedWith(compareBy({ it.entry.timestamp.seconds }, { it.entry.timestamp.nanos })).takeLast(limit)
         return LogResult(sorted, problems)
+    }
+
+    /** The numbers of the running Engine [machineId]/[id], or of all running Engines (of [machineId] if given) if no Engine is named (#191). */
+    public suspend fun getMetrics(machineId: String?, id: String?): MetricsResult {
+        val request = cringle.engine.v1.GetMetricsRequest.getDefaultInstance()
+        if (!machineId.isNullOrEmpty() && !id.isNullOrEmpty()) {
+            return MetricsResult(listOf(MetricsView(machineId, id, runningEngine(machineId, id).getMetrics(request).metrics)), emptyList())
+        }
+        val problems = ArrayList<String>()
+        val result = ArrayList<MetricsView>()
+        for (e in listEngines(machineId)) {
+            if (e.process.state != EngineProcessState.ENGINE_PROCESS_STATE_RUNNING) continue
+            val eid = e.process.engineId.value
+            try {
+                result += MetricsView(e.machine, eid, runningEngine(e.machine, eid).getMetrics(request).metrics)
+            } catch (ex: StatusException) {
+                problems += "${e.machine}/$eid: ${ex.status.description ?: ex.status.code.name}"
+            } catch (ex: ManagementException) {
+                problems += "${e.machine}/$eid: ${ex.message}"
+            }
+        }
+        return MetricsResult(result.sortedWith(compareBy({ it.machine }, { it.engineId })), problems)
     }
 
     // --- Recovery ---
