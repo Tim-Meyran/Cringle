@@ -282,4 +282,18 @@ class ManifestJsonTest {
         assertTrue(remote("""{$ok,"index":-1}""").path.endsWith("remote.index"))
         assertTrue(remote("""[]""").path.endsWith("remote"))
     }
+
+    @Test
+    fun projectProcessorsRoundTrip() {
+        val text = """{"format":1,"kind":"project","name":"x","version":"1.0.0","processors":{"update":"com.acme.Up","downgrade":"com.acme.Down"}}"""
+        val project = ManifestJson.parseProject(text)
+        assertEquals(ProcessorSet("com.acme.Up", "com.acme.Down"), project.processors)
+        assertEquals(project, ManifestJson.parseProject(ManifestJson.encode(project)))
+    }
+
+    @Test
+    fun invalidProcessorClassNameIsRejected() {
+        val text = """{"format":1,"kind":"project","name":"x","version":"1.0.0","processors":{"update":"../evil"}}"""
+        assertTrue(bad(text, ManifestJson::parseProject).message!!.contains("processors"))
+    }
 }
