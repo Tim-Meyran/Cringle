@@ -166,7 +166,15 @@ public data class TetherDef(
      * tether is local or has a [remote]. At most one of [remote] and [service] is set.
      */
     public val service: String? = null,
+    /** Marks the tether for recording in the data warehouse of the engine (#193), with the retention of its partition. `null`: not recorded by the tether's own definition. */
+    public val record: RecordConfig? = null,
 )
+
+/**
+ * What to keep of a recorded tether: records older than [maxAge] and, beyond [maxBytes], the oldest ones are removed. `null` means no limit.
+ * An empty [RecordConfig] records without limits.
+ */
+public data class RecordConfig(public val maxAge: java.time.Duration? = null, public val maxBytes: Long? = null)
 
 /**
  * A port that a blueprint offers to the tethers of other projects under the name [service] (Architecture chapter

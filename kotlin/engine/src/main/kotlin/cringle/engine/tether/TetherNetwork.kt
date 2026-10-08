@@ -1013,7 +1013,7 @@ public class TetherNetwork private constructor(
                     if (t.type == TetherType.TCP || t.type == TetherType.SERIAL) problems += "tether $id: a ${t.type} tether is a local resource and cannot end on another engine"
                     if (config.remote == null) problems += "tether $id: this engine cannot run tethers to other engines"
                     val c = Connection(
-                        TetherInfo(id, t.type, if (sends) local else far, if (sends) far else local, remote),
+                        TetherInfo(id, t.type, if (sends) local else far, if (sends) far else local, remote, t.record),
                         port,
                         port,
                         t.delivery,
@@ -1054,7 +1054,7 @@ public class TetherNetwork private constructor(
                     if (config.serial == null) problems += "tether $id: this fabric has no serial driver"
                 }
                 val c = Connection(
-                    TetherInfo(id, t.type, localFrom, localTo),
+                    TetherInfo(id, t.type, localFrom, localTo, null, t.record),
                     from,
                     to,
                     t.delivery,

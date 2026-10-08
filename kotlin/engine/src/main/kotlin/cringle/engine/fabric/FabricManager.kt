@@ -7,6 +7,7 @@ import cringle.contract.DriverSet
 import cringle.contract.Driver
 import cringle.engine.drivers.BuiltinDrivers
 import cringle.engine.tether.TetherConfig
+import cringle.engine.tether.TetherObserver
 import cringle.engine.EngineArgs
 import cringle.engine.classloading.ContractClassLoader
 import cringle.engine.classloading.FabricClassLoaders
@@ -85,6 +86,11 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
     private val fabrics = LinkedHashMap<String, FabricRuntime>()
 
     private fun find(id: String): FabricRuntime = synchronized(fabrics) { fabrics[id] } ?: throw FabricNotFoundException(id)
+
+    /** Switches the recording of all typed tethers of the fabric [id] on or off (#193). */
+    public fun setRecording(id: String, all: Boolean, default: cringle.packaging.RecordConfig?) {
+        find(id).setRecording(all, default)
+    }
 
     /** Replaces the instances of services that the fabric [id] calls, without a redeploy (see [FabricRuntime.updateServiceBindings]). */
     public fun updateServiceBindings(id: String, bindings: List<ServiceBinding>) {
@@ -228,6 +234,7 @@ public class LocalFabricDeployer(
                 }
             }
             val paths = FabricPaths(engineDir, request.fabricId)
+            val recorder = builtin?.let { cringle.engine.dwh.TetherRecorder(it.dwh, request.fabricId) { message -> paths.fileLogger().log(FabricLogger.Level.WARN, message) } }
             return FabricRuntime(
                 FabricSpec(
                     id = request.fabricId,
@@ -238,7 +245,7 @@ public class LocalFabricDeployer(
                     wiring = wiring,
                     tethers = tethers?.let {
                         TetherConfig(
-                            registry, it.bufferCapacity, it.requestTimeout, it.observer, it.interceptor,
+                            registry, it.bufferCapacity, it.requestTimeout, listOfNotNull(it.observer, recorder).let { o -> if (o.size < 2) o.firstOrNull() else TetherObserver { t, k, p -> o.forEach { x -> x.observe(t, k, p) } } }, it.interceptor,
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
                             it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
                             remote = remoteTethers?.portsFor(request.fabricId),
@@ -250,6 +257,7 @@ public class LocalFabricDeployer(
                     logger = paths.fileLogger(),
                     watchdog = watchdog,
                     onClose = loaders,
+                    recorder = recorder,
                 ),
             )
         } catch (e: Throwable) {

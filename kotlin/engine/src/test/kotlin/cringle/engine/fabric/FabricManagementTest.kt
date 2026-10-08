@@ -212,6 +212,27 @@ class FabricManagementTest {
     }
 
     @Test
+    fun recordingAndDwhRetentionAreSetThroughTheManagementApi() = withEngine { stub, _, _ ->
+        stub.deployFabric(deploy("f1", ProtoTrust.PLUGIN_TRUST_TRUSTED))
+        val id = FabricId.newBuilder().setValue("f1")
+        stub.setRecording(
+            cringle.engine.v1.SetRecordingRequest.newBuilder().setFabricId(id).setAll(true)
+                .setDefaultRetention(cringle.engine.v1.DwhRetention.newBuilder().setMaxBytes(1000)).build(),
+        )
+        stub.setRecording(cringle.engine.v1.SetRecordingRequest.newBuilder().setFabricId(id).setAll(false).build())
+        stub.setDwhRetention(
+            cringle.engine.v1.SetDwhRetentionRequest.newBuilder().setFabricId(id).setKind(cringle.engine.v1.DwhKind.DWH_KIND_BLOCK).setName("m1")
+                .setRetention(cringle.engine.v1.DwhRetention.newBuilder().setMaxAgeMs(60_000).setMaxBytes(2048)).build(),
+        )
+        val meta = Files.readString(dir.resolve("home/engines/e1/dwh/f1/block/m1/meta.json"))
+        assertTrue(meta.contains("\"maxAgeMillis\":60000") && meta.contains("\"maxBytes\":2048"), meta)
+        val unknown = FabricId.newBuilder().setValue("nope")
+        assertEquals(Status.Code.NOT_FOUND, code { stub.setRecording(cringle.engine.v1.SetRecordingRequest.newBuilder().setFabricId(unknown).setAll(true).build()) })
+        assertEquals(Status.Code.NOT_FOUND, code { stub.setDwhRetention(cringle.engine.v1.SetDwhRetentionRequest.newBuilder().setFabricId(unknown).setKind(cringle.engine.v1.DwhKind.DWH_KIND_BLOCK).setName("m1").build()) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { stub.setDwhRetention(cringle.engine.v1.SetDwhRetentionRequest.newBuilder().setFabricId(id).setName("m1").build()) })
+    }
+
+    @Test
     fun invalidDeploymentsAreRejectedWithReadableErrors() = withEngine { stub, _, _ ->
         fun failure(request: DeployFabricRequest): StatusException = assertThrows { runBlocking { stub.deployFabric(request) } }
         val noProject = failure(deploy("f", ProtoTrust.PLUGIN_TRUST_TRUSTED, project = "ghost"))

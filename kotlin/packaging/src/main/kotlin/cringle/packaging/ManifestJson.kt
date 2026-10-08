@@ -91,7 +91,7 @@ public object ManifestJson {
     private val blueprintKeys = setOf("name", "blocks", "tethers", "provides")
     private val providesKeys = setOf("service", "block", "port", "type")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
-    private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote")
+    private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote", "record")
     private val endpointKeys = setOf("block", "port", "index")
     private val remoteKeys = setOf("address", "fingerprint", "fabric", "block", "port", "index")
 
@@ -241,10 +241,18 @@ public object ManifestJson {
                 stopBits = JsonReading.optInt(s, "stopBits", "$path.serial") ?: 1,
             )
         }
+        val record = o["record"]?.let { element ->
+            val r = JsonReading.obj(element, "$path.record")
+            JsonReading.keys(r, "$path.record", setOf("maxAge", "maxBytes"))
+            RecordConfig(
+                maxAge = JsonReading.optLong(r, "maxAge", "$path.record")?.let { java.time.Duration.ofMillis(it) },
+                maxBytes = JsonReading.optLong(r, "maxBytes", "$path.record"),
+            )
+        }
         val remoteObject = o["remote"]?.let { JsonReading.obj(it, "$path.remote") }
         val service = remoteObject?.get("service")?.let { serviceName(remoteObject, "$path.remote") }
         val remote = if (service == null) remoteObject?.let { remoteEndpoint(it, "$path.remote") } else null
-        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial, remote, service)
+        return TetherDef(type, from, to, delivery, port, bufferCapacity, requestTimeout, retry, serial, remote, service, record)
     }
 
     /** The abstract form of a `remote`: `{"service": <name>}` and nothing else. */
@@ -380,6 +388,12 @@ public object ManifestJson {
                                 })
                             }
                             t.service?.let { s -> put("remote", buildJsonObject { put("service", s) }) }
+                            t.record?.let { r ->
+                                put("record", buildJsonObject {
+                                    r.maxAge?.let { put("maxAge", it.toMillis()) }
+                                    r.maxBytes?.let { put("maxBytes", it) }
+                                })
+                            }
                             if (t.delivery != DeliveryPolicy.DROP) put("delivery", t.delivery.name)
                             t.port?.let { put("port", it) }
                             t.bufferCapacity?.let { put("bufferCapacity", it) }

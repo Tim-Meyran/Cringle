@@ -205,6 +205,13 @@ public object PackageValidator {
             if (r.backoffMs <= 0) problem("$path.retry.backoffMs", "backoffMs must be positive")
             if (r.maxBackoffMs <= 0) problem("$path.retry.maxBackoffMs", "maxBackoffMs must be positive")
         }
+        t.record?.let { r ->
+            if (t.type == TetherType.TCP || t.type == TetherType.SERIAL || t.type == TetherType.BYTE_STREAM) {
+                problem("$path.record", "a ${t.type} tether carries bytes and is not recorded")
+            }
+            if (r.maxAge != null && (r.maxAge.isNegative || r.maxAge.isZero)) problem("$path.record.maxAge", "maxAge must be positive")
+            if (r.maxBytes != null && r.maxBytes <= 0) problem("$path.record.maxBytes", "maxBytes must be positive")
+        }
         if (t.type == TetherType.SERIAL) {
             if (t.serial == null) problem("$path.serial", "a SERIAL tether needs a 'serial' object")
             if (t.delivery != DeliveryPolicy.DROP) problem("$path.delivery", "a SERIAL tether only supports delivery DROP")

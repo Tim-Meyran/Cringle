@@ -35,6 +35,8 @@ public data class TetherInfo(
      * other engine by the ids of this object.
      */
     val remote: RemoteEndpoint? = null,
+    /** The recording definition of the tether in the blueprint (#193), or `null`. */
+    val record: cringle.packaging.RecordConfig? = null,
 )
 
 /** What kind of traffic a hook sees. */

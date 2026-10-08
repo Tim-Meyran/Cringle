@@ -59,3 +59,22 @@ A block that names the driver `dwh` in its `requiredDrivers` gets a `DwhDriver` 
 numbers, booleans, `null`); anything else is rejected with an `IllegalArgumentException`. A block cannot read the partitions of other
 blocks or fabrics; the ManagementServer reads any partition (#194). An entry is stored as `{"key": ..., "value": ...}` with the
 timestamp and tags of the entry. The retention of a block partition is set per partition (`SetDwhRetention`, #193).
+
+## Recording tether traffic (#193)
+
+Tether messages go into the DWH in two ways:
+
+- **Per tether**, in the blueprint: a tether with a `record` object is recorded. `{"maxAge": <ms>, "maxBytes": <bytes>}` (both optional,
+  both positive; `{}` records without limits) is the retention of the partition of that tether. Tethers that carry bytes (`BYTE_STREAM`,
+  `TCP`, `SERIAL`) cannot have one. See `spec/package-format.md`.
+- **Per fabric**, the recording mode: the engine API `SetRecording(fabric, all, default retention)` switches a running fabric to
+  "record every typed tether that has no definition of its own" and back. The mode is not kept by the engine; the ManagementServer
+  applies it again (#194).
+
+What is recorded: every message, request, response and stream item after schema validation, as the JSON value the tether carries,
+in the partition `(fabric, TETHER, tether id)` with the tag `kind` (`message`, `request`, `response`, `stream_item`). The tether id is
+the one `GetMetrics` shows (`s.out -> d.in`). Recording never slows a tether down: records go through a bounded queue (1024) to a
+writer; when it is full a record is dropped, counted, and a warning is written once to the log of the fabric.
+
+The retention of any partition (a block's or a tether's) can be changed at run time with `SetDwhRetention(fabric, kind, name,
+retention)`; a retention of 0 for age or size means no limit. The limits are applied every minute (see "Data warehouse store").

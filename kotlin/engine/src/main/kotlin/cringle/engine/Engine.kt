@@ -348,6 +348,31 @@ public class Engine private constructor(
             RemoveFabricResponse.getDefaultInstance()
         }
 
+        private fun recordConfig(r: cringle.engine.v1.DwhRetention): cringle.packaging.RecordConfig = cringle.packaging.RecordConfig(
+            r.maxAgeMs.takeIf { it > 0 }?.let { java.time.Duration.ofMillis(it) },
+            r.maxBytes.takeIf { it > 0 },
+        )
+
+        override suspend fun setRecording(request: cringle.engine.v1.SetRecordingRequest): cringle.engine.v1.SetRecordingResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                fabrics.setRecording(request.fabricId.value, request.all, if (request.hasDefaultRetention()) recordConfig(request.defaultRetention) else null)
+                cringle.engine.v1.SetRecordingResponse.getDefaultInstance()
+            }
+
+        override suspend fun setDwhRetention(request: cringle.engine.v1.SetDwhRetentionRequest): cringle.engine.v1.SetDwhRetentionResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                fabrics.status(request.fabricId.value) // NOT_FOUND for an unknown fabric
+                val kind = when (request.kind) {
+                    cringle.engine.v1.DwhKind.DWH_KIND_BLOCK -> cringle.engine.dwh.DwhKind.BLOCK
+                    cringle.engine.v1.DwhKind.DWH_KIND_TETHER -> cringle.engine.dwh.DwhKind.TETHER
+                    else -> throw FabricException("the kind of the partition must be block or tether")
+                }
+                if (request.name.isBlank()) throw FabricException("the name of the partition must not be empty")
+                val config = recordConfig(request.retention)
+                dwh.setRetention(cringle.engine.dwh.DwhPartition(request.fabricId.value, kind, request.name), cringle.engine.dwh.Retention(config.maxAge, config.maxBytes))
+                cringle.engine.v1.SetDwhRetentionResponse.getDefaultInstance()
+            }
+
         override suspend fun getMetrics(request: cringle.engine.v1.GetMetricsRequest): cringle.engine.v1.GetMetricsResponse {
             val e = cringle.engine.metrics.MetricsCollector.engine()
             val b = cringle.engine.v1.EngineMetrics.newBuilder()
