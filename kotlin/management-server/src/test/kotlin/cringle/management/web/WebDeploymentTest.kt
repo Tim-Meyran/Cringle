@@ -88,7 +88,7 @@ class WebDeploymentTest : ServiceTestBase() {
         assertTrue(metrics.contains("e-a") && metrics.contains(fabric), metrics)
 
         val logs = admin.get("/logs/list?fabric=$fabric&level=INFO&limit=50").body()
-        assertTrue(logs.contains("<table") && !logs.contains("class=\"error\""), logs)
+        assertTrue((logs.contains("<table") || logs.contains("No log lines")) && !logs.contains("class=\"error\""), logs)
         assertTrue(admin.get("/logs").body().contains("x-data"))
         assertTrue(admin.get("/logs/list?machine=m1&engine=unknown").body().contains("class=\"error\""))
     }

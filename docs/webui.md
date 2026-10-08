@@ -206,3 +206,13 @@ There is **one theme: dark**, minimal and carefully made. `app.css` has no light
 **Components** (class names): `page-header` (`pageHeader(title, subtitle, actions)`), `panel`, `cards`/`card`, `data` tables (every table in a list is styled like one), `btn` (`primary`, `ghost`, `danger`, `small`, `block`), `field` (a label above a control), `badge` (`ok`, `warn`, `bad`, `info`; Kotlin: `badge(text, Tone)` and `stateBadge(state)`, the text always says the state, the color only supports it), `notice` (`error`, `info`), `empty` (an empty list says what to do next), `problem` (a page for a status other than 200), `details` for disclosure. A button with `hx-confirm` is drawn as a destructive button.
 
 **Dashboard** (`DashboardPage`): cards for machines, engines, fabrics and deployed projects, a list *Needs attention* (an unreachable machine, a crashed engine or one that should run and does not, a failed fabric or one that should run and does not, each with a link), and the machines. **Sign-in, 403, 404 and 500** are pages in the same style; the favicon is `/static/favicon.svg`.
+
+## Pages in the design system (#247)
+
+Every page is built from the same parts (`PageSupport.kt`, `Layout.kt`), so that a new page looks and behaves like the others:
+
+- `pageHeader(title, subtitle, actions)` (or `section(title, subtitle, name, list)` for a page with a self-refreshing list): the title, one line of help, the actions on the right.
+- `dataTable(headers, rows, empty)`: a table; **no rows means an empty state** that says what to do next, never an empty table. An empty header is the column of the buttons; `actionsCell(...)` is the cell of a row (right aligned; buttons the user may not use are not rendered).
+- `formPanel(title, hint, form)`: the place where something is created, below the list; it is not rendered for a user who may not create. `field(label, control, hint)` is a labelled input; `form-row` lays fields out in a row, `check` is a checkbox.
+- `stateBadge(state)` / `badge(text, Tone)` for every state (engine, fabric, machine, block, trust, log level, kind), `tag` for roles, labels and groups, `fingerprint(value)` for keys (first and last characters, the whole value as the title, a click copies it).
+- Destructive buttons (those with `hx-confirm`) are drawn in red; a row with several actions keeps *Tags*, *Retention* and *Tokens* in a popover (`details.popover`), which the refresh respects (it waits while one is open).

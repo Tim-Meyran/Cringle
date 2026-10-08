@@ -37,13 +37,13 @@ class WebOverviewTest : ServiceTestBase() {
         assertTrue(admin.get("/fabrics/list").body().contains("orders-service-service-1"))
 
         val stopped = admin.post("/engines/m1/e-b/stop").body()
-        assertTrue(Regex("e-b</td><td>stopped").containsMatchIn(stopped), stopped)
+        assertTrue(Regex("e-b</strong></td><td><span class=\"badge neutral\">stopped").containsMatchIn(stopped), stopped)
         val started = admin.post("/engines/m1/e-b/start").body()
-        assertTrue(Regex("e-b</td><td>running").containsMatchIn(started), started)
+        assertTrue(Regex("e-b</strong></td><td><span class=\"badge ok\">running").containsMatchIn(started), started)
 
         val fabric = "/fabrics/m1/e-svc/orders-service-service-1"
-        assertTrue(Regex("stopped</td><td>stopped").containsMatchIn(admin.post("$fabric/stop").body()))
-        assertTrue(Regex("running</td><td>running").containsMatchIn(admin.post("$fabric/start").body()))
+        assertTrue(Regex("badge neutral\">stopped</span></td><td><span class=\"badge neutral\">stopped").containsMatchIn(admin.post("$fabric/stop").body()))
+        assertTrue(Regex("badge ok\">running</span></td><td><span class=\"badge ok\">running").containsMatchIn(admin.post("$fabric/start").body()))
         assertTrue(admin.get(fabric).body().contains("s1"))
 
         assertTrue(admin.post("$fabric/remove").body().let { !it.contains("orders-service-service-1") })

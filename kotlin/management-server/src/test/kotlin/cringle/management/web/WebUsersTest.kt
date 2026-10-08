@@ -55,9 +55,9 @@ class WebUsersTest {
 
     @Test
     fun aCreatedUserGetsATokenThatLogsIn() {
-        assertTrue(admin.post("/groups", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<td>ops</td><td>operator</td>"))
+        assertTrue(admin.post("/groups", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<strong>ops</strong></td><td><span class=\"tag\">operator</span>"))
         val created = admin.post("/users", mapOf("name" to "bob", "role-VIEWER" to "on", "groups" to "ops")).body()
-        assertTrue(created.contains("<td>bob</td><td>viewer, operator</td><td>ops</td>") || created.contains("<td>bob</td><td>operator, viewer</td><td>ops</td>"), created)
+        assertTrue(created.contains("<strong>bob</strong>") && created.contains("<span class=\"tag\">viewer</span>") && created.contains("<span class=\"tag\">operator</span>") && created.contains("<span class=\"tag\">ops</span>"), created)
 
         val answer = admin.post("/users/${idOf("bob")}/tokens", mapOf("label" to "laptop", "hours" to "1")).body()
         val token = Regex("<code>([^<]+)</code> \\(shown once").find(answer)!!.groupValues[1]
@@ -80,7 +80,7 @@ class WebUsersTest {
         assertTrue(admin.post("/users", mapOf("name" to "")).body().contains("class=\"error\""))
         assertTrue(admin.post("/users", mapOf("name" to "x", "groups" to "nope")).body().contains("unknown group"))
         assertTrue(admin.post("/users/${idOf("vera")}/tokens", mapOf("hours" to "abc")).body().contains("number of hours"))
-        assertFalse(admin.post("/users/${idOf("vera")}/delete").body().contains("<td>vera</td>"))
+        assertFalse(admin.post("/users/${idOf("vera")}/delete").body().contains("<strong>vera</strong>"))
     }
 
     @Test

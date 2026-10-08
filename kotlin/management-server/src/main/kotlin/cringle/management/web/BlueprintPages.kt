@@ -165,7 +165,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val snapshot = try {
             catalog.snapshot()
         } catch (e: Exception) {
-            return html(h("<h1>Blueprint {}</h1>", draft.name), notice(describe(e)))
+            return html(pageHeader("Blueprint ${draft.name}", "", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")), notice(describe(e)))
         }
         val blueprint = blueprintOf(draft) ?: Blueprint(draft.name, emptyList(), emptyList())
         val positions = draft.content.jsonObject["ui"]?.jsonObject?.get("positions")?.jsonObject.orEmpty().mapValues { (_, p) -> p.jsonArray[0].jsonPrimitive.content.toDouble() to p.jsonArray[1].jsonPrimitive.content.toDouble() }
@@ -192,7 +192,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)
         val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) }
         return html(
-            h("<h1>Blueprint {}</h1>", draft.name),
+            pageHeader("Blueprint ${draft.name}", "Add blocks from the left, connect an output to an input; the server checks every connection.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a><a class=\"btn\" href=\"/deployments\">Deployments</a>")),
             if (kept > 0) h("<p class=\"info\">{} tethers (to other engines or services) are not drawn; they are kept as they are when you save.</p>", kept) else Html(""),
             h(
                 "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\">",
@@ -202,11 +202,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             snapshot.plugins.flatMap { p -> p.manifest.blocks.map { b -> h("<button type=\"button\" data-block=\"{}/{}\" title=\"{}\">{}</button>", p.manifest.name, b.name, p.manifest.name, b.name) } },
             raw("</aside><div id=\"drawflow\"></div><aside id=\"properties\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside></div>"),
             raw("<div id=\"blueprint-meta\">"),
-            h("<label>Version <input id=\"version\" value=\"{}\" size=\"10\"></label> <label>Roles of the fabric <input id=\"roles\" value=\"{}\" placeholder=\"role, role\"></label>", draft.version, roles),
-            h("<label>Provided services (service=block.port, one per line)<br><textarea id=\"provides\" rows=\"3\" cols=\"50\">{}</textarea></label>", provides),
+            field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
+            field("Roles of the fabric", h("<input id=\"roles\" value=\"{}\" placeholder=\"role, role\">", roles), "engines with all these roles run it"),
+            field("Provided services", h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides), "service=block.port, one per line"),
             h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
-            if (canSave) raw(" <button type=\"button\" id=\"save-blueprint\">Save draft</button>") else Html(""),
-            raw("</div><div id=\"result\"></div><p><a href=\"/drafts\">Back to the drafts</a> &middot; <a href=\"/deployments\">Deployments</a></p>"),
+            if (canSave) raw("<button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button>") else Html(""),
+            raw("</div><div id=\"result\"></div>"),
         )
     }
 

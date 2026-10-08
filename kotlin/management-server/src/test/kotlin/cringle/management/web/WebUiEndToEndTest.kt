@@ -37,7 +37,7 @@ class WebUiEndToEndTest : ServiceTestBase() {
         val ui = WebTestClient(server.port, core.identity.publicKeyFingerprint).login(token)
 
         // a user for the operations team, with a token that works
-        assertTrue(ui.post("/users", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<td>ops</td>"))
+        assertTrue(ui.post("/users", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<strong>ops</strong>"))
         val opsToken = Regex("<code>([^<]+)</code> \\(shown once").find(ui.post("/users/${users.listUsers().first { it.user.name == "ops" }.user.id}/tokens", mapOf("label" to "e2e")).body())!!.groupValues[1]
         WebTestClient(server.port, core.identity.publicKeyFingerprint).login(opsToken)
 
@@ -74,7 +74,7 @@ class WebUiEndToEndTest : ServiceTestBase() {
         val metrics = ui.get("/metrics/list").body()
         assertTrue(metrics.contains(fabric) && metrics.contains("e-a"), metrics)
         val logs = ui.get("/logs/list?fabric=$fabric&limit=50").body()
-        assertTrue(logs.contains("<table") && !logs.contains("class=\"error\""), logs)
+        assertTrue((logs.contains("<table") || logs.contains("No log lines")) && !logs.contains("class=\"error\""), logs)
         val partitions = ui.get("/dwh/list").body()
         assertTrue(partitions.contains("<td>$fabric</td><td>tether</td>"), partitions)
 
