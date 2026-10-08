@@ -75,7 +75,10 @@ public class WebServer(
         DeploymentPages(core).register(this)
         users?.let { UserPages(it).register(this) }
         TrustPackagePages(core).register(this)
-        SchemaPages(core, DraftStore(core.dataDirectory.resolve("drafts"))).register(this)
+        val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
+        val blueprints = BlueprintPages(core, drafts)
+        SchemaPages(core, drafts, blueprints).register(this)
+        blueprints.register(this)
     }
 
     private fun sslContext(): SSLContext {

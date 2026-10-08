@@ -22,7 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * carries the schema document and nothing else. The editor is a form (Alpine.js holds the rows); the server turns the form into the document ([SchemaForm]),
  * validates it with the parser of the schema module and shows the document and the problems with their path.
  */
-internal class SchemaPages(private val core: ManagementCore, private val drafts: DraftStore) {
+internal class SchemaPages(private val core: ManagementCore, private val drafts: DraftStore, private val blueprints: BlueprintPages) {
     private val pretty = Json { prettyPrint = true }
 
     fun register(web: WebServer) {
@@ -36,7 +36,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
                 val kind = req.form["kind"].orEmpty()
                 val name = req.form["name"].orEmpty().trim()
                 if (drafts.load(kind, name) != null) throw ManagementException(io.grpc.Status.Code.ALREADY_EXISTS, "the $kind draft '$name' exists")
-                drafts.save(kind, name, "1.0.0", if (kind == "schema") SchemaForm.toDocument("""{"namespace": "", "types": []}""") else JsonObject(emptyMap()))
+                drafts.save(kind, name, "1.0.0", if (kind == "schema") SchemaForm.toDocument("""{"namespace": "", "types": []}""") else blueprints.emptyContent(name))
             }
             fragment(list(req.session!!, error, null))
         }
@@ -83,7 +83,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
             h(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}{}</td></tr>",
                 d.kind, d.name, d.version, d.revision,
-                if (d.kind == "schema") h("<a href=\"/schemas/{}\">Edit</a> ", d.name) else Html(""),
+                h("<a href=\"/{}/{}\">Edit</a> ", if (d.kind == "schema") "schemas" else "blueprints", d.name),
                 button(session, Permission.OPERATE, "Publish", "$base/publish", "Publish ${d.kind} ${d.name} ${d.version} to the repository?"),
                 button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete the draft ${d.name}?"),
             )
@@ -91,14 +91,14 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val form = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"innerHTML\"><select name=\"kind\"><option value=\"schema\">schema</option></select> <input name=\"name\" placeholder=\"name, e.g. acme-orders\" required> <button>Create draft</button></form>")
+            raw("<form hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"innerHTML\"><select name=\"kind\"><option value=\"schema\">schema</option><option value=\"project\">project (blueprint)</option></select> <input name=\"name\" placeholder=\"name, e.g. acme-orders\" required> <button>Create draft</button></form>")
         }
         return html(notice(error), info(done), raw("<table><tr><th>Kind</th><th>Name</th><th>Version</th><th>Revision</th><th></th></tr>"), rows, raw("</table>"), form)
     }
 
     private suspend fun publish(kind: String, name: String): String {
         val draft = drafts.load(kind, name) ?: throw ManagementException(io.grpc.Status.Code.NOT_FOUND, "no $kind draft '$name'")
-        if (kind != "schema") throw ManagementException(io.grpc.Status.Code.UNIMPLEMENTED, "project drafts are published by the blueprint editor")
+        if (kind == "project") return blueprints.publish(draft)
         val text = pretty.encodeToString(JsonObject.serializer(), draft.content.jsonObject)
         val document = try {
             SchemaParser.parse(text, "draft $name")

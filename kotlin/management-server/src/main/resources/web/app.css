@@ -18,3 +18,13 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .error { color: var(--err); }
 code { font-size: 13px; word-break: break-all; }
 .info { color: #1a7f37; }
+#blueprint-editor { display: grid; grid-template-columns: 12rem 1fr 18rem; gap: .6rem; min-height: 28rem; }
+#blueprint-editor aside { border: 1px solid var(--line); border-radius: 4px; padding: .5rem; overflow: auto; }
+#palette button { display: block; width: 100%; margin-bottom: .3rem; text-align: left; }
+#drawflow { border: 1px solid var(--line); border-radius: 4px; height: 28rem; background: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; }
+#drawflow .drawflow-node { background: var(--bg); color: var(--fg); border: 1px solid var(--accent); width: 190px; }
+#drawflow .drawflow-node small { display: block; color: var(--muted); }
+#drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs { width: 0; }
+textarea.invalid { border-color: var(--err); }
+#blueprint-meta { margin-top: .6rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+@media (max-width: 800px) { #blueprint-editor { grid-template-columns: 1fr; } }
