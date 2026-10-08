@@ -44,8 +44,6 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 - Das Plugin wird **nur über Maven Local** verteilt, Version `0.0.0-SNAPSHOT` (Issue #56).
 - `cringlePublish` nutzt `RepositoryClient` direkt, löst Adresse und Token wie das CLI auf und läuft nie automatisch mit `build`. `cringlePackage` hängt von `cringleValidate` ab. Die Option heißt `--dryRun`. Bei `--debug` darf das Token im gRPC-Header-Dump stehen.
 
-- **Tests: zwei Suiten (#133, #134):** `./gradlew build` führt nur die schnelle Suite aus. Langsame Tests (Prozesse, Netzwerk, Gradle-TestKit, Distribution) tragen `@Tag("integration")` und laufen mit `integrationTest`; ein Test, der einen Prozess startet, das Netzwerk nutzt, einen Gradle-Build ausführt oder 5 s oder länger braucht, wird so getaggt. Vor dem Merge, im Release und in der CI gilt `./gradlew build integrationTest`.
-
 ## Auslieferung
 
 - Ein gemeinsames Release-Archiv je Plattform, keine mitgelieferte JRE (JDK 21), kein Code-Signing. Installer als Skripte (Linux: systemd, Windows: PowerShell mit WinSW), Updates manuell (Issues #57 bis #60).
