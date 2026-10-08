@@ -7,6 +7,7 @@ The ManagementServer serves a web interface next to its gRPC API (Architecture 7
 | htmx | 2.0.4 | 0BSD |
 | Alpine.js | 3.14.8 | MIT |
 | Drawflow | 0.0.60 | MIT |
+| idiomorph (htmx extension `morph`) | 0.8.0 | 0BSD |
 
 To update one: fetch the package from the npm registry (`npm pack <name>@<version>`), copy the file from its `dist/` folder over the one in `vendor/`, and change this table and `NOTICE`.
 
@@ -177,3 +178,12 @@ Without a page:
 | `cringle cert renew` | renews the certificate files of the local home; no server involved |
 | `cringle self-update` | updates the installation of the command line tool |
 | `cringle shell` | the interactive mode of the command line tool; the web interface is the interactive way there |
+
+## How the lists refresh (#242)
+
+The lists (`#list`) refresh every 5 seconds, and an action answers with the new list. Two things keep that from getting in the way:
+
+- **Morphing:** the new HTML is not put in place of the old one but merged into it (`hx-swap="morph:innerHTML"`, the htmx extension `morph`, idiomorph). What did not change stays: the DOM element, the focus, the scroll position, the text selection.
+- **Waiting while you work:** the polling is `hx-trigger="every 5s [cringleIdle()]"`. `cringleIdle()` (in `app.js`) is false while a field in the list has the focus, a `<details>` in it is open (the `Tags` panel, an engine on the metrics page, the tokens of a user), or a field differs from what it had when it was rendered (text typed, an option or a checkbox changed, a file chosen). Then the refresh is paused and a hint "Refresh paused while you edit" with a *Refresh now* link shows. When the field is empty again, closed or submitted, the refresh goes on.
+
+A page that adds a list follows the same rules: build it with `section(...)`, give every `hx-post` the target `#list` and the swap `morph:innerHTML`, and keep state of the user in the DOM (fields, `<details>`), not in Alpine state inside the swapped fragment. `WebUiRefreshTest` checks the attributes of the pages; the behaviour in the browser was checked with Playwright (typing, an open `Tags` panel and an expanded engine survive 7 seconds; an idle list still refreshes; an action updates the list).

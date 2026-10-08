@@ -91,7 +91,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val form = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"innerHTML\"><select name=\"kind\"><option value=\"schema\">schema</option><option value=\"project\">project (blueprint)</option></select> <input name=\"name\" placeholder=\"name, e.g. acme-orders\" required> <button>Create draft</button></form>")
+            raw("<form hx-post=\"/drafts\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><select name=\"kind\"><option value=\"schema\">schema</option><option value=\"project\">project (blueprint)</option></select> <input name=\"name\" placeholder=\"name, e.g. acme-orders\" required> <button>Create draft</button></form>")
         }
         return html(notice(error), info(done), raw("<table><tr><th>Kind</th><th>Name</th><th>Version</th><th>Revision</th><th></th></tr>"), rows, raw("</table>"), form)
     }
@@ -126,7 +126,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
             h("<h1>Schema {}</h1>", draft.name),
             raw("<datalist id=\"standard-types\"><option>cringle.std/String</option><option>cringle.std/Boolean</option><option>cringle.std/Int</option><option>cringle.std/Double</option><option>cringle.std/Bytes</option><option>cringle.std/Timestamp</option><option>cringle.std/Empty</option><option>cringle.std/Error</option></datalist>"),
             h(
-                "<form id=\"editor\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"innerHTML\">",
+                "<form id=\"editor\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
                 data, base,
             ),
             raw(
@@ -146,7 +146,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
 </div></fieldset></template>
 <button type="button" @click="types.push({name: '', kind: 'record', fields: [], values: ''}); ${'$'}dispatch('cringle-changed')">Add type</button>""",
             ),
-            if (canSave) h("<button type=\"button\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"innerHTML\">Save draft</button>", base) else Html(""),
+            if (canSave) h("<button type=\"button\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
             raw("</form><div id=\"preview\"></div><p><a href=\"/drafts\">Back to the drafts</a></p>"),
         )
     }

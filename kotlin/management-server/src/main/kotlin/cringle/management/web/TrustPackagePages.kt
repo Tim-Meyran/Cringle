@@ -33,7 +33,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 val (host, port) = hostPort(address)
                 val actual = TlsHelper.probeServerFingerprint(host, port)
                 confirm = h(
-                    "<form hx-post=\"/trust/routers\" hx-target=\"#list\" hx-swap=\"innerHTML\"><p>The router at <strong>{}</strong> presents the key <code>{}</code>. Check it with the operator of that router.</p><input type=\"hidden\" name=\"address\" value=\"{}\"><input type=\"hidden\" name=\"fingerprint\" value=\"{}\"><button>Trust this router</button></form>",
+                    "<form hx-post=\"/trust/routers\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><p>The router at <strong>{}</strong> presents the key <code>{}</code>. Check it with the operator of that router.</p><input type=\"hidden\" name=\"address\" value=\"{}\"><input type=\"hidden\" name=\"fingerprint\" value=\"{}\"><button>Trust this router</button></form>",
                     address, actual, address, actual,
                 )
             }
@@ -102,7 +102,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 if (!admin || it.origin.isNotEmpty()) {
                     Html("")
                 } else {
-                    h("<form hx-post=\"/trust/revoke\" hx-target=\"#list\" hx-swap=\"innerHTML\" hx-confirm=\"Revoke the trust in {}?\"><input type=\"hidden\" name=\"fingerprint\" value=\"{}\"><button>Revoke</button></form>", it.name, it.fingerprint)
+                    h("<form hx-post=\"/trust/revoke\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\" hx-confirm=\"Revoke the trust in {}?\"><input type=\"hidden\" name=\"fingerprint\" value=\"{}\"><button>Revoke</button></form>", it.name, it.fingerprint)
                 },
             )
         }
@@ -111,7 +111,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 h(
                     "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                     it.address, it.cachedEngines, it.lastError,
-                    if (!admin) Html("") else h("<form hx-post=\"/trust/routers/remove\" hx-target=\"#list\" hx-swap=\"innerHTML\" hx-confirm=\"Disconnect {}?\"><input type=\"hidden\" name=\"address\" value=\"{}\"><button>Disconnect</button></form>", it.address, it.address),
+                    if (!admin) Html("") else h("<form hx-post=\"/trust/routers/remove\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\" hx-confirm=\"Disconnect {}?\"><input type=\"hidden\" name=\"address\" value=\"{}\"><button>Disconnect</button></form>", it.address, it.address),
                 )
             }
         } catch (e: Exception) {
@@ -121,8 +121,8 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             Html("")
         } else {
             raw(
-                "<h2>Trust a router</h2><form hx-post=\"/trust/probe\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"address\" placeholder=\"router host:port\" required> <button>Show its key</button></form>" +
-                    "<h2>Trust a component</h2><form hx-post=\"/trust/components\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"fingerprint\" placeholder=\"fingerprint (64 hex characters)\" size=\"40\" required> <input name=\"name\" placeholder=\"name\" required> <select name=\"kind\"><option>COMPONENT</option><option>SERVER</option></select> <input name=\"address\" placeholder=\"host:port (optional)\"> <button>Trust</button></form>",
+                "<h2>Trust a router</h2><form hx-post=\"/trust/probe\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"address\" placeholder=\"router host:port\" required> <button>Show its key</button></form>" +
+                    "<h2>Trust a component</h2><form hx-post=\"/trust/components\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"fingerprint\" placeholder=\"fingerprint (64 hex characters)\" size=\"40\" required> <input name=\"name\" placeholder=\"name\" required> <select name=\"kind\"><option>COMPONENT</option><option>SERVER</option></select> <input name=\"address\" placeholder=\"host:port (optional)\"> <button>Trust</button></form>",
             )
         }
         return html(
@@ -141,7 +141,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 if (plugin) "plugin" else "project", p.name, p.version, p.sizeBytes, if (plugin) p.trust.pretty().removePrefix("plugin_trust_").removePrefix("trust_") else "",
                 if (plugin && session.can(Permission.ADMINISTER)) {
                     h(
-                        "<form hx-post=\"/packages/{}/trust\" hx-target=\"#list\" hx-swap=\"innerHTML\"><select name=\"trust\"><option>trusted</option><option>untrusted</option></select> <button>Set trust (all versions)</button></form>",
+                        "<form hx-post=\"/packages/{}/trust\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><select name=\"trust\"><option>trusted</option><option>untrusted</option></select> <button>Set trust (all versions)</button></form>",
                         p.name,
                     )
                 } else {
@@ -152,7 +152,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         val upload = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<h2>Publish a package</h2><form hx-post=\"/packages/upload\" hx-encoding=\"multipart/form-data\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input type=\"file\" name=\"file\" required> <button>Publish</button></form>")
+            raw("<h2>Publish a package</h2><form hx-post=\"/packages/upload\" hx-encoding=\"multipart/form-data\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"file\" name=\"file\" required> <button>Publish</button></form>")
         }
         return html(notice(error), info(done), raw("<table><tr><th>Kind</th><th>Name</th><th>Version</th><th>Bytes</th><th>Trust</th><th></th></tr>"), rows, raw("</table>"), upload)
     }

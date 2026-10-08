@@ -1,4 +1,33 @@
 // Own helpers of the WebUI; the page logic is in htmx attributes and Alpine x-data.
+// The lists refresh themselves (hx-trigger "every 5s [cringleIdle()]"), morphing the new HTML into the old. They wait while the user is working in a
+// list: a field has the focus, a <details> is open, or a field differs from what it had when it was rendered (text typed, an option changed).
+window.cringleIdle = function () {
+  var list = document.getElementById('list');
+  if (!list) return true;
+  var active = document.activeElement;
+  if (active && list.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return false;
+  if (list.querySelector('details[open]')) return false;
+  var fields = list.querySelectorAll('input, textarea, select');
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    if (f.tagName === 'SELECT') {
+      for (var j = 0; j < f.options.length; j++) if (f.options[j].selected !== f.options[j].defaultSelected) return false;
+    } else if (f.type === 'checkbox' || f.type === 'radio') {
+      if (f.checked !== f.defaultChecked) return false;
+    } else if (f.type === 'file') {
+      if (f.files && f.files.length > 0) return false;
+    } else if (f.type !== 'hidden' && f.value !== f.defaultValue) {
+      return false;
+    }
+  }
+  return true;
+};
+// the hint "refresh paused while you edit" follows the same rule
+setInterval(function () {
+  var hint = document.getElementById('paused');
+  if (hint) hint.hidden = window.cringleIdle();
+}, 1000);
+
 // htmx reports a request that fails at the network or with a status >= 400 as an event; show the answer of the server inline.
 document.addEventListener('htmx:responseError', function (event) {
   var target = event.detail.target;
@@ -152,7 +181,7 @@ document.addEventListener('htmx:responseError', function (event) {
   if (save) {
     save.addEventListener('click', function () {
       htmx.ajax('POST', host.dataset.saveUrl, {
-        source: host, target: '#result', swap: 'innerHTML',
+        source: host, target: '#result', swap: 'morph:innerHTML',
         values: {
           graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
           provides: document.getElementById('provides').value, roles: document.getElementById('roles').value,

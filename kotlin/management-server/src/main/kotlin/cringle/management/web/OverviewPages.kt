@@ -102,7 +102,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         val form = if (!session.can(Permission.ADMINISTER)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/machines\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"id\" placeholder=\"machine id\" required> <input name=\"address\" placeholder=\"daemon host:port\" required> <button>Add machine</button></form>")
+            raw("<form hx-post=\"/machines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"id\" placeholder=\"machine id\" required> <input name=\"address\" placeholder=\"daemon host:port\" required> <button>Add machine</button></form>")
         }
         return html(notice(message), raw("<table><tr><th>Machine</th><th>Daemon</th><th>State</th><th>Last error</th><th></th></tr>"), rows, raw("</table>"), form)
     }
@@ -123,7 +123,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         val form = if (!session.can(Permission.OPERATE)) {
             Html("")
         } else {
-            raw("<form hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"machine\" placeholder=\"machine id\" required> <input name=\"id\" placeholder=\"engine id (optional)\"> <label><input type=\"checkbox\" name=\"autostart\"> autostart</label> <button>Create engine</button></form>")
+            raw("<form hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"machine\" placeholder=\"machine id\" required> <input name=\"id\" placeholder=\"engine id (optional)\"> <label><input type=\"checkbox\" name=\"autostart\"> autostart</label> <button>Create engine</button></form>")
         }
         return html(notice(message), raw("<table><tr><th>Machine</th><th>Engine</th><th>State</th><th>Roles</th><th>Labels</th><th></th></tr>"), rows, raw("</table>"), form)
     }
@@ -133,7 +133,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             Html("")
         } else {
             h(
-                "<details><summary>Tags</summary><form hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"innerHTML\"><input name=\"roles\" value=\"{}\" placeholder=\"roles, comma separated\"> <input name=\"labels\" value=\"{}\" placeholder=\"key=value, ...\"> <button>Save</button></form></details>",
+                "<details><summary>Tags</summary><form hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"roles\" value=\"{}\" placeholder=\"roles, comma separated\"> <input name=\"labels\" value=\"{}\" placeholder=\"key=value, ...\"> <button>Save</button></form></details>",
                 base, roles.joinToString(","), labels.entries.joinToString(",") { "${it.key}=${it.value}" },
             )
         }
