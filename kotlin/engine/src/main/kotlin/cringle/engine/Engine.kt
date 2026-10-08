@@ -151,7 +151,7 @@ public class Engine private constructor(
                         FabricState.RUNNING -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_RUNNING
                         FabricState.STOPPING -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_STOPPING
                         FabricState.STOPPED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_STOPPED
-                        FabricState.FAILED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_FAILED
+                        FabricState.FAILED, FabricState.MIGRATION_FAILED -> FabricLifecycleState.FABRIC_LIFECYCLE_STATE_FAILED
                     },
                 )
                 .build()
@@ -490,7 +490,7 @@ public class Engine private constructor(
                 FabricState.RUNNING -> FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING
                 FabricState.STOPPING -> FabricRuntimeState.FABRIC_RUNTIME_STATE_STOPPING
                 FabricState.STOPPED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_STOPPED
-                FabricState.FAILED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED
+                FabricState.FAILED, FabricState.MIGRATION_FAILED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED
             },
         )
         .addAllBlocks(

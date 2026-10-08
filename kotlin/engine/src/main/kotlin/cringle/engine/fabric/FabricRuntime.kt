@@ -16,6 +16,7 @@ import cringle.schema.SchemaRegistry
 import cringle.schema.SchemaValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -75,6 +76,8 @@ public class FabricSpec(
     public val onClose: AutoCloseable? = null,
     /** Records the tethers of the fabric in the data warehouse (#193); closed with the fabric. */
     public val recorder: cringle.engine.dwh.TetherRecorder? = null,
+    /** Migrates the persistent data folders before the blocks start (#258); `null` if the fabric has none. */
+    public val migrations: DataMigrations? = null,
 )
 
 /**
@@ -107,6 +110,8 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     @Volatile private var phase = FabricState.CREATED
 
     @Volatile private var startFailure: String? = null
+
+    @Volatile private var migrationFailure: String? = null
 
     @Volatile private var currentExecution: String? = null
 
@@ -158,12 +163,13 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     private fun computeStatus(): FabricStatus {
         val blocks = hosts.map { BlockStatus(it.id, it.state, it.restarts, it.lastError) }
         val state = when {
+            migrationFailure != null -> FabricState.MIGRATION_FAILED
             startFailure != null -> FabricState.FAILED
             phase == FabricState.RUNNING || phase == FabricState.FAILED ->
                 if (blocks.any { it.state == BlockState.FAILED }) FabricState.FAILED else FabricState.RUNNING
             else -> phase
         }
-        return FabricStatus(spec.id, spec.blueprint.name, state, blocks, startFailure)
+        return FabricStatus(spec.id, spec.blueprint.name, state, blocks, migrationFailure ?: startFailure)
     }
 
     private fun publish() {
@@ -197,10 +203,22 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
                 }
             }
             startFailure = null
+            migrationFailure = null
             phase = FabricState.STARTING
             publish()
             try {
                 spec.paths.create(entries.map { it.instance.id })
+                spec.migrations?.let { m ->
+                    try {
+                        withContext(Dispatchers.IO) { m.run { log(FabricLogger.Level.INFO, it) } }
+                    } catch (e: MigrationFailedException) {
+                        log(FabricLogger.Level.ERROR, e.message ?: "migration failed")
+                        migrationFailure = e.message
+                        phase = FabricState.STOPPED
+                        publish()
+                        throw FabricException("fabric '${spec.id}' is not started: ${e.message}", e)
+                    }
+                }
                 log(FabricLogger.Level.INFO, "starting fabric '${spec.id}' (blueprint '${spec.blueprint.name}')")
                 // The tethers are open before the first block runs: a message a block sends in start() finds the tether
                 // open, and a block that is not running yet is handled by the delivery policy of its tethers.
@@ -216,6 +234,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
                 publish()
                 throw e
             } catch (e: Exception) {
+                if (migrationFailure != null) throw e
                 val message = "fabric '${spec.id}' cannot be started: ${e.message}"
                 startFailure = message
                 network?.close()

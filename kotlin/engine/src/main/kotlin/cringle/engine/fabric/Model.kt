@@ -36,6 +36,9 @@ public enum class FabricState {
 
     /** A block failed for good, or the fabric could not be started. */
     FAILED,
+
+    /** A migration of persisted data failed (step and message in the failure); the fabric is stopped, the backup is in place, and a start retries it. */
+    MIGRATION_FAILED,
 }
 
 /** Lifecycle states of a block inside a fabric. */
