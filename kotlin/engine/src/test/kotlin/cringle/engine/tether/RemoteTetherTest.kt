@@ -52,6 +52,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -60,6 +61,7 @@ import org.junit.jupiter.api.io.TempDir
  * Tethers between engines (#146): two engines with their own generated identity, one fabric on each, and a `MESSAGE`
  * tether between them over mutual TLS. Both fabrics name each other, as the blueprints of a real deployment do.
  */
+@Tag("integration")
 class RemoteTetherTest : RemoteTetherTestBase() {
     @Test
     fun hundredMessagesArriveInOrderAndEqual(): Unit = runBlocking {

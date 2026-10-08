@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.io.TempDir
  * Like `PublishFunctionalTest` no test here leaves the loopback interface or reads the profile of the user who runs
  * the build: the Cringle home is a folder of the build directory.
  */
+@Tag("integration")
 class ProjectPublishFunctionalTest {
 
     @TempDir

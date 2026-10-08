@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -42,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir
  * that does not print a stack trace, that runs in a forked process (a build that gets an environment of its own can
  * only be sure of it outside the daemon) and that keeps its output out of the log of the build.
  */
+@Tag("integration")
 class PublishFunctionalTest {
 
     @TempDir

@@ -39,10 +39,12 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /** Deploys a project from a real Repository onto real Engine processes. */
+@Tag("integration")
 class DeploymentTest {
     private lateinit var dir: Path
     private lateinit var home: Path

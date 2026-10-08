@@ -35,9 +35,11 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 
 /** Runs the commands against a real ManagementServer with user management, a Daemon, a Repository and a Router. */
+@Tag("integration")
 class CliTest {
     private lateinit var dir: Path
     private lateinit var home: Path

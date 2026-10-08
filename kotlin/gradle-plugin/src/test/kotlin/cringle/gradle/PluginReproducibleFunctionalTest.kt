@@ -3,6 +3,7 @@
 package cringle.gradle
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -13,6 +14,7 @@ import java.security.MessageDigest
  * AC 3: the same sources built twice, the second time in a copy of the project in another directory, produce
  * byte-identical packages.
  */
+@Tag("integration")
 class PluginReproducibleFunctionalTest {
 
     @TempDir

@@ -5,6 +5,7 @@ package cringle.gradle
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -19,6 +20,7 @@ import java.nio.file.Path
  * results Gradle writes at `build/test-results/test/TEST-acme.orders.OrdersBlockTest.xml` and asserts that the root
  * `<testsuite>` element reports `failures="0"` and `errors="0"`.
  */
+@Tag("integration")
 class SamplePluginTestFunctionalTest {
 
     @TempDir

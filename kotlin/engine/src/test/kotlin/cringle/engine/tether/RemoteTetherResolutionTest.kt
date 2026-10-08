@@ -25,6 +25,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -182,6 +183,7 @@ class RemoteTetherResolutionTest {
     }
 
     @Test
+    @Tag("integration")
     fun aLostConnectionInvalidatesTheCacheAndTheTargetIsFoundAgainUnderItsNewAddress(): Unit = runBlocking {
         val clock = ManualClock()
         val a = identity("a")

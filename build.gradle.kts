@@ -48,8 +48,19 @@ subprojects {
         add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:1.11.4")
     }
 
-    tasks.withType<Test> {
-        useJUnitPlatform()
+    // The default `test` task is the fast suite; the tests tagged "integration" (real processes, ports, nested Gradle builds) run in `integrationTest`.
+    tasks.named<Test>("test") {
+        useJUnitPlatform { excludeTags("integration") }
+    }
+
+    tasks.register<Test>("integrationTest") {
+        description = "Runs the tests tagged \"integration\" (real processes, ports, nested Gradle builds)."
+        group = "verification"
+        val test = project.the<SourceSetContainer>()["test"]
+        testClassesDirs = test.output.classesDirs
+        classpath = test.runtimeClasspath
+        useJUnitPlatform { includeTags("integration") }
+        shouldRunAfter(tasks.named("test"))
     }
 }
 

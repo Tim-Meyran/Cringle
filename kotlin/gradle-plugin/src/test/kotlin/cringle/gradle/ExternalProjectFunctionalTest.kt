@@ -10,6 +10,7 @@ import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -30,6 +31,7 @@ import kotlin.io.path.writeText
  * written, which the runner passes as `-Dmaven.repo.local`. Nothing can be downloaded, so the plugin can only come
  * from that folder, and no test of this build ever writes to the real `~/.m2`.
  */
+@Tag("integration")
 class ExternalProjectFunctionalTest {
 
     @TempDir
