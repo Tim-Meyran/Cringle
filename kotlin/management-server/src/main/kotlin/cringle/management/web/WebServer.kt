@@ -71,6 +71,7 @@ public class WebServer(
         server.executor = executor
         server.createContext("/") { exchange -> runCatching { handle(exchange) }.onFailure { fail(exchange, it) } }
         registerFoundation()
+        OverviewPages(core).register(this)
     }
 
     private fun sslContext(): SSLContext {
@@ -127,6 +128,10 @@ public class WebServer(
             WebResponse.page(200, layout.page("Dashboard", r.session, content, openMode = users == null))
         }
     }
+
+    /** A full page for [request] with [content] in the frame. */
+    public fun render(title: String, request: WebRequest, content: Html): WebResponse =
+        WebResponse.page(200, layout.page(title, request.session, content, openMode = users == null))
 
     private fun loginPage(error: String?): Html {
         val content = html(
