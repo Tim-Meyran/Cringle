@@ -24,12 +24,16 @@ Gradle 8.12.1, JDK 21, one root build (`build.gradle.kts`, `settings.gradle.kts`
 | You want | Call |
 |---|---|
 | Does one module compile (main and tests)? | `./gradlew :engine:compileKotlin :engine:compileTestKotlin --console=plain --no-daemon` |
-| All tests of one module | `./gradlew :engine:test --console=plain --no-daemon` |
+| Fast tests of one module | `./gradlew :engine:test --console=plain --no-daemon` |
+| Integration tests of one module (processes, network, Gradle builds; tagged `integration`) | `./gradlew :engine:integrationTest --console=plain --no-daemon` |
+| One class of the integration suite | `./gradlew :engine:integrationTest --tests 'cringle.engine.tether.RemoteTetherTest' --console=plain --no-daemon` |
 | One test class | `./gradlew :engine:test --tests 'cringle.engine.PackageCacheTest' --console=plain --no-daemon` |
 | One method or a pattern | `--tests 'cringle.engine.PackageCacheTest.ensureForDeploy*'` |
 | Run tests again that did not change | add `--rerun` to the test task: `./gradlew :engine:test --rerun --console=plain --no-daemon` |
 | Format all files (SPDX header, line ends) | `./gradlew spotlessApply --console=plain --no-daemon`; `spotlessCheck` only checks |
-| The full verification before a pull request | `./gradlew spotlessApply` first, then `./gradlew build --console=plain --no-daemon` (all modules, all tests, spotlessCheck) |
+| The fast build (all modules, fast suite, spotlessCheck) | `./gradlew spotlessApply` first, then `./gradlew build --console=plain --no-daemon` |
+| The integration suite of all modules | `./gradlew integrationTest --console=plain --no-daemon` |
+| The full verification (reviewer, release, CI) | `./gradlew build integrationTest --console=plain --no-daemon` (give it the 10 minutes) |
 | See every failure of a full build, not only the first | add `--continue` |
 | Why did a build fail (more detail) | add `--stacktrace`, or `--info` (with it the output of the tests shows) |
 | The release archives | `./gradlew cringleDist -PreleaseVersion=0.6.0 --console=plain --no-daemon` (`DistributionTest` in `:cli` checks them) |
@@ -46,7 +50,7 @@ Rules for `--tests`: it comes **after** the test task of **one** module (`:engin
 
 1. The last lines: `BUILD SUCCESSFUL in 9s` or `BUILD FAILED`. No such line means the call did not finish.
 2. A failed test prints `Class > method() FAILED` with the first lines of the exception, and `N tests completed, M failed`. Read those lines first, not the whole log.
-3. **A passing test task prints no test counts.** Whether tests really ran, and how many, is in `kotlin/<module>/build/test-results/test/TEST-<class>.xml`:
+3. **A passing test task prints no test counts.** Whether tests really ran, and how many, is in `kotlin/<module>/build/test-results/test/TEST-<class>.xml` (fast suite) or `kotlin/<module>/build/test-results/integrationTest/` (integration suite):
    ```
    grep -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' kotlin/engine/build/test-results/test/*.xml
    grep -l "<failure\|<error" kotlin/*/build/test-results/test/*.xml
@@ -54,7 +58,7 @@ Rules for `--tests`: it comes **after** the test task of **one** module (`:engin
    ```
    The HTML report is `kotlin/<module>/build/reports/tests/test/index.html`.
 4. `> Task :engine:test UP-TO-DATE` or `FROM-CACHE` means the tests did **not** run this time (nothing changed). If you changed a test or production code and it still says so, you ran the wrong module or class; if you want a fresh run, add `--rerun`. `NO-SOURCE` means the module has no tests of that kind.
-5. Count what you ran: say in the pull request which calls you ran and their result lines (for example `./gradlew build` on the final commit: `BUILD SUCCESSFUL`, 538 tests), not "the build passes".
+5. Count what you ran: say in the pull request which calls you ran and their result lines (for example `./gradlew build` on the final commit: `BUILD SUCCESSFUL`, 546 tests; `:engine:integrationTest`: `BUILD SUCCESSFUL`, 40 tests), not "the build passes".
 
 ## Errors you will see
 

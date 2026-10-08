@@ -42,4 +42,4 @@ Propose them to the owner for `decisions.md`; do not change them without asking.
 - Remote tether driver, resolution through the registry with cache and health check, failover (M6).
 - Transitive trust of the management server in the engines of another router is shown by `cringle trust list` (origin = the router) but the management server does not call those engines yet.
 - Isolated (untrusted) blocks and the local IPC tether are deferred (M9).
-- The GitHub workflow `CI` is disabled (billing). The local build replaces it; an agent states the result of `./gradlew build` in the pull request. The two test suites issue (fast default suite and integration suite) is open.
+- The GitHub workflow `CI` is disabled (billing). The local build replaces it; an agent states the results of `./gradlew build` and of `integrationTest` in the pull request; `./gradlew build integrationTest` is the full verification (two suites, #133).

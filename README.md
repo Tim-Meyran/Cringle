@@ -40,11 +40,13 @@ Cringle/
 
 Prerequisites: JDK 21.
 
-To build all modules, run tests, and verify code style:
+To build all modules, run the fast tests, and verify code style:
 
 ```bash
 ./gradlew build
 ```
+
+The slow tests (processes, network, Gradle builds) are tagged `integration` and run with `./gradlew integrationTest`; `./gradlew build integrationTest` is the full verification.
 
 To automatically format source code and apply license headers:
 

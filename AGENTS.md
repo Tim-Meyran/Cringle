@@ -92,7 +92,10 @@ Implement exactly the issue's **Scope**. Anything under **Out of scope** belongs
 ```bash
 ./gradlew spotlessApply --console=plain --no-daemon
 ./gradlew build --console=plain --no-daemon
+./gradlew :<module>:integrationTest --console=plain --no-daemon   # for every module you touch and every module that depends on it
 ```
+
+There are two test suites. `./gradlew build` runs only the fast suite. Tests that start a process, use the network, run a Gradle build or take 5 s or more carry `@Tag("integration")` and run with `integrationTest` (all modules: `./gradlew integrationTest`). The full verification is `./gradlew build integrationTest`.
 
 Run every Gradle command in this form: `./gradlew <task> --console=plain --no-daemon`. Do not redirect or filter the output (no `> file`, no `| tail`, no `nohup`/background run); read the output of the command itself. Test and build output never goes into a file in the project. A successful build ends with `BUILD SUCCESSFUL`, a failed one with `BUILD FAILED`.
 
@@ -105,7 +108,8 @@ Every acceptance criterion needs a test or a documented manual check. Never disa
 When the acceptance criteria are met, do this **without asking**:
 
 ```bash
-./gradlew build --console=plain --no-daemon       # must pass locally, all modules, all tests
+./gradlew build --console=plain --no-daemon       # must pass locally: all modules, fast suite
+./gradlew :<module>:integrationTest --console=plain --no-daemon   # integration suite of every touched module and its dependents
 git push
 gh pr create --base master --title "<issue title> (#<n>)" --body-file <file>   # body: use .github/pull_request_template.md, must contain "Closes #<n>"
 gh issue edit <n> --add-label needs-review --remove-label changes-requested
@@ -127,7 +131,7 @@ gh issue comment <n> --body "PR #<pr> ready for review."
 
 - **Scope discipline.** No refactoring of unrelated code, no renames, no extra features.
 - **Never edit** `docs/Architecture.md` or `docs/decisions.md` as part of an issue. Propose changes in a comment (or in `docs/status.md`, where decisions that are not yet in `decisions.md` are collected).
-- **Merging** is done only by the owner (or a reviewer the owner names), only through `gh pr merge --squash --delete-branch`, and only after `./gradlew build` was green on the final commit and the review found no blocker or major problem. Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
+- **Merging** is done only by the owner (or a reviewer the owner names), only through `gh pr merge --squash --delete-branch`, and only after `./gradlew build integrationTest` was green on the final commit and the review found no blocker or major problem. Never use `--admin`, never merge a pull request whose local build failed or was not run, never push to `master`, and never change branch protection, repository settings, or the CI workflow to make a build pass (unless the issue is about exactly that).
 - **Never** force-push, rewrite published history, commit secrets, keys or tokens, or add dependencies without stating them and their license in the pull request (allowed: Apache-2.0, MIT, BSD, EPL-2.0; ask before adding anything else, in particular any GPL/AGPL/LGPL).
 - **Technical guard rails.** `.claude/settings.json` (Claude Code) and `opencode.json` (opencode) enforce the hard rules above: force-pushes, pushes to `master`, `--admin` merges, repository and branch-protection changes, and edits of `docs/Architecture.md` and `docs/decisions.md` are denied; edits of workflows are confirmed by the user. If an action is denied, do not look for a way around it: stop and tell the user.
 - **No commits to `master`.** Every change goes through a branch and a pull request (`issue/<n>-<slug>` for an issue). Scratch, log and test-output files go to `$TMPDIR` or `build/`, never into the project (`git status` must show none before you commit).
@@ -139,7 +143,7 @@ gh issue comment <n> --body "PR #<pr> ready for review."
 - Kotlin, JDK 21, Gradle with the version catalog; pin versions in `gradle/libs.versions.toml`.
 - Public API of `contract` and other library modules has KDoc. Keep `contract` dependency-free (stdlib and coroutines only).
 - Coroutines for all asynchronous code. Never block a dispatcher thread inside block or tether execution.
-- Tests: JUnit 5; deterministic (no sleeps for synchronization, use test dispatchers or latches); no network access outside `localhost`; generated certificates and temp dirs only, never files from the real `~/.cringle`. Use the `CRINGLE_HOME` override.
+- Tests: JUnit 5; deterministic (no sleeps for synchronization, use test dispatchers or latches); no network access outside `localhost`; generated certificates and temp dirs only, never files from the real `~/.cringle`. Use the `CRINGLE_HOME` override. A test that starts a process, uses the network, runs a Gradle build or takes 5 s or more gets `@Tag("integration")`; all others stay in the fast suite.
 - **TLS in tests:** every connection between components is mutual TLS and there is no unencrypted mode. Tests use `cringle.common.test.TestTls` (test fixtures of `common`, `testFixtures(project(":common"))`) for identities and trust stores, and `cringle.management.test.ManagementTls` (test fixtures of `management-server`) for a management server with daemon, repository and router. A peer without an entry in the trust store is refused at the handshake; test it that way.
 - **Windows and Linux:** tests run on both. Do not create symbolic links in tests (they need a privilege on Windows); use `linkSwitcherFor(Platform.current())` where the self-update needs a link. A test that cannot run on one system uses `@EnabledOnOs` and the pull request says so.
 - Language-independent parts (`proto/`, `spec/`) contain no Kotlin-specific assumptions.
@@ -149,7 +153,7 @@ gh issue comment <n> --body "PR #<pr> ready for review."
 ## Definition of done
 
 - [ ] All acceptance criteria of the issue are met and tested.
-- [ ] `./gradlew build` passes locally on the final commit, and the pull request text states the result.
+- [ ] `./gradlew build` and the `integrationTest` of the touched modules pass locally on the final commit, and the pull request text states both results and the number of tests of each. The reviewer runs `./gradlew build integrationTest` before merging.
 - [ ] Pull request contains `Closes #<n>`, follows the template, and has no unrelated changes.
 - [ ] Findings and follow-ups are written down (issue comment, follow-up issues).
 - [ ] Agent: the pull request is open and the issue has the label `needs-review`.
