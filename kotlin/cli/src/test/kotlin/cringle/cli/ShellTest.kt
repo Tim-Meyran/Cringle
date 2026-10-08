@@ -64,12 +64,46 @@ class ShellTerminalTest {
 
     // --- JLine on a terminal that is made of streams ---
 
+    /**
+     * The keys, and then no more: the stream **waits** until the terminal is closed instead of ending. An input that ends at once lets the terminal
+     * see the end of its input and close before `readLine` has taken the keys (an `EndOfFileException` that depends on timing).
+     */
+    private class KeysThenWait(keys: ByteArray) : java.io.InputStream() {
+        private val data = java.io.ByteArrayInputStream(keys)
+        private val closed = java.util.concurrent.CountDownLatch(1)
+
+        override fun read(): Int {
+            val b = data.read()
+            if (b >= 0) return b
+            closed.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            return -1
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = data.read(b, off, len)
+            if (n > 0) return n
+            closed.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            return -1
+        }
+
+        override fun close() = closed.countDown()
+    }
+
+    private val terminals = ArrayList<org.jline.terminal.Terminal>()
+
+    @org.junit.jupiter.api.AfterEach
+    fun closeTerminals() {
+        terminals.forEach { runCatching { it.close() } }
+        terminals.clear()
+    }
+
     private fun reader(keys: String, history: java.nio.file.Path): org.jline.reader.LineReader {
         val terminal = org.jline.terminal.TerminalBuilder.builder()
             .system(false)
-            .streams(java.io.ByteArrayInputStream(keys.toByteArray()), java.io.ByteArrayOutputStream())
+            .streams(KeysThenWait(keys.toByteArray()), java.io.ByteArrayOutputStream())
             .type("xterm")
             .build()
+        terminals += terminal
         return lineReaderFor(terminal, history)
     }
 
