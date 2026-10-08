@@ -42,6 +42,8 @@ public class Route(
     public val method: String,
     public val pattern: String,
     public val permission: Permission?,
+    /** The largest request body this route accepts; `null`: the limit of the server. */
+    public val maxBodyBytes: Int? = null,
     public val handler: suspend (WebRequest) -> WebResponse,
 ) {
     private val segments = pattern.trim('/').split('/').filter { it.isNotEmpty() }
@@ -62,14 +64,14 @@ public class Router {
     private val routes = ArrayList<Route>()
 
     /** Adds a route. */
-    public fun add(method: String, pattern: String, permission: Permission?, handler: suspend (WebRequest) -> WebResponse): Router {
-        routes += Route(method, pattern, permission, handler)
+    public fun add(method: String, pattern: String, permission: Permission?, maxBodyBytes: Int? = null, handler: suspend (WebRequest) -> WebResponse): Router {
+        routes += Route(method, pattern, permission, maxBodyBytes, handler)
         return this
     }
 
-    public fun get(pattern: String, permission: Permission?, handler: suspend (WebRequest) -> WebResponse): Router = add("GET", pattern, permission, handler)
+    public fun get(pattern: String, permission: Permission?, handler: suspend (WebRequest) -> WebResponse): Router = add("GET", pattern, permission, null, handler)
 
-    public fun post(pattern: String, permission: Permission?, handler: suspend (WebRequest) -> WebResponse): Router = add("POST", pattern, permission, handler)
+    public fun post(pattern: String, permission: Permission?, maxBodyBytes: Int? = null, handler: suspend (WebRequest) -> WebResponse): Router = add("POST", pattern, permission, maxBodyBytes, handler)
 
     /** The match for [method] and [path]: the route and its path variables, or `null`. */
     internal fun find(method: String, path: String): Pair<Route, Map<String, String>>? {
