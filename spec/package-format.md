@@ -74,6 +74,7 @@ leave the directory it belongs to.
 | `blueprints` | string[] | Entry names `blueprints/<name>.json` |
 | `schemas` | string[] | Entry names `schemas/*.json` |
 | `fabrics` | object[] | Fabric config, see section 5 |
+| `processors` | object | Optional `update` and `downgrade` class names; the classes belong to a plugin the project depends on and migrate the project's data folder when the project version changes |
 
 Projects and plugins have **no** JAR list: only plugins carry code.
 

@@ -23,8 +23,23 @@ public enum class PackageKind(public val manifestFile: String, public val jsonNa
     PLUGIN("cringle-plugin.json", "plugin"),
 }
 
-/** Optional plugin processors that migrate persisted state on update or downgrade; values are class names. */
-public data class ProcessorSet(public val update: String? = null, public val downgrade: String? = null)
+/**
+ * Optional processors that migrate persisted state (the data folders of blocks) when a plugin or a project changes its version: [update] runs when the
+ * version goes up, [downgrade] when it goes down. The values are class names (`com.acme.Migrate`) of a `cringle.contract.Processor`. A plugin names classes of
+ * its own jars; a project has no jars, so it names classes of a plugin it depends on. Both are optional.
+ */
+public data class ProcessorSet(public val update: String? = null, public val downgrade: String? = null) {
+    init {
+        for ((key, name) in listOf("update" to update, "downgrade" to downgrade)) {
+            if (name != null) require(CLASS_NAME.matches(name)) { "processors.$key: '$name' is not a class name" }
+        }
+    }
+
+    private companion object {
+        val CLASS_NAME = Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*")
+    }
+}
+
 
 /**
  * Deployment instruction: run [instances] copies of the blueprint named [blueprint] on engines that have all
@@ -58,6 +73,7 @@ public data class ProjectManifest(
     public val blueprints: List<String> = emptyList(),
     public val schemas: List<String> = emptyList(),
     public val fabrics: List<FabricConfig> = emptyList(),
+    public val processors: ProcessorSet = ProcessorSet(),
 )
 
 /** One end of a tether. [index] selects the slot of a VarArg port and must be `null` for plain ports. */

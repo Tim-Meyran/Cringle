@@ -140,6 +140,7 @@ public class TestPluginBuilder(private val name: String, private val version: St
 /** Builds project packages for tests. The result is validated with `packaging` unless disabled. */
 public class TestProjectBuilder(private val name: String, private val version: String = "1.0.0") {
     private val dependencies = LinkedHashMap<String, String>()
+    private var processors = ProcessorSet()
     private val blueprints = ArrayList<Blueprint>()
     private val fabrics = ArrayList<FabricConfig>()
     private val schemas = LinkedHashMap<String, String>()
@@ -160,9 +161,12 @@ public class TestProjectBuilder(private val name: String, private val version: S
     /** Adds a static file as `binaries/<path>`. */
     public fun binary(path: String, content: ByteArray): TestProjectBuilder = also { binaries["binaries/$path"] = content }
 
+    /** Sets the update and downgrade processor class names of the project (classes of a plugin it depends on). */
+    public fun processors(update: String? = null, downgrade: String? = null): TestProjectBuilder = also { processors = ProcessorSet(update, downgrade) }
+
     /** The manifest as built so far. */
     public fun manifest(): ProjectManifest = ProjectManifest(
-        name, version, dependencies.toMap(), blueprints.map { "blueprints/${it.name}.json" }, schemas.keys.toList(), fabrics.toList(),
+        name, version, dependencies.toMap(), blueprints.map { "blueprints/${it.name}.json" }, schemas.keys.toList(), fabrics.toList(), processors,
     )
 
     /**

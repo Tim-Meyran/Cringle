@@ -83,7 +83,7 @@ public object PackageNames {
 /** JSON (de)serialization of manifests and blueprints (`spec/package-format.md`, sections 3 to 6). */
 public object ManifestJson {
     private val pretty = Json { prettyPrint = true }
-    private val projectKeys = setOf("format", "kind", "name", "version", "dependencies", "blueprints", "schemas", "fabrics")
+    private val projectKeys = setOf("format", "kind", "name", "version", "dependencies", "blueprints", "schemas", "fabrics", "processors")
     private val pluginKeys = setOf(
         "format", "kind", "name", "version", "dependencies", "providers", "drivers", "blocks", "libs", "schemas", "processors",
     )
@@ -107,6 +107,7 @@ public object ManifestJson {
             blueprints = JsonReading.stringList(o, "blueprints", "$"),
             schemas = JsonReading.stringList(o, "schemas", "$"),
             fabrics = fabrics,
+            processors = processors(o),
         )
     }
 
@@ -115,11 +116,6 @@ public object ManifestJson {
         val file = PackageKind.PLUGIN.manifestFile
         val o = header(text, file, PackageKind.PLUGIN, pluginKeys)
         val blocks = JsonReading.objectList(o, "blocks", "$").mapIndexed { i, b -> BlockDefinitionJson.fromJson(b, "$.blocks[$i]") }
-        val processors = o["processors"]?.let {
-            val p = JsonReading.obj(it, "$.processors")
-            JsonReading.keys(p, "$.processors", setOf("update", "downgrade"))
-            ProcessorSet(JsonReading.optString(p, "update", "$.processors"), JsonReading.optString(p, "downgrade", "$.processors"))
-        } ?: ProcessorSet()
         return PluginManifest(
             name = name(o, file),
             version = version(o, file),
@@ -129,8 +125,18 @@ public object ManifestJson {
             blocks = blocks,
             libs = JsonReading.stringList(o, "libs", "$"),
             schemas = JsonReading.stringList(o, "schemas", "$"),
-            processors = processors,
+            processors = processors(o),
         )
+    }
+
+    private fun processors(o: JsonObject): ProcessorSet {
+        val p = o["processors"]?.let { JsonReading.obj(it, "$.processors") } ?: return ProcessorSet()
+        JsonReading.keys(p, "$.processors", setOf("update", "downgrade"))
+        return try {
+            ProcessorSet(JsonReading.optString(p, "update", "$.processors"), JsonReading.optString(p, "downgrade", "$.processors"))
+        } catch (e: IllegalArgumentException) {
+            throw PackageFormatException("$.processors", e.message ?: "invalid")
+        }
     }
 
     /** Parses a blueprint file. [file] names the entry in error messages. */
@@ -321,6 +327,15 @@ public object ManifestJson {
                     },
                 ),
             )
+            if (m.processors != ProcessorSet()) {
+                put(
+                    "processors",
+                    buildJsonObject {
+                        m.processors.update?.let { put("update", it) }
+                        m.processors.downgrade?.let { put("downgrade", it) }
+                    },
+                )
+            }
         },
     ) + "\n"
 
