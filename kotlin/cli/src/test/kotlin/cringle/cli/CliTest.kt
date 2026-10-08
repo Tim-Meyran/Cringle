@@ -500,4 +500,40 @@ class CliTest {
         assertEquals(2, cli("dwh", "query", "f1", "flavor", "t").code)
         assertEquals(2, cli("dwh", "query", "f1", "tether").code)
     }
+
+    @Test
+    fun theShellRunsOneCommandPerLineUntilExit() {
+        val session = cli("shell", stdin = "whoami\nmachine list\nexit\nwhoami\n")
+        assertEquals(0, session.code, session.err)
+        assertTrue(session.out.contains("admin"), "the first command ran:\n${session.out}")
+        assertTrue(session.out.contains("no machines"), "the second command ran:\n${session.out}")
+        assertEquals(3, Regex("cringle>").findAll(session.out).count(), "a prompt per line, none after exit:\n${session.out}")
+        assertEquals(1, Regex("name +: admin").findAll(session.out).count(), "the whoami after exit did not run")
+    }
+
+    @Test
+    fun aFailingCommandDoesNotEndTheShell() {
+        val session = cli("shell", stdin = "nonsense\nmachine list --nope\nmachine add\n\nwhoami\n")
+        assertEquals(0, session.code, session.err)
+        assertTrue(session.err.contains("unknown command 'nonsense'"), session.err)
+        assertTrue(session.err.contains("usage: cringle machine add"), session.err)
+        assertTrue(session.out.contains("admin"), "the last command still ran:\n${session.out}")
+    }
+
+    @Test
+    fun theShellAppliesTheGlobalOptionsToEveryCommandAndEndsAtTheEndOfTheInput() {
+        val json = cli("--json", "shell", stdin = "whoami")
+        assertEquals(0, json.code, json.err)
+        assertTrue(json.out.contains("\"name\""), "--json applies to the command:\n${json.out}")
+        assertEquals(0, cli("shell", stdin = "").code, "the end of the input leaves the shell")
+    }
+
+    @Test
+    fun theShellRefusesANestedShellAndAnUnclosedQuote() {
+        val session = cli("shell", stdin = "shell\nmachine add \"m1\nwhoami\n")
+        assertEquals(0, session.code, session.err)
+        assertTrue(session.err.contains("you are in the shell already"), session.err)
+        assertTrue(session.err.contains("is not closed"), session.err)
+        assertTrue(session.out.contains("admin"), session.out)
+    }
 }
