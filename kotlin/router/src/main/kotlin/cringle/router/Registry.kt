@@ -31,10 +31,12 @@ public data class EngineRecord(
     val fingerprint: String = "",
     /** `host:port` of the tether service of the engine (tethers between engines), empty if it has none. */
     val tetherAddress: String = "",
+    /** The numbers of the last heartbeat, learned from a remote router; not persisted. For local engines see [EngineView.vitals]. */
+    val vitals: cringle.common.v1.EngineMetrics? = null,
 )
 
-/** An [EngineRecord] with its current reachability and last heartbeat. */
-public data class EngineView(val record: EngineRecord, val reachability: Reachability, val lastHeartbeat: Instant?)
+/** An [EngineRecord] with its current reachability, last heartbeat and the numbers it carried (memory only, #190). */
+public data class EngineView(val record: EngineRecord, val reachability: Reachability, val lastHeartbeat: Instant?, val vitals: cringle.common.v1.EngineMetrics? = record.vitals)
 
 /** A known remote router with the engines cached from it. */
 public data class RemoteRouterRecord(
@@ -114,25 +116,32 @@ public class Registry(
     public fun unregister(id: String): Boolean = synchronized(lock) {
         val removed = engines.remove(id) != null
         heartbeats.remove(id)
+        vitalsById.remove(id)
         if (removed) changed(persist = true)
         removed
     }
 
-    /** Records a heartbeat with the engine's current [fabrics]. Throws [EngineNotRegisteredException] if unknown. */
-    public fun heartbeat(id: String, fabrics: List<FabricSummary>) {
+    /**
+     * Records a heartbeat with the engine's current [fabrics] and, if it sent them, its [vitals] (kept in memory only; a
+     * heartbeat without them keeps the last ones). Throws [EngineNotRegisteredException] if unknown.
+     */
+    public fun heartbeat(id: String, fabrics: List<FabricSummary>, vitals: cringle.common.v1.EngineMetrics? = null) {
         synchronized(lock) {
             val record = engines[id] ?: throw EngineNotRegisteredException(id)
             heartbeats[id] = clock.instant()
+            if (vitals != null) vitalsById[id] = vitals
             val fabricsChanged = record.fabrics != fabrics
             if (fabricsChanged) engines[id] = record.copy(fabrics = fabrics)
             changed(persist = fabricsChanged)
         }
     }
 
+    private val vitalsById = HashMap<String, cringle.common.v1.EngineMetrics>()
+
     private fun view(record: EngineRecord): EngineView {
         val last = heartbeats[record.id]
         val reachable = last != null && Duration.between(last, clock.instant()) <= heartbeatTimeout
-        return EngineView(record, if (reachable) Reachability.REACHABLE else Reachability.UNREACHABLE, last)
+        return EngineView(record, if (reachable) Reachability.REACHABLE else Reachability.UNREACHABLE, last, vitalsById[record.id])
     }
 
     /**

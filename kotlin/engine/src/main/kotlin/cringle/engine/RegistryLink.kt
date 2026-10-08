@@ -46,6 +46,8 @@ internal class RegistryLink(
     private val routerAddress: String,
     private val interval: Duration,
     private val fabrics: () -> List<FabricStateSummary>,
+    /** The few numbers the heartbeat carries (#190); `null` sends none. */
+    private val vitals: (() -> cringle.common.v1.EngineMetrics)?,
     private val tls: EngineTls,
     private var enrollmentSecret: ByteArray?,
 ) {
@@ -97,6 +99,7 @@ internal class RegistryLink(
             .setEngineId(id)
             .setTimestamp(Timestamp.newBuilder().setSeconds(now.epochSecond).setNanos(now.nano))
             .addAllFabricStates(fabrics())
+            .apply { vitals?.let { v -> runCatching { v() }.getOrNull()?.let { setMetrics(it) } } }
             .build()
     }
 
