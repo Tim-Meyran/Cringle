@@ -301,7 +301,9 @@ public class Engine private constructor(
                     },
                 )
             }
-            info(fabrics.deploy(DeployRequest(request.fabricId.value, request.project.name, request.project.version, request.blueprint, plugins, request.serviceCallersList)))
+            info(fabrics.deploy(DeployRequest(request.fabricId.value, request.project.name, request.project.version, request.blueprint, plugins, request.serviceCallersList,
+                request.serviceBindingsList.map { cringle.engine.fabric.ServiceBinding(it.service, it.fabric, it.block, it.port, it.fingerprint) },
+            )))
         }
 
         override suspend fun setServiceCallers(request: cringle.engine.v1.SetServiceCallersRequest): cringle.engine.v1.SetServiceCallersResponse =
