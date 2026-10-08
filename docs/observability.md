@@ -1,6 +1,18 @@
 # Observability
 
-What an operator can see of a running Cringle (Architecture chapter 16). This page grows with the M7 issues (#150).
+What an operator can see of a running Cringle (Architecture chapter 16): logs, metrics, the heartbeat and the data warehouse.
+
+| You want | Look at |
+|---|---|
+| Log entries of blocks, from one engine or all | `cringle logs` (`QueryLogs`); logging driver of the block, foreign log files, collector, see [logging.md](logging.md) |
+| Log entries of a stopped engine | `cringle engine collect <machine> <engine> on`, then `cringle logs` |
+| CPU, memory, errors, tether throughput | `cringle metrics [--fabrics] [--tethers]` (`GetMetrics`) |
+| A few numbers of every engine at the router | the heartbeat, `vitals` in the router's `ListEngines` |
+| Tether messages and other data over time | `cringle dwh list`, `dwh query`; recording with `record` in the blueprint or `dwh record <fabric> on` |
+| How long data is kept | `dwh retention`, `record.maxAge`/`maxBytes` in the blueprint |
+
+The test `ObservabilityEndToEndTest` goes through all of it: an engine with a service and an engine with a recorded tether, read through the
+ManagementServer.
 
 ## Metrics (#187)
 
