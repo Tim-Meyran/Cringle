@@ -447,3 +447,5 @@ registerProgram("daemon", "runDaemon", "cringle.daemon.MainKt", "Runs the daemon
 registerProgram("management-server", "runManagementServer", "cringle.management.MainKt", "Runs the management server with user management on port 7500 and the WebUI on https://127.0.0.1:8443 (prints its fingerprint and the bootstrap token); CRINGLE_HOME is build/dev-home.", "--port", "7500", "--auth", "--web-port", "8443")
 registerProgram("engine", "runEngine", "cringle.engine.MainKt", "Runs one engine by itself (normally the daemon starts engines); CRINGLE_HOME is build/dev-home.", "--id", "dev-engine")
 registerProgram("cli", "runCli", "cringle.cli.MainKt", "Runs the cringle command line; pass the command with --args, e.g. --args=\"login --server 127.0.0.1:7500 --fingerprint <sha256>\".", "--help")
+
+registerProgram("cli", "runShell", "cringle.cli.MainKt", "Runs the cringle command line in interactive mode (`cringle shell`): type commands, `exit` leaves; the standard input is the console. Global options (--server, --home, --json) go before `shell` with --args.", "shell")

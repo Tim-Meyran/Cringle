@@ -47,6 +47,14 @@ public class Cli(
                 out.println("cringle $version")
                 return 0
             }
+            if (rest == listOf("shell")) {
+                // the global options of this call apply to every command of the session
+                return shell(buildList {
+                    server?.let { add("--server"); add(it) }
+                    home?.let { add("--home"); add(it) }
+                    if (json) add("--json")
+                })
+            }
             val wantsHelp = rest.isEmpty() || rest.first() == "help" || rest.first() == "--help" || rest.first() == "-h"
             if (wantsHelp) {
                 val words = rest.filter { it != "help" && it != "--help" && it != "-h" }
@@ -110,6 +118,37 @@ public class Cli(
             err.println("error: ${e.message ?: e.javaClass.simpleName}")
             return 1
         }
+    }
+
+    /**
+     * The interactive mode: reads one command per line from the standard input and runs it like a command line of its own,
+     * with the global options [globals]; a failing command is reported and the session goes on. `exit`, `quit` or the end of
+     * the input leave it. The standard input of a single command is empty: a login in the shell takes its token with
+     * `--token-file` or `--token`, because the lines of the session are not its token.
+     */
+    private fun shell(globals: List<String>): Int {
+        val reader = stdin.bufferedReader()
+        out.println("cringle $version: type a command, 'help' lists them, 'exit' leaves")
+        while (true) {
+            out.print("cringle> ")
+            out.flush()
+            val line = reader.readLine() ?: break
+            val words = try {
+                splitWords(line)
+            } catch (e: IllegalArgumentException) {
+                err.println("error: ${e.message}")
+                continue
+            }
+            if (words.isEmpty()) continue
+            if (words.first() == "exit" || words.first() == "quit") break
+            if (words.first() == "shell") {
+                err.println("error: you are in the shell already")
+                continue
+            }
+            Cli(out, err, java.io.ByteArrayInputStream(ByteArray(0)), environment, version).run(globals + words)
+        }
+        out.println()
+        return 0
     }
 
     private fun describe(status: Status): String {

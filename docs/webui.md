@@ -176,3 +176,4 @@ Without a page:
 | `cringle cert status` | reads the certificate files of the local home; no server involved |
 | `cringle cert renew` | renews the certificate files of the local home; no server involved |
 | `cringle self-update` | updates the installation of the command line tool |
+| `cringle shell` | the interactive mode of the command line tool; the web interface is the interactive way there |

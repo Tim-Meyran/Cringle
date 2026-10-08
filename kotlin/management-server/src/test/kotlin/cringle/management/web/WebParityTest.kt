@@ -51,6 +51,7 @@ class WebParityTest {
         "cert status" to "reads the certificate files of the local home; no server involved",
         "cert renew" to "renews the certificate files of the local home; no server involved",
         "self-update" to "updates the installation of the command line tool",
+        "shell" to "the interactive mode of the command line tool; the web interface is the interactive way there",
     )
 
     private fun cliCommands(): Set<String> {

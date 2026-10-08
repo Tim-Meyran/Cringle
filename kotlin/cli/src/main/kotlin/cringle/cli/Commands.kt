@@ -317,6 +317,7 @@ internal val COMMANDS: List<Command> = listOf(
         env.save(Profile(env.profile.server, null, env.profile.fingerprint))
         Output.Message("logged out")
     },
+    Command(listOf("shell"), "", "Interactive mode: reads one command per line from standard input until 'exit'; the global options apply to every command", needsServer = false) { _, _ -> Output.Message("") },
     Command(listOf("whoami"), "", "Show the user the token belongs to") { env, _ ->
         val u = env.users.whoAmI(WhoAmIRequest.getDefaultInstance()).user
         Output.Detail(userRow(u))
