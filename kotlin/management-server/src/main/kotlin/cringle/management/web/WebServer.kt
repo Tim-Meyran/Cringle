@@ -75,6 +75,7 @@ public class WebServer(
         DeploymentPages(core).register(this)
         users?.let { UserPages(it).register(this) }
         TrustPackagePages(core).register(this)
+        SchemaPages(core, DraftStore(core.dataDirectory.resolve("drafts"))).register(this)
     }
 
     private fun sslContext(): SSLContext {

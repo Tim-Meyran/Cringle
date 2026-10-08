@@ -83,3 +83,16 @@ Only with `--auth`; every route needs `MANAGE_USERS`, and the navigation entries
 | | `POST /packages/{plugin}/trust` | `ADMINISTER` | `trusted` or `untrusted` for all versions of a plugin |
 
 Deleting a package version is not possible in the repository (and so not here).
+
+## Drafts and the schema editor (#212)
+
+A **draft** is work in progress that the ManagementServer keeps: one JSON file `<management home>/drafts/<kind>/<name>.json` (`kind` is `schema`, later also `project`), written atomically, with a version for the package it becomes and a **revision** that every save raises. A save that names the revision it started from is refused if the draft moved on (`changed meanwhile`), so two editors do not silently overwrite each other. Names follow the package name grammar; no name can leave the folder.
+
+| Route | Permission | Notes |
+|---|---|---|
+| `GET /drafts`, `POST /drafts`, `POST /drafts/{kind}/{name}/delete` | `READ`, `OPERATE` | list, create (empty), delete |
+| `POST /drafts/schema/{name}/publish` | `OPERATE` | validates the schema document and the package, then publishes a **plugin package** named like the draft that carries the document (`schemas/<namespace>.json`) and nothing else |
+| `GET /schemas/{name}` | `READ` | the editor |
+| `POST /schemas/{name}/check`, `POST /schemas/{name}/save` | `READ`, `OPERATE` | `check` shows the document and its problems with their path and saves nothing; `save` stores the draft (also an invalid one, as work in progress) |
+
+The editor is a form: Alpine.js (`x-data`) holds the rows (types, fields with a name, a type from `cringle.std/...` or a type of the document, and one of *one value*, `list`, `map`, `optional`; enums with their values). Every change posts the rows to `check`; the **server** turns them into the schema document (`SchemaForm`) and validates it with the schema parser, so the form has no logic of its own. Limits: one wrapper per field (no list of optional values), and a type of another namespace is accepted by the parser but a draft that uses one cannot be published yet (the editor knows no dependencies). Project drafts are published by the blueprint editor (#213).
