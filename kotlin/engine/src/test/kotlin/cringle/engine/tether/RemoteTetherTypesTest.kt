@@ -114,7 +114,7 @@ class RemoteTetherTypesTest : RemoteTetherTestBase() {
         answering.join()
     }
 
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(20)
     fun closingEitherSideClosesBoth(): Unit = runBlocking {
         val opened = CompletableDeferred<TetherStream>()
         val p = connect(TetherType.STREAM) { event -> opened.complete((event as TetherEvent.StreamOpened).stream) }
