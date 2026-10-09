@@ -25,4 +25,5 @@ A role is **global** (the `roles` of a user or group, as before) or **scoped**: 
   | packages of the repository (`PublishPackage`, `ListPackages`, `ListVersions`, `GetPackage`, `DownloadPackage`) | the role globally or for any scope (the repository is not scoped yet) |
 
   List calls (`ListMachines`, `ListEngines`, `ListFabrics`, `ListBindings`, `ListDwhPartitions`, `GetMetrics`, `QueryLogs`) return only what the caller may read. A role on a machine covers what runs on it; a role on a project covers its fabrics wherever they run; a deploy needs the role for the project only.
-- **Not yet:** the WebUI does not look at scopes (#271), the CLI cannot grant them (#270).
+- **Grant and revoke (#270):** `cringle user grant|revoke <user-id> <role> --scope <scope>` and `cringle group grant|revoke <group> <role> --scope <scope>` (`user list` and `group list` show `operator@MACHINE:m1`); in the WebUI the *Scoped roles* popover of a user or group (`POST /users/{id}/grant|revoke`, `POST /groups/{name}/grant|revoke`, role, kind and name, or the scope text for a revoke). `--scope global` is refused: a global role is given with `user create --role`.
+- **Not yet:** the WebUI does not look at scopes when it shows or changes things (#271).

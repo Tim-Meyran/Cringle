@@ -138,6 +138,10 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle deploy` | `POST /deployments` |
 | `cringle rollback` | `POST /deployments/p/rollback` |
 | `cringle undeploy` | `POST /deployments/p/undeploy` |
+| `cringle user grant` | `POST /users/u1/grant` |
+| `cringle user revoke` | `POST /users/u1/revoke` |
+| `cringle group grant` | `POST /groups/g1/grant` |
+| `cringle group revoke` | `POST /groups/g1/revoke` |
 | `cringle bind` | `POST /bindings` |
 | `cringle unbind` | `POST /bindings/p/s/unbind` |
 | `cringle bindings` | `GET /deployments/list` |

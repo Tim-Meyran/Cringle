@@ -21,7 +21,7 @@ The CLI talks to the ManagementServer only (one address, also for user managemen
 | Routers | `router add\|remove\|list` |
 | Trust | `trust list`, `trust add <router-address> [--fingerprint SHA256 \| --yes]`, `trust add-component <fingerprint> --name NAME [--kind COMPONENT\|SERVER] [--address HOST:PORT]`, `trust revoke <fingerprint>` |
 | Repository | `repo publish\|list\|versions\|download\|trust` |
-| Users | `user create\|list\|delete`, `group create\|list`, `token create\|list\|revoke` |
+| Users | `user create\|list\|delete`, `user grant\|revoke <user-id> <role> --scope <scope>` (a role for one machine, project, fabric or framework function; see `users.md`), `group create\|list`, `group grant\|revoke <group> <role> --scope <scope>`, `token create\|list\|revoke` |
 | Update | `self-update [--check] [--version v] [--allow-major] [--timeout s] [--install-root dir]` (see `updating.md`) |
 
 **Deploy.** `deploy` uses the lock file `<home>/management/locks/<project>-<version>.lock.json` of the version it picks; `--relock` resolves the dependencies again and overwrites it (for example to get a newer compatible plugin). A damaged lock, or one whose hashes differ from the Repository, fails the command and names `--relock`. `deploy` and `undeploy` of one project run one after the other. A deploy that cannot be placed (no running engine with the required roles and labels) fails with the requirement and leaves the running fabrics of the project untouched; a deploy that fails while starting restores the previous fabrics of the project. Details are in `management-server.md`.
