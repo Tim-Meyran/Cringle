@@ -322,6 +322,29 @@ class CliTest {
     }
 
     @Test
+    fun aTokenCanBePrintedAsLoginLinkAndQrCodeInTheTerminal() {
+        val id = field(json(ok("user", "create", "quentin", "--role", "viewer", "--json")) as JsonObject, "id")
+        val plain = ok("token", "create", id).out
+        assertFalse(plain.contains("loginLink") || plain.contains("▀") || plain.contains("█"), "without the options the output is unchanged")
+
+        val shown = ok("token", "create", id, "--qr", "--web-url", "https://h.example:1/").out
+        val token = Regex("token: (crt_\\S+)").find(shown)!!.groupValues[1]
+        assertTrue(shown.contains("loginLink: https://h.example:1/login#token=$token"), shown)
+        val block = shown.lines().filter { l -> l.isNotEmpty() && l.all { it in "▀▄█ " } }
+        assertTrue(block.size >= 10 && block.all { it.length == block.first().length }, shown)
+
+        val linkOnly = ok("token", "create", id, "--web-url", "https://h.example:1").out
+        assertTrue(linkOnly.contains("loginLink: https://h.example:1/login#token=") && !linkOnly.contains("█"))
+        val asJson = json(ok("token", "create", id, "--qr", "--web-url", "https://h.example:1", "--json")).let { (it as? JsonArray)?.get(0) as? JsonObject ?: it as JsonObject }
+        assertTrue(field(asJson, "loginLink").startsWith("https://h.example:1/login#token=crt_"))
+
+        val noUrl = cli("token", "create", id, "--qr", token = adminToken)
+        assertTrue(noUrl.code != 0 && noUrl.err.contains("--qr needs --web-url"), noUrl.err)
+        assertTrue(cli("token", "create", id, "--web-url", "http://h.example", token = adminToken).code != 0)
+        assertTrue(cli("token", "create", id, "--web-url", "https://h.example/path", token = adminToken).code != 0)
+    }
+
+    @Test
     fun usersGroupsAndTokensAreManagedAndRolesAreEnforced() {
         val created = json(ok("user", "create", "vera", "--role", "viewer", "--json")) as JsonObject
         val id = field(created, "id")
