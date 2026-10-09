@@ -119,6 +119,10 @@ There is no version in a file. A release gets its version from the build propert
 - `lib/` holds no test libraries (JUnit, TestKit, test helpers); `DistributionTest` fails if it does.
 
 
+### Run again
+
+The step that creates the release can be repeated for the same tag (**Re-run jobs**, or push the tag again after deleting it): it reuses the release of the tag, replaces a file of the same name and publishes the release when all seven files are there. A release that a run could not complete stays a draft. To start from nothing, delete the release (`gh release delete v0.1.0 --yes`, the tag stays) and run the workflow again.
+
 ### Checking `release.yml`
 
 Not done yet. Once, and whenever the workflow changes:
