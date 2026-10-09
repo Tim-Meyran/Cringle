@@ -60,7 +60,7 @@ class WebUsersTest {
         assertTrue(created.contains("<strong>bob</strong>") && created.contains("<span class=\"tag\">viewer</span>") && created.contains("<span class=\"tag\">operator</span>") && created.contains("<span class=\"tag\">ops</span>"), created)
 
         val answer = admin.post("/users/${idOf("bob")}/tokens", mapOf("label" to "laptop", "hours" to "1")).body()
-        val token = Regex("<code>([^<]+)</code> \\(shown once").find(answer)!!.groupValues[1]
+        val token = Regex("<code data-copy=\"([^\"]+)\"[^>]*>[^<]+</code> \\(shown once").find(answer)!!.groupValues[1]
         assertNotNull(users.authenticate(token))
         // the value is not kept: a later listing does not show it
         assertFalse(admin.get("/users/list").body().contains(token))
@@ -76,8 +76,8 @@ class WebUsersTest {
     fun theLastAdminCannotBeDeletedAndInputIsChecked() {
         val adminId = users.listUsers().first { UserRole.ADMIN in it.effectiveRoles }.user.id
         val refused = admin.post("/users/$adminId/delete").body()
-        assertTrue(refused.contains("class=\"error\"") && refused.contains("the last admin cannot be deleted"), refused)
-        assertTrue(admin.post("/users", mapOf("name" to "")).body().contains("class=\"error\""))
+        assertTrue(refused.contains("class=\"notice error\"") && refused.contains("the last admin cannot be deleted"), refused)
+        assertTrue(admin.post("/users", mapOf("name" to "")).body().contains("class=\"notice error\""))
         assertTrue(admin.post("/users", mapOf("name" to "x", "groups" to "nope")).body().contains("unknown group"))
         assertTrue(admin.post("/users/${idOf("vera")}/tokens", mapOf("hours" to "abc")).body().contains("number of hours"))
         assertFalse(admin.post("/users/${idOf("vera")}/delete").body().contains("<strong>vera</strong>"))

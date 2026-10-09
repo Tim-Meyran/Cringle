@@ -4,6 +4,7 @@
 window.cringleIdle = function () {
   var list = document.getElementById('list');
   if (!list) return true;
+  if (document.querySelector('.htmx-request:not(#list)')) return false; // a request of the user is running
   var active = document.activeElement;
   if (active && list.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return false;
   if (list.querySelector('details[open]')) return false;
@@ -22,6 +23,26 @@ window.cringleIdle = function () {
   }
   return true;
 };
+// A request of the user (a button, a form) must not meet a refresh that started earlier: its answer would arrive later than the answer of the
+// request and put the old state back. So a request that is not a GET aborts the refresh in flight (htmx:abort), and no refresh starts while one runs.
+document.addEventListener('htmx:beforeRequest', function (event) {
+  var config = event.detail.requestConfig;
+  var list = document.getElementById('list');
+  if (config && config.verb && config.verb !== 'get' && list && list.classList.contains('htmx-request')) htmx.trigger(list, 'htmx:abort');
+});
+// Feedback lives in #flash (see flash() in PageSupport.kt): the refresh never touches it. Keep the last three plain messages; a result that is shown
+// once (data-sticky) and a form that continues a flow stay until they are closed or used.
+document.addEventListener('htmx:oobAfterSwap', function (event) {
+  var flash = document.getElementById('flash');
+  if (!flash || !event.target || event.target.id !== 'flash') return;
+  var plain = Array.prototype.filter.call(flash.children, function (item) { return !item.hasAttribute('data-sticky'); });
+  plain.slice(0, -3).forEach(function (item) { item.remove(); });
+});
+// a form in #flash (the confirmation of a step) is used up by sending it
+document.addEventListener('htmx:afterRequest', function (event) {
+  var item = event.detail.elt && event.detail.elt.closest && event.detail.elt.closest('#flash > .notice');
+  if (item && event.detail.successful) item.remove();
+});
 // the hint "refresh paused while you edit" follows the same rule
 setInterval(function () {
   var hint = document.getElementById('paused');

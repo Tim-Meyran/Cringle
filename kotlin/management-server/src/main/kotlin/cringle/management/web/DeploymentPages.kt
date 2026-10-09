@@ -131,7 +131,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(error), info(done),
+            flash(error, done),
             dataTable(listOf("Project", "Version", "Fabrics", ""), rows, raw("Nothing is deployed yet.")),
             formPanel("Deploy a project", "A project of the repository is placed on engines by the roles and labels of its fabric configs.", deployForm),
             raw("<h2>Bindings of service dependencies</h2>"),
@@ -270,7 +270,7 @@ internal class DeploymentPages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(error), info(done), problems.map { notice(it) },
+            flash(error, done), problems.map { notice(it) },
             dataTable(listOf("Fabric", "Kind", "Name", "Bytes", "Retention", ""), rows, raw("Nothing is recorded yet. Mark a tether with `record` in its blueprint, or switch the recording of a fabric on below.")),
             formPanel("Recording", "Switches the recording of a fabric on or off; the retention is the default for the tethers that have none of their own.", recordForm),
         )

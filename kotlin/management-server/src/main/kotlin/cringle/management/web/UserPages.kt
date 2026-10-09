@@ -33,7 +33,7 @@ internal class UserPages(private val users: UserManager) {
             val error = attempt {
                 val hours = req.form["hours"]?.trim()?.takeIf { it.isNotEmpty() }?.let { it.toLongOrNull() ?: throw UserException(UserException.Kind.INVALID, "lifetime must be a number of hours") }
                 val token = users.createToken(req.params.getValue("id"), req.form["label"].orEmpty().trim().ifEmpty { "web" }, hours?.let { Duration.ofHours(it) })
-                created = h("Token <code>{}</code> (shown once, copy it now).", token.secret)
+                created = h("Token <code data-copy=\"{}\" title=\"Click to copy\">{}</code> (shown once, copy it now).", token.secret, token.secret)
             }
             fragment(usersList(error, created))
         }
@@ -72,7 +72,7 @@ internal class UserPages(private val users: UserManager) {
             field("Groups", raw("<input name=\"groups\" placeholder=\"none\">"), "comma separated"),
         )
         return html(
-            notice(error), if (created == null) Html("") else html(raw("<p class=\"notice info\" role=\"status\">"), created, raw("</p>")),
+            flash(error, detail = created),
             dataTable(listOf("Name", "Roles", "Groups", "Tokens", ""), rows, raw("No user.")),
             formPanel("Create a user", "The new user gets no token yet: create one in the Tokens column. The value is shown once.", createForm),
         )
@@ -105,7 +105,7 @@ internal class UserPages(private val users: UserManager) {
             roleBoxes(),
         )
         return html(
-            notice(error),
+            flash(error),
             dataTable(listOf("Group", "Roles"), rows, raw("No group yet.")),
             formPanel("Create a group", "Members get the roles of the group in addition to their own.", form),
         )

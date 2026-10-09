@@ -49,6 +49,7 @@ For `[Offen]` points or anything that is neither in the issue, in `docs/decision
 | Kotlin implementation | `kotlin/` |
 | Documentation index | `docs/README.md` |
 | How to run Gradle and read its result (read it before every `./gradlew` call) | `.claude/skills/gradle/SKILL.md` |
+| htmx 2.x and how the WebUI uses it (read it before you change a page, a fragment or `app.js` of the WebUI) | `.claude/skills/htmx/SKILL.md` |
 
 The architecture and decision documents are in German, issues and code are in English.
 

@@ -60,7 +60,7 @@ class WebDeploymentTest : ServiceTestBase() {
     fun errorsAreShownInlineAndAViewerCannotPost() {
         web()
         val refused = admin.post("/deployments", mapOf("project" to "shop", "start" to "on")).body()
-        assertTrue(refused.contains("class=\"error\"") && refused.contains("FAILED_PRECONDITION"), refused)
+        assertTrue(refused.contains("class=\"notice error\"") && refused.contains("FAILED_PRECONDITION"), refused)
         assertTrue(admin.post("/bindings", mapOf("project" to "shop", "service" to "orders", "fabrics" to "ghost")).body().contains("NOT_FOUND"))
         assertEquals(403, viewer.post("/deployments", mapOf("project" to "shop")).statusCode())
         assertEquals(403, viewer.post("/dwh/retention", mapOf("fabric" to "x")).statusCode())
