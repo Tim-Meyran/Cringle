@@ -33,6 +33,9 @@ import io.grpc.Status
 import io.grpc.StatusException
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -282,11 +285,10 @@ abstract class ServiceTestBase {
         s = ManagementServiceCoroutineStub(channel)
         runBlocking {
             s.addMachine(AddMachineRequest.newBuilder().setMachineId("m1").setDaemonAddress("127.0.0.1:${daemon.port}").build())
-            engine("e-svc", "svc")
-            engine("e-svc2", "svc")
-            engine("e-a", "a")
-            engine("e-bak", "backup")
-            engine("e-b", "b")
+            // the engines are processes: start them at the same time
+            listOf("e-svc" to "svc", "e-svc2" to "svc", "e-a" to "a", "e-bak" to "backup", "e-b" to "b")
+                .map { (id, role) -> async(Dispatchers.IO) { engine(id, role) } }
+                .awaitAll()
         }
     }
 

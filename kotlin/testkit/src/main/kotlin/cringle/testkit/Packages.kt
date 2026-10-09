@@ -53,7 +53,12 @@ public object TestJar {
      * Compiles Java [sources] (fully qualified class name to source text) with the JDK compiler and returns a JAR
      * with the resulting classes. Throws [IllegalStateException] with the compiler output on errors.
      */
-    public fun fromJavaSources(sources: Map<String, String>): ByteArray {
+    public fun fromJavaSources(sources: Map<String, String>): ByteArray = compiled.computeIfAbsent(sources.toMap()) { compile(it) }.clone()
+
+    // the same sources are compiled again by every test of a class (`@BeforeEach`): the compiler runs once per JVM
+    private val compiled = java.util.concurrent.ConcurrentHashMap<Map<String, String>, ByteArray>()
+
+    private fun compile(sources: Map<String, String>): ByteArray {
         val compiler = ToolProvider.getSystemJavaCompiler() ?: error("no Java compiler available: run the tests on a JDK")
         val diagnostics = javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
         val files = sources.map { (name, text) ->
