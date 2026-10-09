@@ -223,3 +223,7 @@ Every page is built from the same parts (`PageSupport.kt`, `Layout.kt`), so that
 - `formPanel(title, hint, form)`: the place where something is created, below the list; it is not rendered for a user who may not create. `field(label, control, hint)` is a labelled input; `form-row` lays fields out in a row, `check` is a checkbox.
 - `stateBadge(state)` / `badge(text, Tone)` for every state (engine, fabric, machine, block, trust, log level, kind), `tag` for roles, labels and groups, `fingerprint(value)` for keys (first and last characters, the whole value as the title, a click copies it).
 - Destructive buttons (those with `hx-confirm`) are drawn in red; a row with several actions keeps *Tags*, *Retention* and *Tokens* in a popover (`details.popover`), which the refresh respects (it waits while one is open).
+
+## QR codes (#301)
+
+`cringle.common.qr.QrCode` is a small QR encoder (ISO/IEC 18004, byte mode, versions 1 to 40, levels L/M/Q/H, no dependency). `toSvg(label)` gives an `<svg>` without script and style (black on white, a quiet zone of four modules) that fits the content security policy of the WebUI; `toText()` gives the half-block rendering for a terminal, which the CLI uses. The text never leaves the process: no external service draws the code. A token or an invite link is shared by scanning the code from the screen (#302, #303). `QrCodeTest` decodes its own output (unmasking, error correction syndromes, text); the output was also read by an independent decoder (zxing-cpp) for all levels and sizes up to version 40.
