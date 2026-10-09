@@ -69,7 +69,7 @@ internal class UserPages(private val users: UserManager, private val web: WebSer
     }
 
     /** Reads the role and the scope of a grant or revoke form and runs [action]. */
-    private fun change(form: Map<String, String>, action: (UserRole, Scope) -> Unit) {
+    internal fun change(form: Map<String, String>, action: (UserRole, Scope) -> Unit) {
         val role = UserRole.entries.firstOrNull { it.name.equals(form["role"].orEmpty().trim().replace('-', '_'), ignoreCase = true) }
             ?: throw UserException(UserException.Kind.INVALID, "unknown role '${form["role"].orEmpty()}'")
         val text = form["scope"]?.trim()?.takeIf { it.isNotEmpty() } ?: "${form["kind"].orEmpty().trim()}:${form["name"].orEmpty().trim()}"
@@ -82,7 +82,7 @@ internal class UserPages(private val users: UserManager, private val web: WebSer
     }
 
     /** The scoped roles of a user or group ([base] is `/users/<id>` or `/groups/<name>`): the list with a revoke form each, and the form to grant one. */
-    private fun scopedPopover(base: String, scoped: Set<RoleAssignment>): Html = h(
+    internal fun scopedPopover(base: String, scoped: Set<RoleAssignment>): Html = h(
         "<details class=\"popover wide\"><summary>{}</summary><div class=\"popover-body\">{}<form class=\"form-row\" hx-post=\"{}/grant\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}<button class=\"btn primary small\">Grant</button></form></div></details>",
         if (scoped.isEmpty()) "none" else "${scoped.size} scoped",
         dataTable(
@@ -101,13 +101,13 @@ internal class UserPages(private val users: UserManager, private val web: WebSer
         field("Name", raw("<input name=\"name\" placeholder=\"m1, shop, trust, ...\" required>"), "function: trust, plugin-trust, users"),
     )
 
-    private fun roleBoxes(): Html = html(
+    internal fun roleBoxes(): Html = html(
         raw("<fieldset class=\"roles\"><legend>Roles</legend>"),
         UserRole.entries.map { h("<label class=\"check\"><input type=\"checkbox\" name=\"role-{}\"> {}</label>", it.name, it.name.lowercase().replace('_', '-')) },
         raw("</fieldset>"),
     )
 
-    private fun tags(values: Collection<String>): Html = if (values.isEmpty()) raw("<span class=\"muted\">none</span>") else html(values.map { h("<span class=\"tag\">{}</span> ", it) })
+    internal fun tags(values: Collection<String>): Html = if (values.isEmpty()) raw("<span class=\"muted\">none</span>") else html(values.map { h("<span class=\"tag\">{}</span> ", it) })
 
     private fun usersList(error: String?, created: Html?): Html {
         val rows = users.listUsers().map { v ->

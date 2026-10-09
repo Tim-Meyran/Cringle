@@ -44,6 +44,21 @@ service UserService {
 
   // Returns the user the presented token belongs to.
   rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+
+  // Trusts the registry of another site: its users are accepted as `name@registry` with a token that it signed (Architecture 6.2).
+  rpc TrustRegistry(TrustRegistryRequest) returns (TrustRegistryResponse);
+
+  // Stops trusting a registry; its tokens are refused from now on.
+  rpc UntrustRegistry(UntrustRegistryRequest) returns (UntrustRegistryResponse);
+
+  // Lists the trusted registries with their rights. Rights are given with GrantRole and RevokeRole (`registry` names the subject).
+  rpc ListRegistries(ListRegistriesRequest) returns (ListRegistriesResponse);
+
+  // Issues a token for a user of this site that another registry, which trusts this one, accepts as `user@<registry_name>`.
+  rpc IssueFederatedToken(IssueFederatedTokenRequest) returns (IssueFederatedTokenResponse);
+
+  // The public key with which this site signs federated tokens: the other site enters it with TrustRegistry.
+  rpc GetRegistryKey(GetRegistryKeyRequest) returns (GetRegistryKeyResponse);
 }
 
 enum Role {
@@ -82,17 +97,74 @@ message RoleAssignment {
 }
 
 message RoleScopeRequest {
-  // Exactly one of the two names the subject.
+  // Exactly one of the three names the subject.
   string user_id = 1;
   string group = 2;
   Role role = 3;
   Scope scope = 4;
+  // A trusted registry: all of its users.
+  string registry = 5;
 }
 
 message RoleScopeResponse {
-  // The user or the group after the change.
+  // The user, the group or the registry after the change.
   User user = 1;
   Group group = 2;
+  Registry registry = 3;
+}
+
+// A registry of another site that is trusted.
+message Registry {
+  string name = 1;
+  // SHA-256 of the public key, 64 lower case hex characters: what the administrator compares with the other site.
+  string fingerprint = 2;
+  // Roles of every user of the registry.
+  repeated Role roles = 3;
+  repeated RoleAssignment scoped_roles = 4;
+}
+
+message TrustRegistryRequest {
+  string name = 1;
+  // The public key of the other registry as PEM (`PUBLIC KEY`), or its certificate (`CERTIFICATE`).
+  string public_key_pem = 2;
+  repeated Role roles = 3;
+}
+
+message TrustRegistryResponse {
+  Registry registry = 1;
+}
+
+message UntrustRegistryRequest {
+  string name = 1;
+}
+
+message UntrustRegistryResponse {}
+
+message ListRegistriesRequest {}
+
+message ListRegistriesResponse {
+  repeated Registry registries = 1;
+}
+
+message IssueFederatedTokenRequest {
+  // The name under which the other site has entered this registry (it is `iss` in the token).
+  string registry_name = 1;
+  // The user of this site the token is for; the other site sees `user@registry_name`.
+  string user = 2;
+  // Lifetime in seconds, 1 to 30 days.
+  int64 ttl_seconds = 3;
+}
+
+message IssueFederatedTokenResponse {
+  string token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message GetRegistryKeyRequest {}
+
+message GetRegistryKeyResponse {
+  string public_key_pem = 1;
+  string fingerprint = 2;
 }
 
 message User {

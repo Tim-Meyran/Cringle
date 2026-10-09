@@ -126,7 +126,7 @@ class RoleMatrixTest {
             "ListTrust" to Permission.READ, "AddTrustedComponent" to Permission.ADMINISTER, "RemoveTrust" to Permission.ADMINISTER,
         ).mapKeys { "cringle.management.v1.ManagementService/" + it.key }
         assertEquals(management, ManagementServer.REQUIRED_PERMISSIONS)
-        val users = listOf("CreateUser", "ListUsers", "DeleteUser", "CreateGroup", "ListGroups", "CreateToken", "ListTokens", "RevokeToken", "GrantRole", "RevokeRole")
+        val users = listOf("CreateUser", "ListUsers", "DeleteUser", "CreateGroup", "ListGroups", "CreateToken", "ListTokens", "RevokeToken", "GrantRole", "RevokeRole", "TrustRegistry", "UntrustRegistry", "ListRegistries", "IssueFederatedToken", "GetRegistryKey")
             .associate { "cringle.user.v1.UserService/$it" to Permission.MANAGE_USERS } +
             ("cringle.user.v1.UserService/WhoAmI" to Permission.AUTHENTICATED)
         assertEquals(users, UserGrpcService.REQUIRED_PERMISSIONS)

@@ -72,6 +72,10 @@ Retention is entered as hours and bytes; empty means no limit.
 
 Only with `--auth`; every route needs `MANAGE_USERS`, and the navigation entries are shown only to users that have it. The functions of `cringle user|group|token`: `GET /users` (users with roles, groups, tokens), `POST /users` (name, roles, groups), `POST /users/{id}/delete` (the last administrator cannot be deleted), `POST /users/{id}/tokens` (label, lifetime in hours; the value is shown **once** in the answer and not kept), `POST /tokens/{id}/revoke`, `GET /groups`, `POST /groups`. A token is rotated by creating a new one and revoking the old one. Changing the groups or roles of an existing user or group is not possible in the CLI either and comes with its own issue.
 
+## Page: registries of other sites (#295)
+
+Only with `--auth`, every route needs `MANAGE_USERS` (or the `users` function). `GET /registries` and `GET /registries/list` show the trusted registries (name, key fingerprint, roles, scoped roles) and the public key of this registry; `POST /registries` (name, PEM key or certificate, roles) trusts one, `POST /registries/{name}/delete` stops trusting it, `POST /registries/{name}/grant|revoke` give and take scoped roles, `POST /registries/token` (user, known-there-as, hours) issues a federated token, shown once. See `trust.md`.
+
 ## Pages: trust and packages (#211)
 
 | Page | Routes | Permission | Notes |
@@ -170,6 +174,13 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle token create` | `POST /users/u1/tokens` |
 | `cringle token list` | `GET /users/list` |
 | `cringle token revoke` | `POST /tokens/t1/revoke` |
+| `cringle registry key` | `GET /registries` (the key and fingerprint of this registry) |
+| `cringle registry trust` | `POST /registries` |
+| `cringle registry list` | `GET /registries/list` |
+| `cringle registry untrust` | `POST /registries/r1/delete` |
+| `cringle registry grant` | `POST /registries/r1/grant` |
+| `cringle registry revoke` | `POST /registries/r1/revoke` |
+| `cringle registry issue-token` | `POST /registries/token` |
 
 Without a page:
 

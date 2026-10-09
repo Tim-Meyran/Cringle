@@ -41,6 +41,8 @@ class WebParityTest {
         "user grant" to "POST /users/u1/grant", "user revoke" to "POST /users/u1/revoke",
         "group create" to "POST /groups", "group list" to "GET /groups", "group grant" to "POST /groups/g1/grant", "group revoke" to "POST /groups/g1/revoke",
         "token create" to "POST /users/u1/tokens", "token list" to "GET /users/list", "token revoke" to "POST /tokens/t1/revoke",
+        "registry key" to "GET /registries", "registry trust" to "POST /registries", "registry list" to "GET /registries/list", "registry untrust" to "POST /registries/r1/delete",
+        "registry grant" to "POST /registries/r1/grant", "registry revoke" to "POST /registries/r1/revoke", "registry issue-token" to "POST /registries/token",
     )
 
     /** The commands that have no page, and why. */

@@ -30,7 +30,11 @@ import java.time.Duration
 import java.time.Instant
 
 /** The gRPC service for user management. Serve it behind an [AuthInterceptor] configured with [REQUIRED_PERMISSIONS]. */
-public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt.UserServiceCoroutineImplBase() {
+public class UserGrpcService(
+    private val users: UserManager,
+    /** The key pair with which this site signs federated tokens (the identity key of the management server); without it nothing can be issued (#295). */
+    private val signingKey: java.security.KeyPair? = null,
+) : UserServiceGrpcKt.UserServiceCoroutineImplBase() {
     private fun <T> call(body: () -> T): T = try {
         body()
     } catch (e: UserException) {
@@ -163,10 +167,14 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
         requireUsers()
         val role = fromRoles(listOf(request.role)).single()
         val scope = fromProto(request.scope)
-        if ((request.userId.isEmpty()) == (request.group.isEmpty())) throw Status.INVALID_ARGUMENT.withDescription("name exactly one of user_id and group").asException()
+        if (listOf(request.userId, request.group, request.registry).count { it.isNotEmpty() } != 1) {
+            throw Status.INVALID_ARGUMENT.withDescription("name exactly one of user_id, group and registry").asException()
+        }
         val response = RoleScopeResponse.newBuilder()
         call {
-            if (request.userId.isNotEmpty()) {
+            if (request.registry.isNotEmpty()) {
+                response.registry = proto(if (grant) users.grantRegistry(request.registry, role, scope) else users.revokeRegistry(request.registry, role, scope))
+            } else if (request.userId.isNotEmpty()) {
                 response.user = proto(if (grant) users.grantUser(request.userId, role, scope) else users.revokeUser(request.userId, role, scope))
             } else {
                 response.group = proto(if (grant) users.grantGroup(request.group, role, scope) else users.revokeGroup(request.group, role, scope))
@@ -181,8 +189,64 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
 
     override suspend fun whoAmI(request: WhoAmIRequest): WhoAmIResponse {
         val current = AuthInterceptor.CURRENT_USER.get() ?: throw Status.UNAUTHENTICATED.asException()
-        val view = users.listUsers().firstOrNull { it.user.id == current.id } ?: throw Status.UNAUTHENTICATED.asException()
+        val view = users.listUsers().firstOrNull { it.user.id == current.id }
+        if (view == null) {
+            // a user of a trusted registry (name@registry) is not stored unless it was given rights of its own
+            if (current.id.contains('@')) {
+                val federated = cringle.user.v1.User.newBuilder().setId(current.id).setName(current.name).addAllEffectiveRoles(current.roles.sorted().map(::toRole)).build()
+                return WhoAmIResponse.newBuilder().setUser(federated).build()
+            }
+            throw Status.UNAUTHENTICATED.asException()
+        }
         return WhoAmIResponse.newBuilder().setUser(proto(view)).build()
+    }
+
+    private fun proto(r: TrustedRegistry): cringle.user.v1.Registry = cringle.user.v1.Registry.newBuilder().setName(r.name).setFingerprint(r.fingerprint)
+        .addAllRoles(r.roles.sorted().map(::toRole)).addAllScopedRoles(r.scoped.sortedBy { it.scope.encode() }.map(::toProto)).build()
+
+    private fun key(): java.security.KeyPair = signingKey ?: throw Status.FAILED_PRECONDITION.withDescription("this server has no key to sign federated tokens with").asException()
+
+    override suspend fun trustRegistry(request: cringle.user.v1.TrustRegistryRequest): cringle.user.v1.TrustRegistryResponse {
+        requireUsers()
+        val publicKey = try {
+            PublicKeyPem.parse(request.publicKeyPem)
+        } catch (e: IllegalArgumentException) {
+            throw Status.INVALID_ARGUMENT.withDescription(e.message).asException()
+        }
+        val registry = call { users.trustRegistry(request.name, publicKey, fromRoles(request.rolesList)) }
+        return cringle.user.v1.TrustRegistryResponse.newBuilder().setRegistry(proto(registry)).build()
+    }
+
+    override suspend fun untrustRegistry(request: cringle.user.v1.UntrustRegistryRequest): cringle.user.v1.UntrustRegistryResponse {
+        requireUsers()
+        call { users.untrustRegistry(request.name) }
+        return cringle.user.v1.UntrustRegistryResponse.getDefaultInstance()
+    }
+
+    override suspend fun listRegistries(request: cringle.user.v1.ListRegistriesRequest): cringle.user.v1.ListRegistriesResponse {
+        requireUsers()
+        return cringle.user.v1.ListRegistriesResponse.newBuilder().addAllRegistries(users.listRegistries().map(::proto)).build()
+    }
+
+    override suspend fun issueFederatedToken(request: cringle.user.v1.IssueFederatedTokenRequest): cringle.user.v1.IssueFederatedTokenResponse {
+        requireUsers()
+        val pair = key()
+        if (request.user.isBlank() || request.user.contains('@')) throw Status.INVALID_ARGUMENT.withDescription("the user is empty or has an @").asException()
+        if (request.registryName.isBlank()) throw Status.INVALID_ARGUMENT.withDescription("registry_name is empty").asException()
+        val ttl = Duration.ofSeconds(request.ttlSeconds.takeIf { it > 0 } ?: Duration.ofHours(24).seconds)
+        val token = try {
+            FederatedToken.issue(request.registryName, request.user, pair, ttl)
+        } catch (e: IllegalArgumentException) {
+            throw Status.INVALID_ARGUMENT.withDescription(e.message).asException()
+        }
+        return cringle.user.v1.IssueFederatedTokenResponse.newBuilder().setToken(token).setExpiresAt(ts(Instant.now().plus(ttl))).build()
+    }
+
+    override suspend fun getRegistryKey(request: cringle.user.v1.GetRegistryKeyRequest): cringle.user.v1.GetRegistryKeyResponse {
+        requireUsers()
+        val pair = key()
+        return cringle.user.v1.GetRegistryKeyResponse.newBuilder().setPublicKeyPem(PublicKeyPem.encode(pair.public))
+            .setFingerprint(cringle.common.PublicKeyFingerprint.of(pair.public)).build()
     }
 
     public companion object {
@@ -200,6 +264,11 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
             "cringle.user.v1.UserService/RevokeToken" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/GrantRole" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/RevokeRole" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/TrustRegistry" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/UntrustRegistry" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/ListRegistries" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/IssueFederatedToken" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/GetRegistryKey" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/WhoAmI" to Permission.AUTHENTICATED,
         )
     }
