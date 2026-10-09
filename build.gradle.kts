@@ -141,7 +141,10 @@ tasks.register("publishToTestMavenLocal") {
 }
 
 testMavenLocalModules.forEach { path ->
-    project(path).tasks.matching { it.name == "publishAllPublicationsToCringleTestMavenLocalRepository" }
+    // every task that writes into the folder (`publishMavenPublicationTo...`, `publishPluginMavenPublicationTo...`, the markers, and the
+    // `publishAllPublicationsTo...` that bundles them) runs after the folder was emptied; the tasks of one publication are
+    // not all dependencies of the bundle in the order the graph runs them, so a clean checkout lost the first ones
+    project(path).tasks.matching { it.name.startsWith("publish") && it.name.endsWith("ToCringleTestMavenLocalRepository") }
         .configureEach { mustRunAfter(deleteTestMavenLocal) }
 }
 

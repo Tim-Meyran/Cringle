@@ -32,12 +32,13 @@ application {
 // and that an unpacked archive starts. The archives are built before the tests run.
 tasks.withType<Test> {
     val dist = rootProject.tasks.named("cringleDist")
+    val distDir = rootProject.layout.buildDirectory.dir("dist")
     if (name == "integrationTest") {
         dependsOn(dist)
         inputs.files(dist)
+        // the folder exists after `cringleDist`; the fast suite does not read it, and on a clean checkout it is not there
+        inputs.dir(distDir)
     }
-    val distDir = rootProject.layout.buildDirectory.dir("dist")
-    inputs.dir(distDir)
     systemProperty("cringle.distDir", distDir.get().asFile.absolutePath)
     systemProperty("cringle.releaseVersion", rootProject.extra["releaseVersion"] as String)
 }
