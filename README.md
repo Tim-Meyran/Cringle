@@ -36,6 +36,32 @@ Cringle/
 - **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and the issue → pull request → independent review → merge flow.
 - **Documentation index:** [docs/README.md](docs/README.md).
 
+## Install
+
+Prerequisite: a JDK 21 or newer on the machine. The installers come with every [release](https://github.com/Tim-Meyran/Cringle/releases/latest): they download the archive, check its SHA-256 and set up the daemon as a service that also runs the management server (web interface, user logins) and the repository, then start it.
+
+**Linux** (systemd), in a terminal:
+
+```bash
+curl -fsSL https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.sh | sudo sh -s -- --start
+```
+
+**Windows**, in PowerShell (it asks for administrative rights itself):
+
+```powershell
+irm https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1 -Start
+```
+
+Then open a new terminal and log in with the admin token of the first start:
+
+```bash
+sudo cat /var/lib/cringle/management/bootstrap-token                     # Windows: type C:\ProgramData\Cringle\management\bootstrap-token
+cringle login --server 127.0.0.1:7500 --yes --token-file <file with the token>
+cringle machine list
+```
+
+The web interface is at `https://127.0.0.1:8443` (log in with the same token). Options (a fixed version, the daemon alone, uninstall) and the details are in [docs/daemon-service.md](docs/daemon-service.md); updates in [docs/updating.md](docs/updating.md).
+
 ## Building & Testing
 
 Prerequisites: JDK 21.

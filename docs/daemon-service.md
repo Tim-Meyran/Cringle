@@ -18,6 +18,44 @@ The daemon starts engines with the same JVM and class path it runs with. When th
 
 ## Installer
 
+### Quick install
+
+A JDK 21 or newer has to be installed. Copy one line, and the daemon, the management server (web interface on 8443, user logins) and the repository run as a service. The links always point to the latest release.
+
+Linux (systemd):
+
+```bash
+curl -fsSL https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.sh | sudo sh -s -- --start
+```
+
+Windows (PowerShell; the script asks for administrative rights, the second command runs it without being stopped by the execution policy):
+
+```powershell
+irm https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1 -Start
+```
+
+A fixed version (here `0.0.3`; every release is at `https://github.com/Tim-Meyran/Cringle/releases/tag/v<version>`):
+
+```bash
+curl -fsSL https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/install.sh | sudo sh -s -- --release 0.0.3 --start
+```
+
+```powershell
+irm https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version 0.0.3 -Start
+```
+
+The daemon alone (a machine that is not the central one of a site): add `--daemon-only` (Linux) or `-DaemonOnly` (Windows). Remove everything but the data: `... | sudo sh -s -- --uninstall` and `powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`.
+
+After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
+
+```bash
+sudo cat /var/lib/cringle/management/bootstrap-token        # Windows: type C:\ProgramData\Cringle\management\bootstrap-token
+cringle login --server 127.0.0.1:7500 --yes --token-file <file with the token>
+cringle machine list                                          # the machine "local" is this daemon
+```
+
+`--yes` accepts the key of the server that `login` shows: on the same machine that is the server just installed. The web interface is at `https://127.0.0.1:8443`; log in with the same token (the file is deleted at the first login, the token keeps working). Details and options follow below.
+
 The installers set up the daemon as a service from a release (`docs/releasing.md`). Both scripts are attached to every release; download the one for your system, read it if you like, and run it. They download the archive of the release, check its SHA-256 against `SHA256SUMS` and stop before anything is installed if it does not match. A JDK 21 or newer has to be on the machine (the Linux installer only warns if it finds none). The services run on the default ports (daemon 7400, management server 7500).
 
 ### Linux (systemd)
