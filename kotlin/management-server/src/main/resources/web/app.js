@@ -43,11 +43,6 @@ document.addEventListener('htmx:afterRequest', function (event) {
   var item = event.detail.elt && event.detail.elt.closest && event.detail.elt.closest('#flash > .notice');
   if (item && event.detail.successful) item.remove();
 });
-// the hint "refresh paused while you edit" follows the same rule
-setInterval(function () {
-  var hint = document.getElementById('paused');
-  if (hint) hint.hidden = window.cringleIdle();
-}, 1000);
 
 // htmx reports a request that fails at the network or with a status >= 400 as an event; show the answer of the server inline.
 document.addEventListener('htmx:responseError', function (event) {
