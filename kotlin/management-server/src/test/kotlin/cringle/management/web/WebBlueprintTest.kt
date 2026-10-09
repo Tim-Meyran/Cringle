@@ -18,6 +18,7 @@ import cringle.testkit.TestPluginBuilder
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -131,6 +132,24 @@ class WebBlueprintTest {
         assertEquals(cringle.packaging.DeliveryPolicy.BUFFER, tether.delivery)
         assertTrue(tether.record != null)
         assertEquals(mapOf("acme-flow" to "^1.0.0"), read.manifest.dependencies)
+    }
+
+    @Test
+    fun savingInTheEditorKeepsTheAssertionsOfTheDraft() {
+        val connected = graph(node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))), node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))))
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connected, "options" to "{}", "version" to "1.0.0", "roles" to "a", "revision" to "1")).body().contains("revision 2"))
+        // the editor cannot edit assertions: put some into the draft the way a file would carry them
+        val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
+        val draft = drafts.load("project", "flow-app")!!
+        val content = draft.content.jsonObject
+        val blueprint = kotlinx.serialization.json.JsonObject(
+            content.getValue("blueprint").jsonObject + ("assertions" to kotlinx.serialization.json.Json.parseToJsonElement("""[{"type":"fabric-running"},{"type":"block-running","block":"reader"}]""")),
+        )
+        drafts.save("project", "flow-app", draft.version, kotlinx.serialization.json.JsonObject(content + ("blueprint" to blueprint)), draft.revision)
+        // saved again from the graph: the assertions stay
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connected, "options" to "{}", "version" to "1.0.0", "roles" to "a", "revision" to (draft.revision + 1).toString())).body().contains("The blueprint is valid"))
+        val after = cringle.packaging.ManifestJson.parseBlueprint(drafts.load("project", "flow-app")!!.content.jsonObject.getValue("blueprint").toString(), "draft")
+        assertEquals(listOf(cringle.packaging.FabricRunning(), cringle.packaging.BlockRunning("reader")), after.assertions)
     }
 
     @Test

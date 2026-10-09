@@ -88,7 +88,13 @@ public object ManifestJson {
         "format", "kind", "name", "version", "dependencies", "providers", "drivers", "blocks", "libs", "schemas", "processors",
     )
     private val fabricKeys = setOf("blueprint", "instances", "roles", "labels")
-    private val blueprintKeys = setOf("name", "blocks", "tethers", "provides")
+    private val blueprintKeys = setOf("name", "blocks", "tethers", "provides", "assertions")
+    private val assertionKeys = mapOf(
+        "fabric-running" to setOf("type", "name"),
+        "block-running" to setOf("type", "name", "block"),
+        "tether-flow" to setOf("type", "name", "tether", "min", "perSeconds"),
+        "no-errors" to setOf("type", "name"),
+    )
     private val providesKeys = setOf("service", "block", "port", "type")
     private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
     private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote", "record")
@@ -147,7 +153,29 @@ public object ManifestJson {
         val blocks = JsonReading.objectList(o, "blocks", path).mapIndexed { i, b -> block(b, "$file $.blocks[$i]") }
         val tethers = JsonReading.objectList(o, "tethers", path).mapIndexed { i, t -> tether(t, "$file $.tethers[$i]") }
         val provides = if (o.containsKey("provides")) JsonReading.objectList(o, "provides", path).mapIndexed { i, p -> provided(p, "$file $.provides[$i]") } else emptyList()
-        return Blueprint(checkedName(JsonReading.string(o, "name", path), "$path.name"), blocks, tethers, provides)
+        val assertions = if (o.containsKey("assertions")) JsonReading.objectList(o, "assertions", path).mapIndexed { i, a -> assertion(a, "$file $.assertions[$i]") } else emptyList()
+        return Blueprint(checkedName(JsonReading.string(o, "name", path), "$path.name"), blocks, tethers, provides, assertions)
+    }
+
+    private fun assertion(o: JsonObject, path: String): Assertion {
+        val type = JsonReading.string(o, "type", path)
+        val allowed = assertionKeys[type] ?: throw PackageFormatException("$path.type", "unknown assertion type '$type' (one of ${assertionKeys.keys.joinToString()})")
+        JsonReading.keys(o, path, allowed)
+        val name = JsonReading.optString(o, "name", path)?.also {
+            if (it.isEmpty() || it.length > 100) throw PackageFormatException("$path.name", "must be 1 to 100 characters")
+        }
+        return when (type) {
+            "fabric-running" -> FabricRunning(name)
+            "block-running" -> BlockRunning(JsonReading.string(o, "block", path), name)
+            "tether-flow" -> {
+                val min = JsonReading.optLong(o, "min", path) ?: throw PackageFormatException(path, "missing key 'min'")
+                val per = JsonReading.optLong(o, "perSeconds", path) ?: throw PackageFormatException(path, "missing key 'perSeconds'")
+                if (min < 1) throw PackageFormatException("$path.min", "must be at least 1")
+                if (per < 1) throw PackageFormatException("$path.perSeconds", "must be at least 1")
+                TetherFlow(JsonReading.string(o, "tether", path), min, per, name)
+            }
+            else -> NoErrors(name)
+        }
     }
 
     private fun header(text: String, file: String, kind: PackageKind, allowed: Set<String>): JsonObject {
@@ -434,6 +462,28 @@ public object ManifestJson {
                     },
                 ),
             )
+            if (b.assertions.isNotEmpty()) {
+                put(
+                    "assertions",
+                    JsonArray(
+                        b.assertions.map { a ->
+                            buildJsonObject {
+                                put("type", a.type)
+                                a.name?.let { put("name", it) }
+                                when (a) {
+                                    is BlockRunning -> put("block", a.block)
+                                    is TetherFlow -> {
+                                        put("tether", a.tether)
+                                        put("min", a.min)
+                                        put("perSeconds", a.perSeconds)
+                                    }
+                                    is FabricRunning, is NoErrors -> {}
+                                }
+                            }
+                        },
+                    ),
+                )
+            }
             if (b.provides.isNotEmpty()) {
                 put(
                     "provides",

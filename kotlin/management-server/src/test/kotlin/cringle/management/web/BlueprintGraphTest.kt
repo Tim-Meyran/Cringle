@@ -40,7 +40,7 @@ class BlueprintGraphTest {
     private fun roundTrip(blueprint: Blueprint): Blueprint {
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
         val kept = blueprint.tethers.filterNot { BlueprintGraph.drawable(it) }
-        return BlueprintGraph.toBlueprint(blueprint.name, graph, BlueprintGraph.options(blueprint), kept, blueprint.provides, ::definition)
+        return BlueprintGraph.toBlueprint(blueprint.name, graph, BlueprintGraph.options(blueprint), kept, blueprint.provides, blueprint.assertions, ::definition)
     }
 
     @Test
@@ -86,7 +86,7 @@ class BlueprintGraphTest {
 
     @Test
     fun aMalformedOrImpossibleGraphIsRefused() {
-        assertThrows<GraphException> { BlueprintGraph.toBlueprint("x", JsonObject(emptyMap()), JsonObject(emptyMap()), emptyList(), emptyList(), ::definition) }
+        assertThrows<GraphException> { BlueprintGraph.toBlueprint("x", JsonObject(emptyMap()), JsonObject(emptyMap()), emptyList(), emptyList(), emptyList(), ::definition) }
         val blueprint = Blueprint("app", listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("c", "p/sink")), listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in"))))
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
         assertThrows<GraphException> { BlueprintGraph.toBlueprint("app", graph, JsonObject(emptyMap()), emptyList(), emptyList()) { null } }

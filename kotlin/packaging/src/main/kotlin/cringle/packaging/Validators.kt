@@ -127,6 +127,24 @@ public object PackageValidator {
                 problem("$path.config", "'${b.block}' takes no configuration")
             }
         }
+        val localTethers = blueprint.tethers.mapNotNull { it.localId() }.toSet()
+        val declared = HashSet<Assertion>()
+        blueprint.assertions.forEachIndexed { i, a ->
+            val path = "$.assertions[$i]"
+            when (a) {
+                is BlockRunning -> if (blueprint.blocks.none { it.id == a.block }) problem("$path.block", "unknown block '${a.block}'")
+                is TetherFlow -> if (a.tether !in localTethers) problem("$path.tether", "unknown tether '${a.tether}' (a tether between two local ports, written like 'a.out -> b.in')")
+                is FabricRunning, is NoErrors -> {}
+            }
+            // the same check twice (the name is only a label)
+            val key = when (a) {
+                is FabricRunning -> FabricRunning()
+                is NoErrors -> NoErrors()
+                is BlockRunning -> BlockRunning(a.block)
+                is TetherFlow -> TetherFlow(a.tether, a.min, a.perSeconds)
+            }
+            if (!declared.add(key)) problem(path, "duplicate assertion '${a.type}'" + (if (a is BlockRunning) " for block '${a.block}'" else if (a is TetherFlow) " for tether '${a.tether}' with the same window" else ""))
+        }
         val services = HashSet<String>()
         blueprint.provides.forEachIndexed { i, p ->
             val path = "$.provides[$i]"
