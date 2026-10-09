@@ -77,7 +77,7 @@ There is no version in a file. A release gets its version from the build propert
 
 ## Making a release step by step
 
-> **Note:** The workflows run on self-hosted runners (`docs/ci.md`). `.github/workflows/release.yml` makes the release when a tag `v*` is pushed (it attaches the archives, `SHA256SUMS`, `manifest.json`, `winsw.exe`, `install.sh` and `install.ps1`); the steps below are the way by hand. A test tag creates a real release: use a pre-release version (`v0.0.1-test.1`) and delete the release afterwards.
+> **Note:** The workflows run on self-hosted runners (`docs/ci.md`). `.github/workflows/release.yml` makes the release when a tag `v*` is pushed (before that it checks that `CI` passed for the commit of the tag, runs the fast suite and `DistributionTest` against the release version, and does not run the other integration tests again: tag a commit of `master` after its `CI` run is green) (it attaches the archives, `SHA256SUMS`, `manifest.json`, `winsw.exe`, `install.sh` and `install.ps1`); the steps below are the way by hand. A test tag creates a real release: use a pre-release version (`v0.0.1-test.1`) and delete the release afterwards.
 
 1. Make sure `master` is what should be released and `./gradlew build integrationTest` (all modules, both test suites) is green.
 2. Build the distribution with a concrete version number, for example:
