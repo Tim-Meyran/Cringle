@@ -74,7 +74,7 @@ public class WebServer(
         registerFoundation()
         OverviewPages(core).register(this)
         DeploymentPages(core).register(this)
-        users?.let { UserPages(it).register(this) }
+        users?.let { val pages = UserPages(it); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
         val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
         val blueprints = BlueprintPages(core, drafts)

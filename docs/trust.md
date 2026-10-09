@@ -92,6 +92,16 @@ The daemon, the router, the engines and the management server of one machine run
 
 What it is not: whoever can write into the home can make a component trust a key, which is no more than that person can do with the keys in the home anyway. Components on different machines still need fingerprints entered by hand (`cringle trust`). The Gradle tasks `runDaemon`, `runManagementServer`, `runEngine`, `runCli` and `runShell` set it (`docs/running-from-the-ide.md`); the installed services do not.
 
+## Federation: users of another site (#231, #295)
+
+An administrator can trust the registry of another site (Architecture 6.2). Its users then come as `name@registry` with a token that their registry signed with its key; the key is the identity key of the management server (EC P-256).
+
+1. Site B shows its key and fingerprint: `cringle registry key` (WebUI: Registries). Site A compares the fingerprint with B by another way (a call, a message) and enters it: `cringle registry trust site-b --key-file b.pem [--role viewer]` (the file is the PEM of the key or the certificate of B). Without `--role` the users of B can sign in and may do nothing; rights per registry are `--role` and `registry grant <name> <role> --scope ...`, rights per user are the ones of a stored user `name@registry`.
+2. B issues a token for one of its users: `cringle registry issue-token alice --as site-b --ttl 7d`. `--as` is the name under which A entered B. The token is shown once and lives at most 30 days; it is not stored on either side.
+3. Alice uses it like any token (`CRINGLE_TOKEN`, `cringle login`, the web interface): A sees `alice@site-b`, checks the signature with the trusted key, the lifetime and the registry, and applies the rights of the registry.
+
+`cringle registry untrust site-b` ends all its tokens at once; there is no revocation list for a single token, so give short lifetimes. A token of an unknown registry, with another key, changed, expired or too long-lived is refused like any wrong token.
+
 ## What is missing
 
 - When a certificate is renewed and what happens at expiry (Architecture chapter 30).

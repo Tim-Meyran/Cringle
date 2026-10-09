@@ -286,6 +286,41 @@ class CliTest {
         }
     }
 
+    /** #295: a registry trusts the public key of another one; here the server trusts its own key under another name, which is what two sites do with each other's. */
+    @Test
+    fun aTokenOfATrustedRegistryLogsInAsUserAtRegistry() {
+        val key = json(ok("registry", "key", "--json")) as JsonObject
+        val pem = field(key, "publicKey")
+        assertTrue(pem.startsWith("-----BEGIN PUBLIC KEY-----"))
+        val file = dir.resolve("site-b.pem")
+        Files.writeString(file, pem)
+        assertTrue(ok("registry", "list").out.contains("no trusted registry"))
+        val trusted = json(ok("registry", "trust", "site-b", "--key-file", file.toString(), "--role", "viewer", "--json")) as JsonObject
+        assertEquals(field(key, "fingerprint"), field(trusted, "fingerprint"))
+        assertTrue(ok("registry", "list").out.contains("site-b"))
+
+        val token = field(json(ok("registry", "issue-token", "alice", "--as", "site-b", "--ttl", "2h", "--json")) as JsonObject, "token")
+        assertTrue(token.startsWith("fed1."))
+        assertEquals("alice@site-b", field(json(ok("whoami", "--json", token = token)) as JsonObject, "name"))
+        // the rights of the registry: a viewer may read and may not change
+        assertTrue(ok("machine", "list", token = token).out.isNotEmpty())
+        assertTrue(cli("machine", "add", "x", "127.0.0.1:1", token = token).code != 0)
+        ok("registry", "grant", "site-b", "operator", "--scope", "machine:m9")
+        assertTrue(ok("registry", "list").out.contains("operator@machine:m9"))
+        ok("registry", "revoke", "site-b", "operator", "--scope", "machine:m9")
+
+        // a name that was not trusted, a bad key and a wrong lifetime
+        val bogus = field(json(ok("registry", "issue-token", "alice", "--as", "other", "--json")) as JsonObject, "token")
+        assertTrue(cli("whoami", token = bogus).code != 0)
+        Files.writeString(dir.resolve("bad.pem"), "not a key")
+        assertTrue(cli("registry", "trust", "x", "--key-file", dir.resolve("bad.pem").toString(), token = adminToken).code != 0)
+        assertTrue(cli("registry", "issue-token", "alice", "--as", "site-b", "--ttl", "90d", token = adminToken).code != 0)
+
+        ok("registry", "untrust", "site-b")
+        assertTrue(cli("whoami", token = token).code != 0, "the token of a registry that is not trusted any more")
+        assertTrue(ok("registry", "list").out.contains("no trusted registry"))
+    }
+
     @Test
     fun usersGroupsAndTokensAreManagedAndRolesAreEnforced() {
         val created = json(ok("user", "create", "vera", "--role", "viewer", "--json")) as JsonObject

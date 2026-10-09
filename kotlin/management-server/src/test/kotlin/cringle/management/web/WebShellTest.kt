@@ -48,7 +48,7 @@ class WebShellTest : ServiceTestBase() {
         assertEquals(listOf("Machines", "Engines", "Fabrics", "Deployments"), entriesOf(page, "Operate"))
         assertEquals(listOf("Logs", "Metrics", "Data warehouse"), entriesOf(page, "Observe"))
         assertEquals(listOf("Drafts"), entriesOf(page, "Build"))
-        assertEquals(setOf("Users", "Groups", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
+        assertEquals(setOf("Users", "Groups", "Registries", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
         assertEquals(1, Regex("aria-current=\"page\"").findAll(page).count())
         assertTrue(page.contains("<a href=\"/machines\" aria-current=\"page\">Machines</a>"), page)
         // the editors belong to the drafts, a detail page to its list

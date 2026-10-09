@@ -119,7 +119,7 @@ public class ManagementServer(
         .apply {
             // user management (#22) is served here, so that clients need one address only
             if (users != null) {
-                addService(ServerInterceptors.intercept(cringle.router.users.UserGrpcService(users).bindService(), AuthInterceptor(users, cringle.router.users.UserGrpcService.REQUIRED_PERMISSIONS, onAuthenticated = onAuthenticated)))
+                addService(ServerInterceptors.intercept(cringle.router.users.UserGrpcService(users, core.identity.keyPair).bindService(), AuthInterceptor(users, cringle.router.users.UserGrpcService.REQUIRED_PERMISSIONS, onAuthenticated = onAuthenticated)))
             }
         }
         .build()

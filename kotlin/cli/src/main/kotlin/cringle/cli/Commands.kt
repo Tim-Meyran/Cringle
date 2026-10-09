@@ -244,6 +244,18 @@ private fun roleScope(a: Parsed, group: Boolean): cringle.user.v1.RoleScopeReque
     return b.build()
 }
 
+private fun registryRoleScope(a: Parsed): cringle.user.v1.RoleScopeRequest {
+    val scope = a.option("scope") ?: throw UsageException("--scope is required (machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>)")
+    return cringle.user.v1.RoleScopeRequest.newBuilder().setRegistry(a.positional[0]).setRole(roleOf(a.positional[1])).setScope(scopeOf(scope)).build()
+}
+
+private fun registryRow(r: cringle.user.v1.Registry): Map<String, Any?> = linkedMapOf(
+    "name" to r.name,
+    "fingerprint" to r.fingerprint,
+    "roles" to r.rolesList.map(::roleName),
+    "scopedRoles" to r.scopedRolesList.map(::scopedName),
+)
+
 private fun userRow(u: cringle.user.v1.User): Map<String, Any?> = linkedMapOf(
     "id" to u.id,
     "name" to u.name,
@@ -828,6 +840,60 @@ internal val COMMANDS: List<Command> = listOf(
             CreateTokenRequest.newBuilder().setUserId(a.positional[0]).setLabel(a.option("label").orEmpty()).setTtlSeconds((a.long("ttl-days") ?: 0) * 86_400).build(),
         )
         Output.Detail(linkedMapOf("token" to r.token, "id" to r.info.id, "user" to r.info.userId, "label" to r.info.label, "expires" to r.info.expiresAt.iso()))
+    },
+    // --- registries of other sites (federation, #295) ---
+    Command(listOf("registry", "key"), "", "Show the public key with which this site signs federated tokens (the other site enters it with 'registry trust')") { env, _ ->
+        val k = env.users.getRegistryKey(cringle.user.v1.GetRegistryKeyRequest.getDefaultInstance())
+        Output.Detail(linkedMapOf("fingerprint" to k.fingerprint, "publicKey" to k.publicKeyPem))
+    },
+    Command(
+        listOf("registry", "trust"), "<name>", "Trust the registry of another site: its users are accepted as user@<name> (compare the fingerprint with the other site)",
+        listOf(
+            opt("key-file", "PEM file with the public key of the other registry, or its certificate", "FILE"),
+            opt("role", "role of every user of that registry: admin, operator or viewer (repeatable; default: none)", "ROLE", repeatable = true),
+        ),
+        1,
+    ) { env, a ->
+        val file = a.option("key-file") ?: throw UsageException("--key-file is required")
+        val roles = a.options("role").map { roleOf(it) }
+        val r = env.users.trustRegistry(
+            cringle.user.v1.TrustRegistryRequest.newBuilder().setName(a.positional[0]).setPublicKeyPem(Files.readString(Paths.get(file))).addAllRoles(roles).build(),
+        ).registry
+        Output.Detail(registryRow(r))
+    },
+    Command(listOf("registry", "list"), "", "List the trusted registries with their rights") { env, _ ->
+        Output.Rows(env.users.listRegistries(cringle.user.v1.ListRegistriesRequest.getDefaultInstance()).registriesList.map(::registryRow), "no trusted registry")
+    },
+    Command(listOf("registry", "untrust"), "<name>", "Stop trusting a registry; its tokens are refused from now on", minArgs = 1) { env, a ->
+        env.users.untrustRegistry(cringle.user.v1.UntrustRegistryRequest.newBuilder().setName(a.positional[0]).build())
+        Output.Message("no longer trusting registry ${a.positional[0]}")
+    },
+    Command(
+        listOf("registry", "grant"), "<name> <role>", "Give all users of a trusted registry a role for one object only",
+        listOf(opt("scope", "machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        Output.Detail(registryRow(env.users.grantRole(registryRoleScope(a)).registry))
+    },
+    Command(
+        listOf("registry", "revoke"), "<name> <role>", "Take a scoped role of a registry back",
+        listOf(opt("scope", "the scope the role was given for", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        Output.Detail(registryRow(env.users.revokeRole(registryRoleScope(a)).registry))
+    },
+    Command(
+        listOf("registry", "issue-token"), "<user>", "Issue a token for a user of this site that a registry which trusts this one accepts as <user>@<name>; shown once",
+        listOf(
+            opt("as", "the name under which the other site has entered this registry", "NAME"),
+            opt("ttl", "lifetime like 2h or 7d, at most 30d (default 24h)", "DURATION"),
+        ),
+        1,
+    ) { env, a ->
+        val name = a.option("as") ?: throw UsageException("--as is required: the name the other site uses for this registry")
+        val seconds = a.option("ttl")?.let { parseDurationMs(it, "ttl") / 1000 } ?: 0
+        val r = env.users.issueFederatedToken(
+            cringle.user.v1.IssueFederatedTokenRequest.newBuilder().setRegistryName(name).setUser(a.positional[0]).setTtlSeconds(seconds).build(),
+        )
+        Output.Detail(linkedMapOf("token" to r.token, "user" to "${a.positional[0]}@$name", "expires" to r.expiresAt.iso()))
     },
     Command(listOf("token", "list"), "<user-id>", "List the tokens of a user (never their values)", minArgs = 1) { env, a ->
         Output.Rows(
