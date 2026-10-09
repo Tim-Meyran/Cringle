@@ -21,6 +21,7 @@ import cringle.user.v1.ListUsersResponse
 import cringle.user.v1.Role
 import cringle.user.v1.RevokeTokenRequest
 import cringle.user.v1.RevokeTokenResponse
+import cringle.user.v1.RoleScopeResponse
 import cringle.user.v1.UserServiceGrpcKt
 import cringle.user.v1.WhoAmIRequest
 import cringle.user.v1.WhoAmIResponse
@@ -57,12 +58,46 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
         }
     }.toSet()
 
+    private fun toProto(s: Scope): cringle.user.v1.Scope = cringle.user.v1.Scope.newBuilder().setName(s.name).setKind(
+        when (s.kind) {
+            ScopeKind.GLOBAL -> cringle.user.v1.ScopeKind.SCOPE_KIND_GLOBAL
+            ScopeKind.MACHINE -> cringle.user.v1.ScopeKind.SCOPE_KIND_MACHINE
+            ScopeKind.PROJECT -> cringle.user.v1.ScopeKind.SCOPE_KIND_PROJECT
+            ScopeKind.FABRIC -> cringle.user.v1.ScopeKind.SCOPE_KIND_FABRIC
+            ScopeKind.FUNCTION -> cringle.user.v1.ScopeKind.SCOPE_KIND_FUNCTION
+        },
+    ).build()
+
+    private fun fromProto(s: cringle.user.v1.Scope): Scope {
+        val kind = when (s.kind) {
+            cringle.user.v1.ScopeKind.SCOPE_KIND_GLOBAL -> ScopeKind.GLOBAL
+            cringle.user.v1.ScopeKind.SCOPE_KIND_MACHINE -> ScopeKind.MACHINE
+            cringle.user.v1.ScopeKind.SCOPE_KIND_PROJECT -> ScopeKind.PROJECT
+            cringle.user.v1.ScopeKind.SCOPE_KIND_FABRIC -> ScopeKind.FABRIC
+            cringle.user.v1.ScopeKind.SCOPE_KIND_FUNCTION -> ScopeKind.FUNCTION
+            else -> throw Status.INVALID_ARGUMENT.withDescription("scope kind must be specified").asException()
+        }
+        return try {
+            Scope(kind, s.name)
+        } catch (e: IllegalArgumentException) {
+            throw Status.INVALID_ARGUMENT.withDescription(e.message).asException()
+        }
+    }
+
+    private fun toProto(a: RoleAssignment): cringle.user.v1.RoleAssignment =
+        cringle.user.v1.RoleAssignment.newBuilder().setRole(toRole(a.role)).setScope(toProto(a.scope)).build()
+
     private fun ts(i: Instant): Timestamp = Timestamp.newBuilder().setSeconds(i.epochSecond).setNanos(i.nano).build()
 
     private fun proto(v: UserView): cringle.user.v1.User = cringle.user.v1.User.newBuilder()
         .setId(v.user.id).setName(v.user.name)
         .addAllRoles(v.user.roles.sorted().map(::toRole)).addAllGroups(v.user.groups.sorted())
-        .addAllEffectiveRoles(v.effectiveRoles.sorted().map(::toRole)).build()
+        .addAllEffectiveRoles(v.effectiveRoles.sorted().map(::toRole))
+        .addAllScopedRoles(v.user.scoped.sortedBy { it.scope.encode() }.map(::toProto))
+        .addAllEffectiveScopedRoles(v.effectiveScoped.sortedBy { it.scope.encode() }.map(::toProto)).build()
+
+    private fun proto(g: Group): cringle.user.v1.Group = cringle.user.v1.Group.newBuilder().setName(g.name).addAllRoles(g.roles.sorted().map(::toRole))
+        .addAllScopedRoles(g.scoped.sortedBy { it.scope.encode() }.map(::toProto)).build()
 
     private fun proto(t: TokenInfo): cringle.user.v1.TokenInfo = cringle.user.v1.TokenInfo.newBuilder()
         .setId(t.id).setUserId(t.userId).setLabel(t.label).setCreatedAt(ts(t.createdAt)).setRevoked(t.revoked)
@@ -81,12 +116,11 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
 
     override suspend fun createGroup(request: CreateGroupRequest): CreateGroupResponse {
         val g = call { users.createGroup(request.name, fromRoles(request.rolesList)) }
-        return CreateGroupResponse.newBuilder()
-            .setGroup(cringle.user.v1.Group.newBuilder().setName(g.name).addAllRoles(g.roles.sorted().map(::toRole))).build()
+        return CreateGroupResponse.newBuilder().setGroup(proto(g)).build()
     }
 
     override suspend fun listGroups(request: ListGroupsRequest): ListGroupsResponse = ListGroupsResponse.newBuilder()
-        .addAllGroups(users.listGroups().map { cringle.user.v1.Group.newBuilder().setName(it.name).addAllRoles(it.roles.sorted().map(::toRole)).build() })
+        .addAllGroups(users.listGroups().map(::proto))
         .build()
 
     override suspend fun createToken(request: CreateTokenRequest): CreateTokenResponse {
@@ -103,6 +137,25 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
         call { users.revokeToken(request.tokenId) }
         return RevokeTokenResponse.getDefaultInstance()
     }
+
+    private fun change(request: cringle.user.v1.RoleScopeRequest, grant: Boolean): RoleScopeResponse {
+        val role = fromRoles(listOf(request.role)).single()
+        val scope = fromProto(request.scope)
+        if ((request.userId.isEmpty()) == (request.group.isEmpty())) throw Status.INVALID_ARGUMENT.withDescription("name exactly one of user_id and group").asException()
+        val response = RoleScopeResponse.newBuilder()
+        call {
+            if (request.userId.isNotEmpty()) {
+                response.user = proto(if (grant) users.grantUser(request.userId, role, scope) else users.revokeUser(request.userId, role, scope))
+            } else {
+                response.group = proto(if (grant) users.grantGroup(request.group, role, scope) else users.revokeGroup(request.group, role, scope))
+            }
+        }
+        return response.build()
+    }
+
+    override suspend fun grantRole(request: cringle.user.v1.RoleScopeRequest): RoleScopeResponse = change(request, true)
+
+    override suspend fun revokeRole(request: cringle.user.v1.RoleScopeRequest): RoleScopeResponse = change(request, false)
 
     override suspend fun whoAmI(request: WhoAmIRequest): WhoAmIResponse {
         val current = AuthInterceptor.CURRENT_USER.get() ?: throw Status.UNAUTHENTICATED.asException()
@@ -121,6 +174,8 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
             "cringle.user.v1.UserService/CreateToken" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/ListTokens" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/RevokeToken" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/GrantRole" to Permission.MANAGE_USERS,
+            "cringle.user.v1.UserService/RevokeRole" to Permission.MANAGE_USERS,
             "cringle.user.v1.UserService/WhoAmI" to Permission.AUTHENTICATED,
         )
     }

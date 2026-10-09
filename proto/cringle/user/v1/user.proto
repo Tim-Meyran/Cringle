@@ -36,6 +36,12 @@ service UserService {
   // Revokes a token.
   rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
 
+  // Gives a user or a group a role for one object only (a machine, a project, a fabric or a framework function).
+  rpc GrantRole(RoleScopeRequest) returns (RoleScopeResponse);
+
+  // Takes a scoped role of a user or a group back.
+  rpc RevokeRole(RoleScopeRequest) returns (RoleScopeResponse);
+
   // Returns the user the presented token belongs to.
   rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
 }
@@ -52,6 +58,43 @@ enum Role {
   ROLE_END_USER = 4;
 }
 
+enum ScopeKind {
+  SCOPE_KIND_UNSPECIFIED = 0;
+  // Everything.
+  SCOPE_KIND_GLOBAL = 1;
+  SCOPE_KIND_MACHINE = 2;
+  SCOPE_KIND_PROJECT = 3;
+  SCOPE_KIND_FABRIC = 4;
+  // A framework function: "trust", "plugin-trust" or "users".
+  SCOPE_KIND_FUNCTION = 5;
+}
+
+// The object a role applies to; `name` is empty for the global scope.
+message Scope {
+  ScopeKind kind = 1;
+  string name = 2;
+}
+
+// A role limited to a scope.
+message RoleAssignment {
+  Role role = 1;
+  Scope scope = 2;
+}
+
+message RoleScopeRequest {
+  // Exactly one of the two names the subject.
+  string user_id = 1;
+  string group = 2;
+  Role role = 3;
+  Scope scope = 4;
+}
+
+message RoleScopeResponse {
+  // The user or the group after the change.
+  User user = 1;
+  Group group = 2;
+}
+
 message User {
   string id = 1;
   string name = 2;
@@ -60,11 +103,16 @@ message User {
   repeated string groups = 4;
   // Roles the user has including those of its groups.
   repeated Role effective_roles = 5;
+  // Roles limited to an object, given to the user directly.
+  repeated RoleAssignment scoped_roles = 6;
+  // Scoped roles including those of the groups.
+  repeated RoleAssignment effective_scoped_roles = 7;
 }
 
 message Group {
   string name = 1;
   repeated Role roles = 2;
+  repeated RoleAssignment scoped_roles = 3;
 }
 
 message TokenInfo {

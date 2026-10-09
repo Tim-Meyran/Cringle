@@ -9,6 +9,7 @@
 | [cli.md](cli.md) | Die Kommandozeile `cringle`: Verbindung mit gepinntem TLS, Befehle. Englisch. |
 | [management-server.md](management-server.md) | ManagementServer: Zustand, Deployment, Kanäle und Trust. Englisch. |
 | [block-data.md](block-data.md) | Datenordner eines Blocks (`BlockContext.dataDirectory`), unabhängig von Fabric-ID und Version. Englisch. |
+| [users.md](users.md) | Benutzer, Gruppen, Rollen und ihre Gültigkeitsbereiche (Scopes). Englisch. |
 | [webui.md](webui.md) | WebUI des ManagementServers (htmx, Alpine.js, Drawflow): Start, Login, Sicherheit, Aufbau von Seiten. Englisch. |
 | [daemon-service.md](daemon-service.md) | Daemon als Dienst, Engine-Identität und Trust-Dateien. Englisch. |
 | [gradle-plugin.md](gradle-plugin.md) | Gradle-Plugins `cringle.plugin` und `cringle.project`, `cringlePublish`. Englisch. |
