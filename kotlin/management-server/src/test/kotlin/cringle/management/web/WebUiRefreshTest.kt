@@ -54,7 +54,6 @@ class WebUiRefreshTest {
         for (name in polled) {
             val page = ui.get("/$name").body()
             assertTrue(page.contains("hx-get=\"/$name/list\" hx-trigger=\"every 5s [cringleIdle()]\" hx-swap=\"morph:innerHTML\""), "$name: $page")
-            assertTrue(page.contains("id=\"paused\"") && page.contains("Refresh now"), name)
         }
     }
 

@@ -64,7 +64,6 @@ internal fun Any.pretty(): String = toString().substringAfter("STATE_").lowercas
 /** A page body: the title block and the self-refreshing `#list`; [actions] stand on the right of the title. */
 internal fun section(title: String, subtitle: String, name: String, initial: Html, actions: Html = Html("")): Html = html(
     pageHeader(title, subtitle, actions),
-    h("<p id=\"paused\" class=\"paused\" role=\"status\" hidden>Refresh paused while you edit. <a href=\"/{}/list\" hx-get=\"/{}/list\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">Refresh now</a></p>", name, name),
     // the refresh morphs the list in place and waits while the user is working in it (see `cringleIdle` in app.js)
     h("<div id=\"list\" hx-get=\"/{}/list\" hx-trigger=\"every 5s [cringleIdle()]\" hx-swap=\"morph:innerHTML\">", name),
     initial,

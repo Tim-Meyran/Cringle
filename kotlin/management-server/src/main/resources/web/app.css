@@ -205,7 +205,6 @@ ul.errors { color: var(--danger); }
 .auth-key code { display: inline-block; margin-top: var(--space-1); }
 
 /* the lists that refresh themselves */
-#paused { color: var(--warning); font-size: var(--text-sm); }
 #list { min-height: 2rem; }
 
 /* the blueprint editor */
@@ -263,8 +262,6 @@ tr.log td { vertical-align: top; }
 .stat { color: var(--text-muted); margin-left: var(--space-4); font-size: var(--text-sm); }
 details.engine summary strong { color: var(--text); }
 .hint { color: var(--text-muted); font-size: var(--text-sm); margin: calc(-1 * var(--space-2)) 0 var(--space-3); }
-.paused { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--warning-tint); color: var(--warning); font-size: var(--text-sm); }
-.paused[hidden] { display: none; }
 code.fp { cursor: copy; }
 code.fp:hover { border-color: var(--accent); }
 code.copied { border-color: var(--success); color: var(--success); }
