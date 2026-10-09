@@ -90,6 +90,23 @@ internal class OverviewPages(private val core: ManagementCore) {
                         f.info.blocksList.map { b -> h("<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"error\">{}</td></tr>", b.blockId.value, stateBadge(b.state.name.removePrefix("BLOCK_RUNTIME_STATE_").lowercase()), b.restarts, b.lastError) },
                         raw("This fabric has no block."),
                     ),
+                    if (f.info.assertionsList.isEmpty()) {
+                        Html("")
+                    } else {
+                        html(
+                            raw("<h2>Assertions</h2>"),
+                            dataTable(
+                                listOf("Assertion", "State", "Since", "Detail"),
+                                f.info.assertionsList.map { a ->
+                                    h(
+                                        "<tr><td>{}</td><td>{}</td><td><time datetime=\"{}\">{}</time></td><td>{}</td></tr>",
+                                        a.id, stateBadge(a.state.name.removePrefix("ASSERTION_STATE_").lowercase()), java.time.Instant.ofEpochSecond(a.since.seconds), java.time.Instant.ofEpochSecond(a.since.seconds).toString().replace('T', ' ').removeSuffix("Z") + " UTC", a.detail,
+                                    )
+                                },
+                                raw("No assertion."),
+                            ),
+                        )
+                    },
                 )
             } catch (e: Exception) {
                 html(pageHeader("Fabric", "", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")), h("<p class=\"notice error\" role=\"alert\">{}</p>", describe(e)))
@@ -168,6 +185,12 @@ internal class OverviewPages(private val core: ManagementCore) {
             )
         }
 
+    /** A red badge "n violated" next to the state of a fabric when assertions of its blueprint are violated; nothing otherwise. */
+    private fun violatedBadge(info: cringle.engine.v1.FabricInfo): Html {
+        val violated = info.assertionsList.count { it.state == cringle.engine.v1.AssertionState.ASSERTION_STATE_VIOLATED }
+        return if (violated == 0) Html("") else h(" {}", badge("$violated violated", Tone.BAD))
+    }
+
     private suspend fun fabrics(session: Session, message: String?): Html {
         val rows = core.listFabrics(null, null).filter { session.canFor(Permission.READ, core.access.fabric(it.machine, it.info.fabricId.value)) }.map { f ->
             val id = f.info.fabricId.value
@@ -175,8 +198,8 @@ internal class OverviewPages(private val core: ManagementCore) {
             val base = "/fabrics/${f.machine}/${f.engineId}/$id"
             val running = f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING || f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_STARTING
             h(
-                "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
-                base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"),
+                "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}{}</td><td>{}</td>{}</tr>",
+                base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), violatedBadge(f.info), stateBadge(if (f.desiredRunning) "running" else "stopped"),
                 actionsCell(
                     if (running) button(session, Permission.OPERATE, "Stop", "$base/stop", scopes = scopes)
                     else button(session, Permission.OPERATE, if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) "Retry" else "Start", "$base/start", scopes = scopes),

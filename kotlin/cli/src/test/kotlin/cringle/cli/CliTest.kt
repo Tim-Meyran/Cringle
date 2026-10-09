@@ -384,7 +384,12 @@ class CliTest {
         val plugin = MarkerFixture.plugin(work)
         val project = TestProjectBuilder("demo", "0.1.0")
             .dependency("acme-demo", "^1.0.0")
-            .blueprint(Blueprint("main", listOf(MarkerFixture.block("b1", marker)), emptyList()))
+            .blueprint(
+                Blueprint(
+                    "main", listOf(MarkerFixture.block("b1", marker)), emptyList(),
+                    assertions = listOf(cringle.packaging.FabricRunning(), cringle.packaging.BlockRunning("b1")),
+                ),
+            )
             .fabric(FabricConfig("main", 1, listOf("worker"), emptyMap()))
             .build(work, listOf(plugin.pkg))
         ok("repo", "publish", plugin.file.toString())
@@ -398,6 +403,13 @@ class CliTest {
         val fabrics = ok("fabric", "list")
         assertTrue(fabrics.out.contains("demo-main-1") && fabrics.out.contains("running"))
         assertTrue(ok("fabric", "status", "m1", "e1", "demo-main-1").out.contains("b1"))
+        // assertions (#293): the list says it in one word, the status lists them, --json has them
+        assertTrue(Regex("CHECKS").containsMatchIn(fabrics.out) && fabrics.out.lines().any { it.contains("demo-main-1") && it.trimEnd().endsWith("ok") }, fabrics.out)
+        val status = ok("fabric", "status", "m1", "e1", "demo-main-1").out
+        assertTrue(status.contains("fabric-running") && status.contains("block-running:b1") && status.contains("block b1 is running"), status)
+        val assertions = (json(ok("fabric", "status", "m1", "e1", "demo-main-1", "--json")) as JsonObject)["assertions"] as JsonArray
+        assertEquals(listOf("fabric-running", "block-running:b1"), assertions.map { field(it as JsonObject, "assertion") })
+        assertEquals(listOf("ok", "ok"), assertions.map { field(it as JsonObject, "state") })
         // metrics (#191)
         assertTrue(ok("metrics").out.contains("e1") && ok("metrics").out.contains("HEAPUSEDMB"))
         assertTrue(ok("metrics", "--fabrics").out.contains("demo-main-1"))

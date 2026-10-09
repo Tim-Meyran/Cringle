@@ -150,3 +150,9 @@ internal fun stateBadge(state: String): Html = badge(
 /** The content of a page for a status that is not 200 (a missing page, a refused request), shown inside the frame. */
 internal fun problemContent(title: String, text: String): Html =
     h("<div class=\"problem\"><h1>{}</h1><p class=\"subtitle\">{}</p><p><a class=\"btn\" href=\"/\">Back to the dashboard</a></p></div>", title, text)
+
+/** A red badge "n violated" next to the state of a fabric when assertions of its blueprint are violated; nothing otherwise. */
+internal fun violatedBadge(info: cringle.engine.v1.FabricInfo): Html {
+    val violated = info.assertionsList.count { it.state == cringle.engine.v1.AssertionState.ASSERTION_STATE_VIOLATED }
+    return if (violated == 0) Html("") else h(" {}", badge("$violated violated", Tone.BAD))
+}

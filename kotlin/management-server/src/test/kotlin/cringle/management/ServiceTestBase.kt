@@ -183,6 +183,7 @@ abstract class ServiceTestBase {
                     listOf(BlueprintBlock("s1", "acme-svc/sink", config = JsonObject(mapOf("file" to JsonPrimitive(file.toString()))))),
                     emptyList(),
                     listOf(ProvidedService("orders", "s1", "in")),
+                    assertions = listOf(cringle.packaging.FabricRunning(), cringle.packaging.BlockRunning("s1")),
                 ),
             )
             .fabric(FabricConfig("service", 1, listOf(role), emptyMap()))

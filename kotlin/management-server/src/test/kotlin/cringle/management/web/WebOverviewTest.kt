@@ -44,7 +44,10 @@ class WebOverviewTest : ServiceTestBase() {
         val fabric = "/fabrics/m1/e-svc/orders-service-service-1"
         assertTrue(Regex("badge neutral\">stopped</span></td><td><span class=\"badge neutral\">stopped").containsMatchIn(admin.post("$fabric/stop").body()))
         assertTrue(Regex("badge ok\">running</span></td><td><span class=\"badge ok\">running").containsMatchIn(admin.post("$fabric/start").body()))
-        assertTrue(admin.get(fabric).body().contains("s1"))
+        val page = admin.get(fabric).body()
+        assertTrue(page.contains("s1"))
+        // the assertions of the blueprint (#293)
+        assertTrue(page.contains("Assertions") && page.contains("block-running:s1") && page.contains("block s1 is running") && page.contains("badge ok\">ok"), page)
 
         assertTrue(admin.post("$fabric/remove").body().let { !it.contains("orders-service-service-1") })
         assertEquals(emptySet<String>(), fabrics().keys)
