@@ -54,6 +54,31 @@ class WebUsersTest {
     private fun idOf(name: String) = users.listUsers().first { it.user.name == name }.user.id
 
     @Test
+    fun aNewTokenComesWithALoginLinkAndAQrCode() {
+        val answer = admin.post("/users/${idOf("vera")}/tokens", mapOf("label" to "phone", "hours" to "2")).body()
+        val secret = Regex("<code data-copy=\"(crt_[^\"]+)\"").find(answer)!!.groupValues[1]
+        val link = Regex("<code data-copy=\"(https://[^\"]+)\"").find(answer)!!.groupValues[1]
+        assertEquals("https://localhost:${server.port}/login#token=$secret", link)
+        assertTrue(answer.contains("<svg class=\"qr\"") && answer.contains("role=\"img\"") && answer.contains("aria-label=\"Login link for vera\""), answer)
+        assertTrue(answer.contains("It expires"), "the expiry is said")
+        // the polled list never holds the token, the link or the code
+        val list = admin.get("/users/list").body()
+        assertFalse(list.contains(secret) || list.contains("<svg class=\"qr\""))
+    }
+
+    @Test
+    fun theWebUrlIsTheBaseOfTheLink() {
+        val tls = ManagementTls(dir.resolve("tls2"))
+        val core = tls.core(ManagementStore(dir.resolve("state2.json")))
+        closeables += core
+        val other = WebServer(core, users, 0, failedLoginDelay = java.time.Duration.ZERO, webUrl = "https://cringle.example:8443/").start()
+        closeables += other
+        val client = WebTestClient(other.port, tls.identity.publicKeyFingerprint).login(users.createToken(idOf("admin"), "x", null).secret)
+        val answer = client.post("/users/${idOf("vera")}/tokens", mapOf("label" to "phone")).body()
+        assertTrue(Regex("<code data-copy=\"https://cringle\\.example:8443/login#token=crt_[^\"]+\"").containsMatchIn(answer), answer)
+    }
+
+    @Test
     fun aCreatedUserGetsATokenThatLogsIn() {
         assertTrue(admin.post("/groups", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<strong>ops</strong></td><td><span class=\"tag\">operator</span>"))
         val created = admin.post("/users", mapOf("name" to "bob", "role-VIEWER" to "on", "groups" to "ops")).body()

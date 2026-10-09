@@ -15,7 +15,7 @@ import java.time.Duration
  * The pages for users, groups and tokens (#210): the functions of `cringle user|group|token ...`, all behind `MANAGE_USERS`. A token value is shown
  * once, in the answer to its creation; it is not kept. Only registered when the ManagementServer runs with `--auth`.
  */
-internal class UserPages(private val users: UserManager) {
+internal class UserPages(private val users: UserManager, private val web: WebServer) {
     fun register(web: WebServer) {
         val usersScope = listOf(Scope(ScopeKind.FUNCTION, "users"))
         web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS, "Administer", usersScope), NavItem("Groups", "/groups", Permission.MANAGE_USERS, "Administer", usersScope))
@@ -41,7 +41,8 @@ internal class UserPages(private val users: UserManager) {
             val error = attempt {
                 val hours = req.form["hours"]?.trim()?.takeIf { it.isNotEmpty() }?.let { it.toLongOrNull() ?: throw UserException(UserException.Kind.INVALID, "lifetime must be a number of hours") }
                 val token = users.createToken(req.params.getValue("id"), req.form["label"].orEmpty().trim().ifEmpty { "web" }, hours?.let { Duration.ofHours(it) })
-                created = h("Token <code data-copy=\"{}\" title=\"Click to copy\">{}</code> (shown once, copy it now).", token.secret, token.secret)
+                val name = users.listUsers().firstOrNull { it.user.id == req.params.getValue("id") }?.user?.name ?: "user"
+                created = tokenMessage(web.baseUrl(req) + "/login#token=" + token.secret, token.secret, name, token.info.expiresAt)
             }
             fragment(usersList(error, created))
         }
@@ -129,6 +130,17 @@ internal class UserPages(private val users: UserManager) {
             formPanel("Create a user", "The new user gets no token yet: create one in the Tokens column. The value is shown once.", createForm),
         )
     }
+
+    /** What a new token shows: the value, the login link and the QR code of the link; the fragment keeps the token out of every server and log. */
+    private fun tokenMessage(link: String, secret: String, user: String, expiresAt: java.time.Instant?): Html = h(
+        "<div class=\"token-share\"><p>Token <code data-copy=\"{}\" title=\"Click to copy\">{}</code> (shown once, copy it now).{}</p>" +
+            "<p>Login link <code data-copy=\"{}\" title=\"Click to copy\">{}</code></p>{}<p class=\"hint\">Scan the code or open the link to sign in as {}. Treat this screen like a password.</p></div>",
+        secret, secret,
+        if (expiresAt != null) h(" It expires {}.", expiresAt.toString().take(16).replace("T", " ") + " UTC") else Html(""),
+        link, link.substringBefore('#') + "#token=…",
+        raw(cringle.common.qr.QrCode.encode(link).toSvg("Login link for $user")),
+        user,
+    )
 
     private fun tokenPopover(userId: String, tokens: List<cringle.router.users.TokenInfo>): Html = h(
         "<details class=\"popover wide\"><summary>{} active</summary><div class=\"popover-body\">{}<form class=\"form-row\" hx-post=\"/users/{}/tokens\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary small\">Create token</button></form></div></details>",

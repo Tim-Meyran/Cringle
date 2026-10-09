@@ -76,3 +76,5 @@ a fabric of that id is deployed again or restored by `Recover`; it is removed wh
 ## Web interface (#207)
 
 With `--web-port <port>` the ManagementServer also serves a web interface over HTTPS (login with the user tokens, sessions, CSRF protection); see [webui.md](webui.md).
+
+**Public address of the web interface (`--web-url`).** `--web-url https://host[:port]` is the address that the web interface puts into login links and QR codes (`docs/webui.md`); without it the `Host` header of the request is used. It must be an `https` URL without path, query or fragment.
