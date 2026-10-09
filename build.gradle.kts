@@ -5,6 +5,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
@@ -35,6 +37,15 @@ spotless {
 
 val versionCatalog = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
+// The modules build in parallel, but the integration tests of two modules never run at the same time: they start processes and write files,
+// and under the load of several modules at once a stopped process can still hold its log file on Windows. Inside a module the test classes
+// run in several JVMs (`maxParallelForks`).
+abstract class IntegrationTestLock : BuildService<BuildServiceParameters.None>
+
+val integrationTestLock = gradle.sharedServices.registerIfAbsent("integrationTestLock", IntegrationTestLock::class) {
+    maxParallelUsages.set(1)
+}
+
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
@@ -49,8 +60,12 @@ subprojects {
     }
 
     // The default `test` task is the fast suite; the tests tagged "integration" (real processes, ports, nested Gradle builds) run in `integrationTest`.
+    // Test classes run in several JVMs at once; `-PtestForks=1` turns it off. Tests use ports and directories of their own (port 0, temp dirs), so forks do not meet.
+    val testForks = providers.gradleProperty("testForks").map { it.toInt() }.orElse((Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4))
+
     tasks.named<Test>("test") {
         useJUnitPlatform { excludeTags("integration") }
+        maxParallelForks = testForks.get()
     }
 
     tasks.register<Test>("integrationTest") {
@@ -60,6 +75,8 @@ subprojects {
         testClassesDirs = test.output.classesDirs
         classpath = test.runtimeClasspath
         useJUnitPlatform { includeTags("integration") }
+        maxParallelForks = testForks.get()
+        usesService(integrationTestLock)
         shouldRunAfter(tasks.named("test"))
     }
 }
