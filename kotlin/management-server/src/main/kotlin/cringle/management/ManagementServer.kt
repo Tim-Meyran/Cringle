@@ -204,6 +204,11 @@ public class ManagementServer(
             cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).setStrategy(r.strategy).build()
         }
 
+        override suspend fun rollback(request: cringle.management.v1.RollbackRequest): cringle.management.v1.DeployProjectResponse = guard {
+            val r = core.rollback(request.project, request.version.ifEmpty { null })
+            cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).setStrategy(r.strategy).build()
+        }
+
         override suspend fun undeploy(request: cringle.management.v1.UndeployRequest): cringle.management.v1.UndeployResponse = guard {
             cringle.management.v1.UndeployResponse.newBuilder().addAllRemoved(core.undeploy(request.project)).build()
         }
@@ -379,6 +384,7 @@ public class ManagementServer(
             "GetEngine" to Permission.READ,
             "SetEngineTags" to Permission.OPERATE,
             "Deploy" to Permission.OPERATE,
+            "Rollback" to Permission.OPERATE,
             "Undeploy" to Permission.OPERATE,
             "Bind" to Permission.OPERATE,
             "Unbind" to Permission.OPERATE,

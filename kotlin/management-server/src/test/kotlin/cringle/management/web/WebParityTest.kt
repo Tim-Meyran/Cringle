@@ -30,7 +30,7 @@ class WebParityTest {
         "engine delete" to "POST /engines/m1/e1/delete", "engine list" to "GET /engines", "engine status" to "GET /engines/list", "engine tag" to "POST /engines/m1/e1/tags",
         "fabric list" to "GET /fabrics", "fabric status" to "GET /fabrics/m1/e1/f1", "fabric start" to "POST /fabrics/m1/e1/f1/start",
         "fabric stop" to "POST /fabrics/m1/e1/f1/stop", "fabric remove" to "POST /fabrics/m1/e1/f1/remove",
-        "deploy" to "POST /deployments", "undeploy" to "POST /deployments/p/undeploy",
+        "deploy" to "POST /deployments", "rollback" to "POST /deployments/p/rollback", "undeploy" to "POST /deployments/p/undeploy",
         "bind" to "POST /bindings", "unbind" to "POST /bindings/p/s/unbind", "bindings" to "GET /deployments/list",
         "logs" to "GET /logs/list", "metrics" to "GET /metrics/list",
         "dwh list" to "GET /dwh/list", "dwh query" to "GET /dwh/records", "dwh record" to "POST /dwh/recording", "dwh retention" to "POST /dwh/retention",

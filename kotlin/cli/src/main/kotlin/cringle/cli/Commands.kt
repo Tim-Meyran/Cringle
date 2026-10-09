@@ -431,6 +431,13 @@ internal val COMMANDS: List<Command> = listOf(
     Command(listOf("bindings"), "[project]", "List the bindings of service dependencies, of one project or of all", minArgs = 0, maxArgs = 1) { env, a ->
         Output.Rows(env.m.listBindings(cringle.management.v1.ListBindingsRequest.newBuilder().setConsumerProject(a.positional.firstOrNull().orEmpty()).build()).bindingsList.map(::bindingRow), "no bindings")
     },
+    Command(
+        listOf("rollback"), "<project>", "Go back to an earlier version of a project (the one deployed before, or --to <version>), with the lock file it had",
+        listOf(opt("to", "the version to go back to (default: the one deployed before the running one)", "VERSION")), minArgs = 1,
+    ) { env, a ->
+        val r = env.m.rollback(cringle.management.v1.RollbackRequest.newBuilder().setProject(a.positional[0]).setVersion(a.option("to").orEmpty()).build())
+        Output.Detail(linkedMapOf("project" to r.project, "version" to r.version, "strategy" to r.strategy, "fabrics" to r.fabricsList.map(::fabricRow)))
+    },
     Command(listOf("undeploy"), "<project>", "Stop and remove all fabrics of a project", minArgs = 1) { env, a ->
         val removed = env.m.undeploy(UndeployRequest.newBuilder().setProject(a.positional[0]).build()).removedList
         Output.Detail(linkedMapOf("removed" to removed))

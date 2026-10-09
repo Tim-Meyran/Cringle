@@ -248,13 +248,13 @@ abstract class ServiceTestBase {
                 }
             }
         """.trimIndent()
-        for (v in listOf("1.0.0", "2.0.0")) {
+        for (v in listOf("1.0.0", "2.0.0", "3.0.0")) {
             val mig = TestPluginBuilder("acme-mig", v)
                 .provider("com.acme.SvcProvider")
                 .block(BlockDefinition("caller", emptyList(), listOf(PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "String"))), emptyList(), SchemaRef("acme.svc", "CallerConfig")))
                 .schema("svc.json", schema)
                 .lib("svc.jar", TestJar.fromJavaSources(sources + ("com.acme.MigUp" to migration)))
-                .also { if (v == "2.0.0") it.processors(update = "com.acme.MigUp") }
+                .also { if (v != "1.0.0") it.processors(update = "com.acme.MigUp", downgrade = "com.acme.MigUp") }
                 .build(work)
             repository.publish(mig.file)
             repository.publish(

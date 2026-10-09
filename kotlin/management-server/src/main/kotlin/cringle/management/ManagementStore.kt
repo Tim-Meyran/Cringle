@@ -53,6 +53,9 @@ public data class BindingRecord(val consumerProject: String, val service: String
 /** The recording mode of a fabric (#194): every typed tether is recorded, with these limits for tethers without their own (0 = no limit). */
 public data class RecordingRecord(val fabricId: String, val maxAgeMs: Long = 0, val maxBytes: Long = 0)
 
+/** A project version that was deployed (#228); the history is what a rollback chooses from. The lock file of the version is kept next to the state. */
+public data class DeploymentRecord(val project: String, val version: String, val atMs: Long)
+
 /** Everything the ManagementServer persists. */
 public data class ManagementData(
     val machines: List<MachineRecord> = emptyList(),
@@ -60,6 +63,7 @@ public data class ManagementData(
     val fabrics: List<FabricRecord> = emptyList(),
     val bindings: List<BindingRecord> = emptyList(),
     val recordings: List<RecordingRecord> = emptyList(),
+    val deployments: List<DeploymentRecord> = emptyList(),
 )
 
 /** Thrown when the state file exists but cannot be read; the server refuses to start then instead of forgetting its machines. */
@@ -105,6 +109,10 @@ public class ManagementStore(private val file: Path) {
                     val o = it as JsonObject
                     RecordingRecord(o.text("fabricId"), (o["maxAgeMs"] as? JsonPrimitive)?.content?.toLong() ?: 0, (o["maxBytes"] as? JsonPrimitive)?.content?.toLong() ?: 0)
                 } ?: emptyList(),
+                deployments = (root["deployments"] as? JsonArray)?.map {
+                    val o = it as JsonObject
+                    DeploymentRecord(o.text("project"), o.text("version"), (o["atMs"] as? JsonPrimitive)?.content?.toLong() ?: 0)
+                } ?: emptyList(),
             )
         } catch (e: ManagementStoreException) {
             throw e
@@ -141,6 +149,13 @@ public class ManagementStore(private val file: Path) {
                     put("fabricId", f.fabricId)
                     put("deploy", java.util.Base64.getEncoder().encodeToString(f.deploy))
                     put("desiredRunning", f.desiredRunning)
+                })
+            }
+            putJsonArray("deployments") {
+                for (d in data.deployments) add(buildJsonObject {
+                    put("project", d.project)
+                    put("version", d.version)
+                    put("atMs", d.atMs)
                 })
             }
             putJsonArray("recordings") {

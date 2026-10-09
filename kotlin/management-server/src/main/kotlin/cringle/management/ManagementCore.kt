@@ -886,7 +886,71 @@ public class ManagementCore(
             sideBySide -> "blue-green"
             else -> "stop-then-start ($strategyReason)"
         }
+        recordDeployment(project, version)
         return DeployResult(project, version, lockText, deployed, strategy)
+    }
+
+    /** Remembers that [version] of [project] is now deployed; a repeat of the last entry is not recorded again, and 20 entries per project are kept. */
+    private fun recordDeployment(project: String, version: String) {
+        update { d ->
+            val mine = d.deployments.filter { it.project == project }
+            if (mine.lastOrNull()?.version == version) return@update d to Unit
+            val kept = (mine + DeploymentRecord(project, version, System.currentTimeMillis())).takeLast(20)
+            d.copy(deployments = d.deployments.filter { it.project != project } + kept) to Unit
+        }
+    }
+
+    /** The version of [project] that its fabrics run now, or `null` if it is not deployed. */
+    private fun currentVersion(project: String): String? =
+        snapshot().fabrics.firstOrNull { projectOf(it) == project }?.let { DeployFabricRequest.parseFrom(it.deploy).project.version }
+
+    /** The versions of [project] a rollback can go to: the ones deployed before, newest first, without the running one. */
+    public fun rollbackTargets(project: String): List<String> {
+        val current = currentVersion(project)
+        return snapshot().deployments.filter { it.project == project && it.version != current }.map { it.version }.asReversed().distinct()
+            .filter { java.nio.file.Files.exists(lockPath(project, it)) }
+    }
+
+    /**
+     * Goes back to an earlier version of [project] (#228): [to], or the one deployed before the running one. It is a deploy of that version with the lock
+     * file it had, so it takes the Blue-Green path (or stop-then-start where a deploy would), and the engines run the downgrade processors. It is refused,
+     * before anything is touched, if the running version has an update processor (of the project or of a plugin whose version changes) and the version to
+     * go back to has no downgrade processor: the data could not be brought back.
+     */
+    public suspend fun rollback(project: String, to: String? = null): DeployResult {
+        val defaultAddress = defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured")
+        val repo = repositoryClient(defaultAddress)
+        val result = projectLock(project).withLock {
+            val current = currentVersion(project) ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "project '$project' is not deployed")
+            val targets = rollbackTargets(project)
+            val target = if (to.isNullOrBlank()) {
+                targets.firstOrNull() ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "project '$project' has no earlier version to go back to (running: $current)")
+            } else {
+                if (to == current) throw ManagementException(Status.Code.FAILED_PRECONDITION, "version $to of '$project' is already running")
+                if (to !in targets) throw ManagementException(Status.Code.NOT_FOUND, "version $to of '$project' was not deployed before by this ManagementServer (can go back to: ${targets.joinToString().ifEmpty { "nothing" }})")
+                to
+            }
+            if (cringle.packaging.Version.parse(target) < cringle.packaging.Version.parse(current)) checkDowngradable(project, current, target, repo)
+            deployLocked(project, target, true, false, true, repo)
+        }
+        afterChange(project, "rolled back")
+        return result
+    }
+
+    private suspend fun checkDowngradable(project: String, current: String, target: String, repo: cringle.repository.RepositoryClient) {
+        val problems = ArrayList<String>()
+        fun check(what: String, from: cringle.packaging.ProcessorSet, backTo: cringle.packaging.ProcessorSet, fromVersion: String, toVersion: String) {
+            if (from.update != null && backTo.downgrade == null) problems += "$what $fromVersion migrates data on update, but $toVersion has no downgrade processor"
+        }
+        check("project $project", readProjectPackage(repo, project, current).manifest.processors, readProjectPackage(repo, project, target).manifest.processors, current, target)
+        val now = LockFile.parse(java.nio.file.Files.readString(lockPath(project, current))).packages.filterKeys { it != project }
+        val back = LockFile.parse(java.nio.file.Files.readString(lockPath(project, target))).packages.filterKeys { it != project }
+        for ((name, locked) in back) {
+            val from = now[name] ?: continue
+            if (from.version == locked.version) continue
+            check("plugin $name", readPluginPackage(repo, name, from.version).manifest.processors, readPluginPackage(repo, name, locked.version).manifest.processors, from.version, locked.version)
+        }
+        if (problems.isNotEmpty()) throw ManagementException(Status.Code.FAILED_PRECONDITION, "cannot go back from $current to $target: " + problems.joinToString("; "))
     }
 
     /** Why the fabrics of [project] are replaced by stopping the old ones first, or `null` if they can run side by side. */

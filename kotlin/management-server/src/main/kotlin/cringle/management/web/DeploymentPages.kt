@@ -33,6 +33,14 @@ internal class DeploymentPages(private val core: ManagementCore) {
             }
             fragment(deployments(req.session!!, error, done))
         }
+        r.post("/deployments/{project}/rollback", Permission.OPERATE) { req ->
+            var done: String? = null
+            val error = attempt {
+                val result = core.rollback(req.params.getValue("project"), req.form["version"]?.trim()?.ifEmpty { null })
+                done = "Went back to ${result.project} ${result.version} (${result.strategy})"
+            }
+            fragment(deployments(req.session!!, error, done))
+        }
         r.post("/deployments/{project}/undeploy", Permission.OPERATE) { req ->
             var done: String? = null
             val error = attempt { done = "Removed " + core.undeploy(req.params.getValue("project")).joinToString(", ").ifEmpty { "nothing" } }
@@ -85,7 +93,10 @@ internal class DeploymentPages(private val core: ManagementCore) {
                 "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td>{}</tr>",
                 key.first, key.second,
                 fabrics.map { f -> h("<div class=\"fabric-line\"><a href=\"/fabrics/{}/{}/{}\">{}</a> <span class=\"muted\">on {}/{}</span> {}</div>", f.machine, f.engineId, f.fabricId, f.fabricId, f.machine, f.engineId, stateBadge(states[f.fabricId]?.info?.state?.pretty() ?: "unknown")) },
-                actionsCell(button(session, Permission.OPERATE, "Undeploy", "/deployments/${key.first}/undeploy", "Undeploy ${key.first}? Its fabrics are stopped and removed.")),
+                actionsCell(
+                    core.rollbackTargets(key.first).firstOrNull()?.let { button(session, Permission.OPERATE, "Roll back", "/deployments/${key.first}/rollback", "Go back to ${key.first} $it? The running version is replaced, its data is migrated back by the downgrade processors.") } ?: Html(""),
+                    button(session, Permission.OPERATE, "Undeploy", "/deployments/${key.first}/undeploy", "Undeploy ${key.first}? Its fabrics are stopped and removed."),
+                ),
             )
         }
         val deployForm = if (!session.can(Permission.OPERATE)) {
