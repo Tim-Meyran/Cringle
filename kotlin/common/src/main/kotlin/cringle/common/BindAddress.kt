@@ -25,6 +25,19 @@ public object BindAddress {
     /** The value of [ENVIRONMENT] in [environment], `null` if it is not set or empty. */
     public fun fromEnvironment(environment: Map<String, String> = System.getenv()): String? = environment[ENVIRONMENT]?.trim()?.takeIf { it.isNotEmpty() }
 
+    /**
+     * [text] for a server whose clients are the other components of the machine (daemon, router, engines): they connect to `127.0.0.1`, so only
+     * `loopback` and `all` make sense. Returns the normalized word (`null` for the default); throws [IllegalArgumentException] for an address.
+     */
+    public fun interfaceChoice(text: String?): String? {
+        val value = text?.trim().orEmpty()
+        return when {
+            value.isEmpty() || value.equals(LOOPBACK, ignoreCase = true) -> null
+            value.equals(ALL, ignoreCase = true) -> ALL
+            else -> throw IllegalArgumentException("the daemon, the router and the engines listen on loopback or all, not on '$value'")
+        }
+    }
+
     /** Whether [text] listens on more than the loopback interface. */
     public fun isOpen(text: String?): Boolean = !(text.isNullOrBlank() || text.trim().equals(LOOPBACK, ignoreCase = true))
 

@@ -56,7 +56,7 @@ class SetupCommandTest {
         assertEquals(0, shown.code, shown.err)
         assertTrue(shown.out.contains("7500") && shown.out.contains("loopback"), shown.out)
         assertEquals(envText, Files.readString(file))
-        for (bad in listOf(listOf("--port", "0"), listOf("--web-port", "70000"), listOf("--port", "abc"), listOf("--bind", "a b"))) {
+        for (bad in listOf(listOf("--port", "0"), listOf("--web-port", "70000"), listOf("--port", "abc"), listOf("--bind", "a b"), listOf("--bind", "192.0.2.7"))) {
             val r = cli("", "--config-file", file.toString(), "--no-restart", *bad.toTypedArray())
             assertEquals(2, r.code, "$bad ${r.err}")
         }

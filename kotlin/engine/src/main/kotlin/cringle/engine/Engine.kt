@@ -73,6 +73,7 @@ public class Engine private constructor(
     identity: EngineIdentity,
     config: EngineConfig,
     requestedPort: Int,
+    bindHost: String?,
     home: Path,
     private val heartbeatInterval: Duration,
     /** The peers that may call the management API of this engine (and, with [tls], the router the engine trusts). */
@@ -127,7 +128,7 @@ public class Engine private constructor(
     private val certificateWatcher = cringle.common.CertificateWatcher(identity.common)
 
     private val server: Server = NettyServerBuilder
-        .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), requestedPort))
+        .forAddress(cringle.common.BindAddress.socketAddress(bindHost, requestedPort))
         .sslContext(TlsHelper.serverCredentials(identity.common, trustStore))
         .addService(ManagementService())
         .build()
@@ -564,7 +565,12 @@ public class Engine private constructor(
             val trustStore = TrustStore(dir.resolve("trust.json"))
             val tls = EngineTls(identity.common, trustStore)
             val enrollmentSecret = readEnrollmentSecret(env)
-            return Engine(dir, identity, config, args.managementPort, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort, tetherOptions)
+            val bindHost = try {
+                cringle.common.BindAddress.interfaceChoice(args.bind ?: cringle.common.BindAddress.fromEnvironment(env))
+            } catch (e: IllegalArgumentException) {
+                throw EngineArgsException("--bind: ${e.message}")
+            }
+            return Engine(dir, identity, config, args.managementPort, bindHost, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort, tetherOptions)
         }
 
         /**

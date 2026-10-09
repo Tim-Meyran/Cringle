@@ -171,6 +171,8 @@ public class RouterServer(
     private val refreshInterval: Duration = Duration.ofSeconds(30),
     public val tls: RouterTls? = null,
     users: UserManager? = null,
+    /** Where the router listens (`loopback` or `all`, see [cringle.common.BindAddress]); `null` is the loopback interface. */
+    bindHost: String? = null,
 ) {
     /** The identity of this router, `null` without TLS. */
     public val identity: Identity? get() = tls?.identity
@@ -189,7 +191,7 @@ public class RouterServer(
         TrustInterceptor(it.trustStore, open = TOKEN_METHODS.keys + REGISTER_ENGINE, componentOnly = setOf(PREPARE_ENGINE))
     }
     private val server: Server = NettyServerBuilder
-        .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        .forAddress(cringle.common.BindAddress.socketAddress(bindHost, port))
         .apply { if (tls != null) sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore, requireTrustedClients = false)) }
         .addService(guarded(Service(registry, remoteRouters, tls, enrollment), users))
         .build()
