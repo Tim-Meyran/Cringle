@@ -130,6 +130,13 @@ public class WebServer(
         router.get("/", Permission.READ) { r -> render("Dashboard", r, dashboard.content(r.session!!)) }
     }
 
+    /** A page for a visitor without a session (the invitation): never cached, no `Referer` (the secret is in the path). */
+    internal fun guestPage(status: Int, title: String, content: Html): WebResponse =
+        WebResponse(status, layout.page(title, null, content, openMode = false).value.toByteArray(), headers = mapOf("Cache-Control" to "no-store", "Referrer-Policy" to "no-referrer"))
+
+    /** The pause after a failure on a public page, as after a failed login. */
+    internal suspend fun slowDown() = delay(failedLoginDelay.toMillis())
+
     /** The address for a link to this server: the configured `--web-url`, else `https://` and the `Host` header of [request]. */
     public fun baseUrl(request: WebRequest): String = publicUrl ?: ("https://" + (request.headers["host"]?.takeIf { it.matches(HOST) } ?: "localhost"))
 
@@ -191,7 +198,7 @@ public class WebServer(
             if (session == null) return unauthenticated(headers)
             if (!(if (route.scopes == null) session.canAnywhere(route.permission) else session.canFor(route.permission, route.scopes))) return forbidden(session, path)
         }
-        if (method == "POST" && session != null && route.pattern != "/login" && !csrfOk(session, headers["x-csrf-token"])) {
+        if (method == "POST" && session != null && route.permission != null && !csrfOk(session, headers["x-csrf-token"])) {
             return WebResponse.page(403, layout.page("Refused", session, problemContent("Refused", "The request has no valid CSRF token. Reload the page and try again."), openMode = users == null, path = path))
         }
         val body = readBody(exchange, route.maxBodyBytes ?: maxBodyBytes)

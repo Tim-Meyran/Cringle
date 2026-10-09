@@ -232,3 +232,8 @@ Every page is built from the same parts (`PageSupport.kt`, `Layout.kt`), so that
 ### Sharing a token by QR code (#302)
 
 A new token (Users page) is shown, once and sticky in `#flash`, as the value, as a **login link** `https://<server>/login#token=crt_...` and as the QR code of the link. The token is in the *fragment*: a browser never sends it to a server and it lands in no log. `app.js` reads `#token=` on the login page, removes the fragment from the address bar (`history.replaceState`), puts the token into the form and submits it; a wrong token shows the normal error. The link works only on this server; the QR code and the link are as secret as the token, so treat the screen like a password. The base of the link is `--web-url` or the `Host` header. Checked in headless Chromium with Playwright: `/login#token=<valid>` lands on the dashboard with no hash in the address bar, a link made by the page signs in a fresh browser context, `/login#token=crt_wrong` shows `The token is not valid.`.
+
+### Invite links (#303)
+
+*Invites* (Administer) creates the link and its QR code as a sticky `flash`, like a new token; the list holds only the state (open, used by, expired, revoked) and *Revoke*. The public pages `GET|POST /invite/{secret}` need no session (and no CSRF token, which only applies to routes with a permission). Checked in headless Chromium with Playwright: the link opens the form, redeeming shows the token, login link and QR code, the login link signs in a fresh context, and the invite link in `#flash` is still there after the 5 s refresh. See `docs/users.md`.
+

@@ -52,6 +52,16 @@ public class FileUserStore(private val file: Path) : UserStore {
                     val o = it as JsonObject
                     TrustedRegistry(o.text("name"), o.text("fingerprint"), o.text("publicKey"), roles(o), scoped(o))
                 }.orEmpty(),
+                // "invites" is optional: a file written before invites existed has none
+                invites = (root["invites"] as? JsonArray)?.map {
+                    val o = it as JsonObject
+                    fun instant(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull?.let(Instant::parse)
+                    Invite(
+                        o.text("id"), o.text("hash"), roles(o), o.strings("groups").toSet(), scoped(o), o.text("createdBy"),
+                        Instant.parse(o.text("createdAt")), Instant.parse(o.text("expiresAt")), instant("usedAt"),
+                        (o["usedBy"] as? JsonPrimitive)?.contentOrNull, (o["revoked"] as? JsonPrimitive)?.boolean ?: false,
+                    )
+                }.orEmpty(),
             )
         } catch (e: UserStoreException) {
             throw e
@@ -97,6 +107,23 @@ public class FileUserStore(private val file: Path) : UserStore {
                     if (t.expiresAt != null) put("expiresAt", t.expiresAt.toString()) else put("expiresAt", JsonNull)
                     put("revoked", t.revoked)
                 })
+            }
+            if (data.invites.isNotEmpty()) {
+                putJsonArray("invites") {
+                    for (i in data.invites) add(buildJsonObject {
+                        put("id", i.id)
+                        put("hash", i.hash)
+                        putJsonArray("roles") { i.roles.sorted().forEach { add(JsonPrimitive(it.name)) } }
+                        putJsonArray("groups") { i.groups.sorted().forEach { add(JsonPrimitive(it)) } }
+                        if (i.scoped.isNotEmpty()) putJsonArray("scoped") { writeScoped(i.scoped) }
+                        put("createdBy", i.createdBy)
+                        put("createdAt", i.createdAt.toString())
+                        put("expiresAt", i.expiresAt.toString())
+                        if (i.usedAt != null) put("usedAt", i.usedAt.toString())
+                        if (i.usedBy != null) put("usedBy", i.usedBy)
+                        put("revoked", i.revoked)
+                    })
+                }
             }
             if (data.registries.isNotEmpty()) {
                 putJsonArray("registries") {

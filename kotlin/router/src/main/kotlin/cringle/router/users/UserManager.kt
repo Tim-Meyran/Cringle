@@ -32,6 +32,9 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     private val random = SecureRandom()
 
     private companion object {
+        /** The longest an invite stays valid. */
+        val MAX_INVITE: Duration = Duration.ofDays(30)
+
         val REGISTRY_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
         /** How far in the future the issue time of a federated token may lie (clocks of two sites are not exact). */
@@ -325,6 +328,66 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     public fun revokeToken(tokenId: String): Unit = synchronized(lock) {
         if (data.tokens.none { it.id == tokenId }) throw UserException(UserException.Kind.NOT_FOUND, "unknown token")
         update { d -> d.copy(tokens = d.tokens.map { if (it.id == tokenId) it.copy(revoked = true) else it }) }
+    }
+
+    private fun inviteInfo(i: Invite) = InviteInfo(i.id, i.roles, i.groups, i.scoped, i.createdBy, i.createdAt, i.expiresAt, i.usedAt, i.usedBy, i.revoked)
+
+    /**
+     * Creates an invite (#303): a one-time secret that [redeemInvite] turns into a user with [roles], [groups] and [scoped] roles. It is valid for [ttl]
+     * (24 hours if `null`, at most 30 days). The inviter decides what it gives, including administrator.
+     */
+    public fun createInvite(createdBy: String, roles: Set<UserRole>, groups: Set<String> = emptySet(), scoped: Set<RoleAssignment> = emptySet(), ttl: Duration? = null): CreatedInvite = synchronized(lock) {
+        val life = ttl ?: Duration.ofHours(24)
+        if (life.isNegative || life.isZero || life > MAX_INVITE) throw UserException(UserException.Kind.INVALID, "invite lifetime must be between 1 second and 30 days")
+        for (g in groups) if (data.groups.none { it.name == g }) throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$g'")
+        val secret = newSecret().replaceFirst("crt_", "inv_")
+        val now = clock.instant()
+        val invite = Invite(UUID.randomUUID().toString(), hash(secret), roles, groups, scoped, createdBy, now, now.plus(life))
+        update { it.copy(invites = it.invites + invite) }
+        CreatedInvite(secret, inviteInfo(invite))
+    }
+
+    /** All invites, newest first, without their secrets. */
+    public fun listInvites(): List<InviteInfo> = synchronized(lock) { data.invites.map { inviteInfo(it) }.sortedByDescending { it.createdAt } }
+
+    /** Revokes an invite that is not used yet; revoking twice is fine. */
+    public fun revokeInvite(id: String): Unit = synchronized(lock) {
+        val invite = data.invites.firstOrNull { it.id == id } ?: throw UserException(UserException.Kind.NOT_FOUND, "unknown invite")
+        if (invite.usedAt != null) throw UserException(UserException.Kind.CONFLICT, "the invite was used already")
+        update { d -> d.copy(invites = d.invites.map { if (it.id == id) it.copy(revoked = true) else it }) }
+    }
+
+    /** What the invite behind [secret] gives, or `null` if it is unknown, used, revoked or expired (one answer for all, so nothing leaks). */
+    public fun peekInvite(secret: String): InviteInfo? = synchronized(lock) { openInvite(secret)?.let { inviteInfo(it) } }
+
+    private fun openInvite(secret: String): Invite? {
+        val h = hash(secret)
+        val now = clock.instant()
+        return data.invites.firstOrNull { it.hash == h && it.usedAt == null && !it.revoked && it.expiresAt.isAfter(now) }
+    }
+
+    /**
+     * Redeems the invite behind [secret]: creates the user [name] with what the invite gives and one token (label [tokenLabel], lifetime [tokenTtl]),
+     * and uses the invite up, in one step under the lock. An unknown, used, revoked or expired secret is `NOT_FOUND` for all of them; a name that
+     * exists is `CONFLICT` and the invite stays valid.
+     */
+    public fun redeemInvite(secret: String, name: String, tokenLabel: String = "invite", tokenTtl: Duration? = null): RedeemedInvite = synchronized(lock) {
+        val invite = openInvite(secret) ?: throw UserException(UserException.Kind.NOT_FOUND, "the invite is not valid")
+        if (name.isBlank() || name.length > 128) throw UserException(UserException.Kind.INVALID, "user name must be 1 to 128 characters")
+        if (data.users.any { it.name == name }) throw UserException(UserException.Kind.CONFLICT, "user '$name' already exists")
+        if (tokenTtl != null && (tokenTtl.isNegative || tokenTtl.isZero)) throw UserException(UserException.Kind.INVALID, "token lifetime must be positive")
+        val now = clock.instant()
+        val user = User(UUID.randomUUID().toString(), name, invite.roles, invite.groups, invite.scoped)
+        val tokenSecret = newSecret()
+        val record = TokenRecord(UUID.randomUUID().toString(), user.id, tokenLabel, hash(tokenSecret), now, tokenTtl?.let { now.plus(it) }, false)
+        update { d ->
+            d.copy(
+                users = d.users + user,
+                tokens = d.tokens + record,
+                invites = d.invites.map { if (it.id == invite.id) it.copy(usedAt = now, usedBy = name) else it },
+            )
+        }
+        RedeemedInvite(view(user), CreatedToken(tokenSecret, info(record)))
     }
 
     /** This user management as the engine-wide driver for blocks. */
