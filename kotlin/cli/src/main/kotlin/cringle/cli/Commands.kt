@@ -174,10 +174,29 @@ private fun fabricRow(f: ManagedFabric): Map<String, Any?> = linkedMapOf(
     "blueprint" to f.info.blueprint,
     "state" to f.info.state.pretty("FABRIC_RUNTIME_STATE_"),
     "desired" to if (f.desiredRunning) "running" else "stopped",
+    "checks" to assertionSummary(f),
 )
+
+/** What the assertions of a fabric say in one word: empty without assertions, `ok`, `n violated` or `unknown`. */
+private fun assertionSummary(f: ManagedFabric): String {
+    val states = f.info.assertionsList.map { it.state }
+    val violated = states.count { it == cringle.engine.v1.AssertionState.ASSERTION_STATE_VIOLATED }
+    return when {
+        states.isEmpty() -> ""
+        violated > 0 -> "$violated violated"
+        states.all { it == cringle.engine.v1.AssertionState.ASSERTION_STATE_OK } -> "ok"
+        else -> "unknown"
+    }
+}
 
 private fun fabricDetail(f: ManagedFabric): Map<String, Any?> = fabricRow(f) + mapOf(
     "failure" to f.info.failure,
+    "assertions" to f.info.assertionsList.map {
+        linkedMapOf(
+            "assertion" to it.id, "state" to it.state.pretty("ASSERTION_STATE_"), "since" to java.time.Instant.ofEpochSecond(it.since.seconds, it.since.nanos.toLong()).toString(),
+            "detail" to it.detail,
+        )
+    },
     "blocks" to f.info.blocksList.map {
         linkedMapOf("block" to it.blockId.value, "state" to it.state.pretty("BLOCK_RUNTIME_STATE_"), "restarts" to it.restarts, "lastError" to it.lastError)
     },
