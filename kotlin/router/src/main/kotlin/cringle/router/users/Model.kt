@@ -147,6 +147,52 @@ public data class TokenInfo(
 /** A freshly created token: the only place where the value [secret] ever appears. */
 public data class CreatedToken(val secret: String, val info: TokenInfo)
 
+/** A stored invite (#303). Only the SHA-256 hash of the secret in the link is kept. [usedAt] and [usedBy] (a user name) are set when it was redeemed. */
+public data class Invite(
+    val id: String,
+    val hash: String,
+    val roles: Set<UserRole>,
+    val groups: Set<String>,
+    val scoped: Set<RoleAssignment>,
+    val createdBy: String,
+    val createdAt: Instant,
+    val expiresAt: Instant,
+    val usedAt: Instant? = null,
+    val usedBy: String? = null,
+    val revoked: Boolean = false,
+)
+
+/** What is known about an invite, without its hash. */
+public data class InviteInfo(
+    val id: String,
+    val roles: Set<UserRole>,
+    val groups: Set<String>,
+    val scoped: Set<RoleAssignment>,
+    val createdBy: String,
+    val createdAt: Instant,
+    val expiresAt: Instant,
+    val usedAt: Instant?,
+    val usedBy: String?,
+    val revoked: Boolean,
+) {
+    /** Where the invite stands at [now]. */
+    public fun state(now: Instant): InviteState = when {
+        usedAt != null -> InviteState.USED
+        revoked -> InviteState.REVOKED
+        !expiresAt.isAfter(now) -> InviteState.EXPIRED
+        else -> InviteState.OPEN
+    }
+}
+
+/** The state of an invite. */
+public enum class InviteState { OPEN, USED, EXPIRED, REVOKED }
+
+/** A freshly created invite: the only place where the secret of the link appears. */
+public data class CreatedInvite(val secret: String, val info: InviteInfo)
+
+/** The result of redeeming an invite: the new user and its first token. */
+public data class RedeemedInvite(val user: UserView, val token: CreatedToken)
+
 /** Everything the user store persists. */
 public data class UserData(
     val users: List<User> = emptyList(),
@@ -156,6 +202,8 @@ public data class UserData(
     val bootstrapped: Boolean = false,
     /** The registries of other sites that are trusted (#231). */
     val registries: List<TrustedRegistry> = emptyList(),
+    /** The invites (#303). */
+    val invites: List<Invite> = emptyList(),
 )
 
 /** Persistence of [UserData]. */
