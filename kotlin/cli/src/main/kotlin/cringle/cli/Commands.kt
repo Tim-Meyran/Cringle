@@ -962,7 +962,7 @@ internal val COMMANDS: List<Command> = listOf(
 
     // --- installation ---
     Command(
-        listOf("setup"), "[--bind <loopback|all>] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
+        listOf("setup"), "[--bind <loopback|all>] [--components LIST] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
         "Change the address and the ports of the installed services (without options: ask for each, an empty answer keeps the value) and restart them",
         listOf(
             opt("bind", "loopback (default) or all (every network interface)", "VALUE"),

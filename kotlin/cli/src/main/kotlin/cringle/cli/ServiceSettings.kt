@@ -113,7 +113,10 @@ internal object ServiceSettings {
     /** Writes [changes] into [file]. */
     fun write(file: Path, changes: Map<String, String>) {
         val text = Files.readString(file)
-        val next = if (file.fileName.toString().endsWith(".xml")) updateXml(text, changes) else updateEnv(text, changes)
+        // the arguments of the daemon follow from the components and the ports
+        val given = changes.mapValues { (key, value) -> if (key == COMPONENTS) normalizeComponents(value) ?: value else value }
+        val all = given + (DAEMON_ARGS to daemonArguments(read(file, Platform.current()) + given))
+        val next = if (file.fileName.toString().endsWith(".xml")) updateXml(text, all) else updateEnv(text, all)
         Files.writeString(file, next)
     }
 }

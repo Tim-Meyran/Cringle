@@ -231,7 +231,7 @@ try {
             Check 'the service Cringle Daemon exists' ($null -ne $daemon)
             Check 'the service starts automatically' ((Get-CimInstance Win32_Service -Filter "Name='cringle-daemon'").StartMode -eq 'Auto')
             Check 'no service of its own for the management server' ($null -eq (Get-Service -Name 'cringle-management' -ErrorAction SilentlyContinue))
-            Check 'the daemon runs management server and repository' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('--with-management %CRINGLE_MANAGEMENT_PORT% --web-port %CRINGLE_WEB_PORT% --with-repository %CRINGLE_REPOSITORY_PORT%'))
+            Check 'the daemon runs management server and repository' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('%CRINGLE_DAEMON_ARGS%') -and (Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_DAEMON_ARGS" value="--port 7400 --combined --with-management 7500 --web-port 8443 --with-repository 7600"/>'))
             Check 'the settings have their defaults' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_MANAGEMENT_PORT" value="7500"/>') -and (Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_BIND" value="loopback"/>'))
             Check 'CRINGLE_HOME is in the service configuration' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains($r5.Data))
             Check 'PATH has the entry' (((& $machinePath) -split ';') -contains $binDir)
@@ -245,7 +245,7 @@ try {
             Check "upgrade with a running service exits with 0 ($($res.Output))" ($res.Code -eq 0)
             Check 'current moved' ((Get-JunctionTarget (Join-Path $r5.Install 'current')) -eq (Join-Path $r5.Install '2.0.0'))
             Check 'the service that was running runs again' ((Get-Service 'cringle-daemon').Status -eq 'Running')
-            Check 'daemon only: the daemon does not run the management server' (-not (Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('--with-management'))
+            Check 'daemon only: the daemon does not run the management server' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_DAEMON_ARGS" value="--port 7400 --combined"/>'))
             Check 'PATH has the entry once' ((((& $machinePath) -split ';') | Where-Object { $_ -eq $binDir }).Count -eq 1)
         } finally {
             $res = Invoke-Installer (@('-Uninstall', '-Purge', '-InstallRoot', $r5.Install, '-DataRoot', $r5.Data))
