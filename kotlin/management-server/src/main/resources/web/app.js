@@ -218,12 +218,18 @@ document.addEventListener('click', function (event) {
   });
 });
 
-// A login link (/login#token=...) signs in without typing: the token goes from the fragment into the form, and the fragment leaves the address bar first.
+// A login link (/login#token=...) fills in the token: it goes from the fragment into the form, and the fragment leaves the address bar first. It does
+// not sign in by itself, the person confirms: a link sent by someone else would otherwise sign the person in as that someone (login CSRF).
 (function () {
   var match = /^#token=([^&]+)$/.exec(location.hash);
   var form = document.querySelector('form[action="/login"]');
   if (!match || !form) return;
   history.replaceState(null, '', location.pathname + location.search);
   form.querySelector('[name=token]').value = decodeURIComponent(match[1]);
-  form.submit();
+  var notice = document.createElement('p');
+  notice.className = 'notice';
+  notice.setAttribute('role', 'status');
+  notice.textContent = 'This link brings a token. Sign in only if it comes from your administrator or from you: with a token from someone else you work in that person’s account.';
+  form.insertBefore(notice, form.querySelector('label'));
+  form.querySelector('button').focus();
 })();

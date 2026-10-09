@@ -52,6 +52,16 @@ class InviteTest {
     }
 
     @Test
+    fun aLocalNameMustNotLookLikeAUserOfAnotherRegistry() {
+        val users = manager()
+        val invite = users.createInvite("admin", setOf(UserRole.VIEWER))
+        assertEquals(UserException.Kind.INVALID, kind { users.redeemInvite(invite.secret, "alice@site-b") })
+        assertEquals(UserException.Kind.INVALID, kind { users.createUser("alice@site-b", setOf(UserRole.VIEWER)) })
+        // the invite is still valid after the refused name
+        assertEquals("alice", users.redeemInvite(invite.secret, "alice").user.user.name)
+    }
+
+    @Test
     fun anUsedExpiredRevokedOrUnknownSecretFailsTheSameWay() {
         val users = manager()
         val used = users.createInvite("admin", setOf(UserRole.VIEWER))
