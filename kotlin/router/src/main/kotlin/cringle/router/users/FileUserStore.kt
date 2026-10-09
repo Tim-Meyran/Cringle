@@ -31,9 +31,14 @@ public class FileUserStore(private val file: Path) : UserStore {
             fun JsonObject.text(k: String) = (this[k] as JsonPrimitive).content
             fun JsonObject.strings(k: String) = (this[k] as JsonArray).map { (it as JsonPrimitive).content }
             fun roles(o: JsonObject) = o.strings("roles").map { UserRole.valueOf(it) }.toSet()
+            // "scoped" is optional: a file written before scopes existed has none
+            fun scoped(o: JsonObject) = (o["scoped"] as? JsonArray)?.map {
+                val a = it as JsonObject
+                RoleAssignment(UserRole.valueOf(a.text("role")), Scope.parse(a.text("scope")))
+            }?.toSet() ?: emptySet()
             return UserData(
-                users = (root["users"] as JsonArray).map { val o = it as JsonObject; User(o.text("id"), o.text("name"), roles(o), o.strings("groups").toSet()) },
-                groups = (root["groups"] as JsonArray).map { val o = it as JsonObject; Group(o.text("name"), roles(o)) },
+                users = (root["users"] as JsonArray).map { val o = it as JsonObject; User(o.text("id"), o.text("name"), roles(o), o.strings("groups").toSet(), scoped(o)) },
+                groups = (root["groups"] as JsonArray).map { val o = it as JsonObject; Group(o.text("name"), roles(o), scoped(o)) },
                 tokens = (root["tokens"] as JsonArray).map {
                     val o = it as JsonObject
                     TokenRecord(
@@ -50,6 +55,13 @@ public class FileUserStore(private val file: Path) : UserStore {
         }
     }
 
+    private fun kotlinx.serialization.json.JsonArrayBuilder.writeScoped(assignments: Set<RoleAssignment>) {
+        for (a in assignments.sortedWith(compareBy({ it.scope.encode() }, { it.role }))) add(buildJsonObject {
+            put("role", a.role.name)
+            put("scope", a.scope.encode())
+        })
+    }
+
     override fun save(data: UserData) {
         val json = buildJsonObject {
             put("format", "1")
@@ -60,12 +72,14 @@ public class FileUserStore(private val file: Path) : UserStore {
                     put("name", u.name)
                     putJsonArray("roles") { u.roles.sorted().forEach { add(JsonPrimitive(it.name)) } }
                     putJsonArray("groups") { u.groups.sorted().forEach { add(JsonPrimitive(it)) } }
+                    if (u.scoped.isNotEmpty()) putJsonArray("scoped") { writeScoped(u.scoped) }
                 })
             }
             putJsonArray("groups") {
                 for (g in data.groups) add(buildJsonObject {
                     put("name", g.name)
                     putJsonArray("roles") { g.roles.sorted().forEach { add(JsonPrimitive(it.name)) } }
+                    if (g.scoped.isNotEmpty()) putJsonArray("scoped") { writeScoped(g.scoped) }
                 })
             }
             putJsonArray("tokens") {

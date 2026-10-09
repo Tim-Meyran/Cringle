@@ -43,14 +43,72 @@ public class UserException(public val kind: Kind, message: String) : RuntimeExce
     public enum class Kind { INVALID, NOT_FOUND, CONFLICT }
 }
 
-/** A user. [roles] are the directly assigned ones, see [UserView.effectiveRoles] for the result with groups. */
-public data class User(val id: String, val name: String, val roles: Set<UserRole>, val groups: Set<String>)
+/** What a role assignment can be limited to (#229, Architecture 6.3). */
+public enum class ScopeKind {
+    /** Everything; the role applies as before scopes existed. */
+    GLOBAL,
+
+    /** One machine and what runs on it. */
+    MACHINE,
+
+    /** One project and its fabrics. */
+    PROJECT,
+
+    /** One fabric. */
+    FABRIC,
+
+    /** One framework function, named by [Scope.FUNCTIONS]. */
+    FUNCTION,
+}
+
+/**
+ * The object a role applies to: everything ([GLOBAL]), or one machine, project, fabric or framework function. Written as text `global`,
+ * `machine:m1`, `project:shop`, `fabric:shop-app-1` or `function:trust`.
+ */
+public data class Scope(val kind: ScopeKind, val name: String = "") {
+    init {
+        when (kind) {
+            ScopeKind.GLOBAL -> require(name.isEmpty()) { "the global scope has no name" }
+            ScopeKind.FUNCTION -> require(name in FUNCTIONS) { "unknown function '$name' (one of ${FUNCTIONS.joinToString()})" }
+            else -> require(NAME.matches(name)) { "invalid ${kind.name.lowercase()} name '$name'" }
+        }
+    }
+
+    /** The text form, see [parse]. */
+    public fun encode(): String = if (kind == ScopeKind.GLOBAL) "global" else "${kind.name.lowercase()}:$name"
+
+    override fun toString(): String = encode()
+
+    public companion object {
+        /** The framework functions a role can be limited to: trust of components, trust of plugins, users and groups. */
+        public val FUNCTIONS: List<String> = listOf("trust", "plugin-trust", "users")
+
+        private val NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+        /** Everything. */
+        public val GLOBAL: Scope = Scope(ScopeKind.GLOBAL)
+
+        /** Parses the text form; throws [IllegalArgumentException] if it is invalid. */
+        public fun parse(text: String): Scope {
+            if (text == "global") return GLOBAL
+            val kind = text.substringBefore(':', "").uppercase().let { k -> ScopeKind.entries.firstOrNull { it.name == k && it != ScopeKind.GLOBAL } }
+            require(kind != null && ':' in text) { "invalid scope '$text' (global, machine:<id>, project:<name>, fabric:<id> or function:<name>)" }
+            return Scope(kind, text.substringAfter(':'))
+        }
+    }
+}
+
+/** A role that applies only to [scope] (#229). */
+public data class RoleAssignment(val role: UserRole, val scope: Scope)
+
+/** A user. [roles] are the global ones; [scoped] are limited to an object. See [UserView.effectiveRoles] for the result with groups. */
+public data class User(val id: String, val name: String, val roles: Set<UserRole>, val groups: Set<String>, val scoped: Set<RoleAssignment> = emptySet())
 
 /** A group that gives its members roles. */
-public data class Group(val name: String, val roles: Set<UserRole>)
+public data class Group(val name: String, val roles: Set<UserRole>, val scoped: Set<RoleAssignment> = emptySet())
 
-/** A user with the roles it has including those of its groups. */
-public data class UserView(val user: User, val effectiveRoles: Set<UserRole>)
+/** A user with the global roles it has including those of its groups, and the same for the scoped ones. */
+public data class UserView(val user: User, val effectiveRoles: Set<UserRole>, val effectiveScoped: Set<RoleAssignment> = emptySet())
 
 /** A stored token. Only the SHA-256 hash of the token value is kept, never the value. */
 public data class TokenRecord(

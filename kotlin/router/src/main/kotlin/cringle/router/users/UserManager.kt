@@ -46,6 +46,11 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     private fun effectiveRoles(u: User): Set<UserRole> =
         u.roles + u.groups.flatMap { g -> data.groups.firstOrNull { it.name == g }?.roles.orEmpty() }
 
+    private fun effectiveScoped(u: User): Set<RoleAssignment> =
+        u.scoped + u.groups.flatMap { g -> data.groups.firstOrNull { it.name == g }?.scoped.orEmpty() }
+
+    private fun view(u: User) = UserView(u, effectiveRoles(u), effectiveScoped(u))
+
     /**
      * On the first start, creates the user `admin` with the admin role and returns its token, which is not shown
      * anywhere else. Returns `null` on every later start (the token keeps working until it is revoked).
@@ -80,6 +85,63 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     /** The permissions of [user], given by its roles. */
     public fun permissions(user: AuthenticatedUser): Set<Permission> = user.roles.flatMap { Permission.of(it) }.toSet() + Permission.AUTHENTICATED
 
+    /**
+     * Whether [user] may do [permission] to an object that lies in all of [scopes] (for a fabric: the fabric, its machine and its project). True if a
+     * global role of the user or its groups gives it, or a role assigned for one of [scopes] does (#229). Users that no longer exist have nothing.
+     */
+    public fun allowed(user: AuthenticatedUser, permission: Permission, scopes: Collection<Scope>): Boolean = synchronized(lock) {
+        if (permission == Permission.AUTHENTICATED) return true
+        if (user.roles.any { permission in Permission.of(it) }) return true
+        val stored = data.users.firstOrNull { it.id == user.id } ?: return false
+        effectiveScoped(stored).any { it.scope in scopes && permission in Permission.of(it.role) }
+    }
+
+    /** Whether [user] has [permission] for [scope] (see the other [allowed]). */
+    public fun allowed(user: AuthenticatedUser, permission: Permission, scope: Scope): Boolean = allowed(user, permission, listOf(scope))
+
+    private fun checkAssignment(a: RoleAssignment) {
+        if (a.role == UserRole.END_USER) throw UserException(UserException.Kind.INVALID, "the role end user cannot be limited to a scope")
+        if (a.scope.kind == ScopeKind.GLOBAL) throw UserException(UserException.Kind.INVALID, "a global role is given with the roles of the user or group, not as a scoped one")
+    }
+
+    /** Gives [userId] the role [role] for [scope]; giving it twice is fine. */
+    public fun grantUser(userId: String, role: UserRole, scope: Scope): UserView = synchronized(lock) {
+        val a = RoleAssignment(role, scope).also(::checkAssignment)
+        val user = data.users.firstOrNull { it.id == userId } ?: throw UserException(UserException.Kind.NOT_FOUND, "unknown user")
+        val next = user.copy(scoped = user.scoped + a)
+        update { d -> d.copy(users = d.users.map { if (it.id == userId) next else it }) }
+        view(next)
+    }
+
+    /** Takes the scoped role back; `NOT_FOUND` if the user does not have it. */
+    public fun revokeUser(userId: String, role: UserRole, scope: Scope): UserView = synchronized(lock) {
+        val a = RoleAssignment(role, scope)
+        val user = data.users.firstOrNull { it.id == userId } ?: throw UserException(UserException.Kind.NOT_FOUND, "unknown user")
+        if (a !in user.scoped) throw UserException(UserException.Kind.NOT_FOUND, "the user does not have the role ${role.name.lowercase()} for $scope")
+        val next = user.copy(scoped = user.scoped - a)
+        update { d -> d.copy(users = d.users.map { if (it.id == userId) next else it }) }
+        view(next)
+    }
+
+    /** Gives the group [group] the role [role] for [scope]; its members have it. */
+    public fun grantGroup(group: String, role: UserRole, scope: Scope): Group = synchronized(lock) {
+        val a = RoleAssignment(role, scope).also(::checkAssignment)
+        val g = data.groups.firstOrNull { it.name == group } ?: throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$group'")
+        val next = g.copy(scoped = g.scoped + a)
+        update { d -> d.copy(groups = d.groups.map { if (it.name == group) next else it }) }
+        next
+    }
+
+    /** Takes the scoped role of a group back; `NOT_FOUND` if the group does not have it. */
+    public fun revokeGroup(group: String, role: UserRole, scope: Scope): Group = synchronized(lock) {
+        val a = RoleAssignment(role, scope)
+        val g = data.groups.firstOrNull { it.name == group } ?: throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$group'")
+        if (a !in g.scoped) throw UserException(UserException.Kind.NOT_FOUND, "the group does not have the role ${role.name.lowercase()} for $scope")
+        val next = g.copy(scoped = g.scoped - a)
+        update { d -> d.copy(groups = d.groups.map { if (it.name == group) next else it }) }
+        next
+    }
+
     /** Creates a user; names are unique. */
     public fun createUser(name: String, roles: Set<UserRole>, groups: Set<String> = emptySet()): UserView = synchronized(lock) {
         if (name.isBlank() || name.length > 128) throw UserException(UserException.Kind.INVALID, "user name must be 1 to 128 characters")
@@ -87,11 +149,11 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
         for (g in groups) if (data.groups.none { it.name == g }) throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$g'")
         val user = User(UUID.randomUUID().toString(), name, roles, groups)
         update { it.copy(users = it.users + user) }
-        UserView(user, effectiveRoles(user))
+        view(user)
     }
 
     /** All users. */
-    public fun listUsers(): List<UserView> = synchronized(lock) { data.users.map { UserView(it, effectiveRoles(it)) } }
+    public fun listUsers(): List<UserView> = synchronized(lock) { data.users.map { view(it) } }
 
     /** Deletes a user and its tokens. The last admin cannot be deleted. */
     public fun deleteUser(id: String): Unit = synchronized(lock) {
