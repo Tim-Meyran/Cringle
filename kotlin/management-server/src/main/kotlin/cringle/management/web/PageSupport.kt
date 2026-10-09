@@ -4,6 +4,7 @@ package cringle.management.web
 
 import cringle.management.ManagementException
 import cringle.router.users.Permission
+import cringle.router.users.Scope
 import kotlinx.coroutines.CancellationException
 
 internal fun fragment(content: Html): WebResponse = WebResponse.page(200, content)
@@ -51,9 +52,20 @@ internal fun describe(e: Exception): String = when (e) {
     else -> e.message ?: e.toString()
 }
 
-/** A button that posts to [url] and replaces the content of `#list`; not rendered if the session lacks [permission]. */
-internal fun button(session: Session, permission: Permission, label: String, url: String, confirm: String? = null): Html =
-    if (!session.can(permission)) {
+/**
+ * Refuses an action on an object: the session needs [permission] globally or for one of the [scopes] of the object (#271). The refusal is a
+ * `PERMISSION_DENIED` that [attempt] turns into a flash, not a 403 page. An empty [scopes] asks for the permission globally.
+ */
+internal fun Session.require(permission: Permission, scopes: List<Scope>) {
+    if (!canFor(permission, scopes)) {
+        val where = if (scopes.isEmpty()) "this operation (it needs the role globally)" else scopes.joinToString(" or ")
+        throw ManagementException(io.grpc.Status.Code.PERMISSION_DENIED, "insufficient rights for $where")
+    }
+}
+
+/** A button that posts to [url] and replaces the content of `#list`; not rendered if the session lacks [permission] (for [scopes], if given: for the object in them). */
+internal fun button(session: Session, permission: Permission, label: String, url: String, confirm: String? = null, scopes: List<Scope>? = null): Html =
+    if (!(if (scopes == null) session.can(permission) else session.canFor(permission, scopes))) {
         Html("")
     } else {
         h("<button hx-post=\"{}\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"{}>{}</button> ", url, if (confirm != null) h(" hx-confirm=\"{}\"", confirm) else Html(""), label)

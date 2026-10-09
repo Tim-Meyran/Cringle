@@ -7,6 +7,7 @@ import cringle.router.users.Permission
 import cringle.router.users.UserException
 import cringle.router.users.RoleAssignment
 import cringle.router.users.Scope
+import cringle.router.users.ScopeKind
 import cringle.router.users.UserManager
 import java.time.Duration
 
@@ -16,8 +17,13 @@ import java.time.Duration
  */
 internal class UserPages(private val users: UserManager) {
     fun register(web: WebServer) {
-        val r = web.router
-        web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS, "Administer"), NavItem("Groups", "/groups", Permission.MANAGE_USERS, "Administer"))
+        val usersScope = listOf(Scope(ScopeKind.FUNCTION, "users"))
+        web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS, "Administer", usersScope), NavItem("Groups", "/groups", Permission.MANAGE_USERS, "Administer", usersScope))
+        // the user functions need MANAGE_USERS globally or for `function:users` (#271)
+        web.router.scoped(usersScope) { registerRoutes(web, this) }
+    }
+
+    private fun registerRoutes(web: WebServer, r: Router) {
 
         r.get("/users", Permission.MANAGE_USERS) { web.render("Users", it, section("Users", "Who may sign in, with which roles. A token is shown once, when it is created.", "users", usersList(null, null))) }
         r.get("/users/list", Permission.MANAGE_USERS) { fragment(usersList(null, null)) }

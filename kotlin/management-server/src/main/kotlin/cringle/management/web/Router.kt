@@ -4,6 +4,7 @@ package cringle.management.web
 
 import cringle.contract.AuthenticatedUser
 import cringle.router.users.Permission
+import cringle.router.users.Scope
 
 /** What a handler gets: the request and, if there is one, the session. */
 public class WebRequest(
@@ -45,6 +46,8 @@ public class Route(
     /** The largest request body this route accepts; `null`: the limit of the server. */
     public val maxBodyBytes: Int? = null,
     public val handler: suspend (WebRequest) -> WebResponse,
+    /** The scopes the whole route needs the permission for (a framework function such as `function:users`); `null`: the page checks the objects it shows. */
+    public val scopes: List<Scope>? = null,
 ) {
     private val segments = pattern.trim('/').split('/').filter { it.isNotEmpty() }
 
@@ -65,8 +68,20 @@ public class Router {
 
     /** Adds a route. */
     public fun add(method: String, pattern: String, permission: Permission?, maxBodyBytes: Int? = null, handler: suspend (WebRequest) -> WebResponse): Router {
-        routes += Route(method, pattern, permission, maxBodyBytes, handler)
+        routes += Route(method, pattern, permission, maxBodyBytes, handler, routeScopes)
         return this
+    }
+
+    private var routeScopes: List<Scope>? = null
+
+    /** Adds the routes that [block] registers with the requirement that the permission is held for [scopes] (globally or for one of them), not just anywhere. */
+    public fun scoped(scopes: List<Scope>, block: Router.() -> Unit) {
+        routeScopes = scopes
+        try {
+            block()
+        } finally {
+            routeScopes = null
+        }
     }
 
     public fun get(pattern: String, permission: Permission?, handler: suspend (WebRequest) -> WebResponse): Router = add("GET", pattern, permission, null, handler)
@@ -93,7 +108,17 @@ public class Session(
     public val permissions: Set<Permission>,
     public val csrfToken: String,
     @Volatile internal var lastUsed: java.time.Instant,
+    /** The scoped roles of the user (#271): whether the user may do a permission to an object in the given scopes; `null` if the user has no scoped roles to ask. */
+    private val scoped: ((Permission, List<Scope>) -> Boolean)? = null,
+    /** Whether the user has a permission for any scope. */
+    private val anywhere: ((Permission) -> Boolean)? = null,
 ) {
-    /** True if the session may do [permission]. */
+    /** True if the session may do [permission] globally. */
     public fun can(permission: Permission): Boolean = permission in permissions
+
+    /** True if the session has [permission] globally or for any object: enough to open a page, the objects on it are checked one by one. */
+    public fun canAnywhere(permission: Permission): Boolean = can(permission) || anywhere?.invoke(permission) == true
+
+    /** True if the session may do [permission] to an object that lies in [scopes] (globally, or for one of them). */
+    public fun canFor(permission: Permission, scopes: List<Scope>): Boolean = can(permission) || scoped?.invoke(permission, scopes) == true
 }

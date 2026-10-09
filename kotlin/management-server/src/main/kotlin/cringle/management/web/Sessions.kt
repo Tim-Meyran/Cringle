@@ -31,7 +31,11 @@ public class Sessions(
     public fun login(token: String): Session? {
         val manager = users ?: return open()
         val user = manager.authenticate(token) ?: return null
-        val session = Session(newId(), user, manager.permissions(user), newId(), clock.instant())
+        val session = Session(
+            newId(), user, manager.permissions(user), newId(), clock.instant(),
+            scoped = { permission, scopes -> manager.allowed(user, permission, scopes) },
+            anywhere = { permission -> manager.allowedAnywhere(user, permission) },
+        )
         sessions[session.id] = session
         return session
     }

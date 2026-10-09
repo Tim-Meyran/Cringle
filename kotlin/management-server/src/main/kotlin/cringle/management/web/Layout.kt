@@ -6,7 +6,7 @@ import cringle.contract.UserRole
 import cringle.router.users.Permission
 
 /** An entry of the navigation in [group]; shown only to a session that has [permission]. */
-public data class NavItem(val label: String, val path: String, val permission: Permission = Permission.READ, val group: String = "Operate")
+public data class NavItem(val label: String, val path: String, val permission: Permission = Permission.READ, val group: String = "Operate", val scopes: List<cringle.router.users.Scope>? = null)
 
 /** The title block of a page: [title], one line of help ([subtitle]) and the [actions] on the right. Pages use it instead of a bare `<h1>`. */
 public fun pageHeader(title: String, subtitle: String = "", actions: Html = Html("")): Html =
@@ -37,7 +37,7 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
 
     private fun sidebar(session: Session, path: String?): Html {
         val active = activeEntry(path)
-        val visible = navigation.filter { session.can(it.permission) }
+        val visible = navigation.filter { if (it.scopes == null) session.canAnywhere(it.permission) else session.canFor(it.permission, it.scopes) }
         val name = session.user?.name ?: "Everybody"
         return html(
             raw("<aside class=\"sidebar\"><a class=\"brand\" href=\"/\">"),

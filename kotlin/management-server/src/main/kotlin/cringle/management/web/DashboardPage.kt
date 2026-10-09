@@ -5,14 +5,16 @@ package cringle.management.web
 import cringle.daemon.v1.EngineProcessState
 import cringle.engine.v1.FabricRuntimeState
 import cringle.management.ManagementCore
+import cringle.router.users.Permission
 
 /** The dashboard (`GET /`): the size of the installation at a glance, and what needs attention, with a link to the page where it is handled. */
 internal class DashboardPage(private val core: ManagementCore) {
-    suspend fun content(): Html {
-        val machines = core.listMachines()
-        val engines = core.listEngines(null)
-        val fabrics = core.listFabrics(null, null)
-        val projects = core.deployedFabrics().map { it.project }.distinct()
+    suspend fun content(session: Session): Html {
+        // only what the user may read (#271)
+        val machines = core.listMachines().filter { session.canFor(Permission.READ, core.access.machine(it.record.id)) }
+        val engines = core.listEngines(null).filter { session.canFor(Permission.READ, core.access.machine(it.machine)) }
+        val fabrics = core.listFabrics(null, null).filter { session.canFor(Permission.READ, core.access.fabric(it.machine, it.info.fabricId.value)) }
+        val projects = core.deployedFabrics().filter { session.canFor(Permission.READ, core.access.fabric(it.machine, it.fabricId)) }.map { it.project }.distinct()
         val runningEngines = engines.count { it.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING }
         val runningFabrics = fabrics.count { it.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING }
         val attention = ArrayList<Html>()

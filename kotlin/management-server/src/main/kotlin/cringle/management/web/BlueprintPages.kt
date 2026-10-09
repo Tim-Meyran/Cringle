@@ -186,7 +186,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             }
         }
         val base = "/blueprints/${draft.name}"
-        val canSave = session.can(Permission.OPERATE)
+        val canSave = session.canAnywhere(Permission.OPERATE)
         val roles = draft.content.jsonObject["roles"]?.jsonArray?.joinToString(", ") { it.jsonPrimitive.content }.orEmpty()
         val provides = blueprint.provides.joinToString("\n") { "${it.service}=${it.block}.${it.port}" + (it.type?.let { t -> ":$t" } ?: "") }
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)

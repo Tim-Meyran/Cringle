@@ -123,7 +123,7 @@ public class WebServer(
             WebResponse(200, ByteArray(0), headers = mapOf("HX-Redirect" to "/login"), cookies = listOf(sessionCookie("", 0)))
         }
         val dashboard = DashboardPage(core)
-        router.get("/", Permission.READ) { r -> render("Dashboard", r, dashboard.content()) }
+        router.get("/", Permission.READ) { r -> render("Dashboard", r, dashboard.content(r.session!!)) }
     }
 
     /** A full page for [request] with [content] in the frame. */
@@ -182,7 +182,7 @@ public class WebServer(
         }
         if (route.permission != null) {
             if (session == null) return unauthenticated(headers)
-            if (!session.can(route.permission)) return forbidden(session, path)
+            if (!(if (route.scopes == null) session.canAnywhere(route.permission) else session.canFor(route.permission, route.scopes))) return forbidden(session, path)
         }
         if (method == "POST" && session != null && route.pattern != "/login" && !csrfOk(session, headers["x-csrf-token"])) {
             return WebResponse.page(403, layout.page("Refused", session, problemContent("Refused", "The request has no valid CSRF token. Reload the page and try again."), openMode = users == null, path = path))

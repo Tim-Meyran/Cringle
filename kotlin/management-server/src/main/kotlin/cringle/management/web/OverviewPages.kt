@@ -20,17 +20,18 @@ internal class OverviewPages(private val core: ManagementCore) {
         r.get("/machines", Permission.READ) { web.render("Machines", it, section("Machines", "The computers that run a daemon and so the engines.", "machines", machines(it.session!!, null))) }
         r.get("/machines/list", Permission.READ) { fragment(machines(it.session!!, null)) }
         r.post("/machines", Permission.ADMINISTER) { req ->
-            val message = attempt { core.addMachine(req.form["id"].orEmpty().trim(), req.form["address"].orEmpty().trim(), null, null) }
+            val message = attempt { req.session!!.require(Permission.ADMINISTER, emptyList()); core.addMachine(req.form["id"].orEmpty().trim(), req.form["address"].orEmpty().trim(), null, null) }
             fragment(machines(req.session!!, message))
         }
         r.post("/machines/{id}/remove", Permission.ADMINISTER) { req ->
-            fragment(machines(req.session!!, attempt { core.removeMachine(req.params.getValue("id")) }))
+            fragment(machines(req.session!!, attempt { req.session!!.require(Permission.ADMINISTER, emptyList()); core.removeMachine(req.params.getValue("id")) }))
         }
 
         r.get("/engines", Permission.READ) { web.render("Engines", it, section("Engines", "The processes that run fabrics. Roles and labels decide where a project is placed.", "engines", engines(it.session!!, null))) }
         r.get("/engines/list", Permission.READ) { fragment(engines(it.session!!, null)) }
         r.post("/engines", Permission.OPERATE) { req ->
             val message = attempt {
+                req.session!!.require(Permission.OPERATE, core.access.machine(req.form["machine"].orEmpty().trim()))
                 core.createEngine(req.form["machine"].orEmpty().trim(), req.form["id"].orEmpty().trim().ifEmpty { null }, null, req.form["autostart"] == "on")
             }
             fragment(engines(req.session!!, message))
@@ -40,6 +41,7 @@ internal class OverviewPages(private val core: ManagementCore) {
                 val machine = req.params.getValue("machine")
                 val id = req.params.getValue("id")
                 val message = attempt {
+                    req.session!!.require(Permission.OPERATE, core.access.machine(machine))
                     when (action) {
                         "start" -> core.startEngine(machine, id)
                         "stop" -> core.stopEngine(machine, id)
@@ -51,6 +53,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         }
         r.post("/engines/{machine}/{id}/tags", Permission.OPERATE) { req ->
             val message = attempt {
+                req.session!!.require(Permission.OPERATE, core.access.machine(req.params.getValue("machine")))
                 core.setEngineTags(req.params.getValue("machine"), req.params.getValue("id"), parseRoles(req.form["roles"].orEmpty()), parseLabels(req.form["labels"].orEmpty()))
             }
             fragment(engines(req.session!!, message))
@@ -64,6 +67,7 @@ internal class OverviewPages(private val core: ManagementCore) {
                 val engine = req.params.getValue("engine")
                 val fabric = req.params.getValue("fabric")
                 val message = attempt {
+                    req.session!!.require(Permission.OPERATE, core.access.fabric(machine, fabric))
                     when (action) {
                         "start" -> core.startFabric(machine, engine, fabric)
                         "stop" -> core.stopFabric(machine, engine, fabric)
@@ -75,6 +79,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         }
         r.get("/fabrics/{machine}/{engine}/{fabric}", Permission.READ) { req ->
             val content = try {
+                req.session!!.require(Permission.READ, core.access.fabric(req.params.getValue("machine"), req.params.getValue("fabric")))
                 val f = core.getFabric(req.params.getValue("machine"), req.params.getValue("engine"), req.params.getValue("fabric"))
                 html(
                     pageHeader("Fabric ${f.info.fabricId.value}", "Blueprint ${f.info.blueprint} on engine ${f.engineId} of machine ${f.machine}.", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")),
@@ -94,7 +99,7 @@ internal class OverviewPages(private val core: ManagementCore) {
     }
 
     private suspend fun machines(session: Session, message: String?): Html {
-        val rows = core.listMachines().map {
+        val rows = core.listMachines().filter { session.canFor(Permission.READ, core.access.machine(it.record.id)) }.map {
             h(
                 "<tr><td><strong>{}</strong></td><td><code>{}</code></td><td>{}{}</td>{}</tr>",
                 it.record.id, it.record.daemonAddress, stateBadge(if (it.reachable) "reachable" else "not reachable"), if (it.lastError.isEmpty()) Html("") else h("<small class=\"error\"> {}</small>", it.lastError),
@@ -118,7 +123,8 @@ internal class OverviewPages(private val core: ManagementCore) {
     }
 
     private suspend fun engines(session: Session, message: String?): Html {
-        val rows = core.listEngines(null).map { e ->
+        val rows = core.listEngines(null).filter { session.canFor(Permission.READ, core.access.machine(it.machine)) }.map { e ->
+            val scopes = core.access.machine(e.machine)
             val base = "/engines/${e.machine}/${e.process.engineId.value}"
             val running = e.process.state == EngineProcessState.ENGINE_PROCESS_STATE_RUNNING
             h(
@@ -127,18 +133,19 @@ internal class OverviewPages(private val core: ManagementCore) {
                 if (e.roles.isEmpty()) h("<span class=\"muted\">none</span>") else e.roles.map { h("<span class=\"tag\">{}</span> ", it) },
                 if (e.labels.isEmpty()) h("<span class=\"muted\">none</span>") else e.labels.entries.map { h("<span class=\"tag\">{}={}</span> ", it.key, it.value) },
                 actionsCell(
-                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else button(session, Permission.OPERATE, "Start", "$base/start"),
-                    tagsForm(session, base, e.roles, e.labels),
-                    button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete engine ${e.process.engineId.value}?"),
+                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop", scopes = scopes) else button(session, Permission.OPERATE, "Start", "$base/start", scopes = scopes),
+                    tagsForm(session, base, e.roles, e.labels, scopes),
+                    button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete engine ${e.process.engineId.value}?", scopes),
                 ),
             )
         }
-        val form = if (!session.can(Permission.OPERATE)) {
+        val operable = core.listMachines().filter { session.canFor(Permission.OPERATE, core.access.machine(it.record.id)) }
+        val form = if (operable.isEmpty()) {
             Html("")
         } else {
             h(
                 "<form class=\"form-row\" hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"autostart\"> Start with the daemon</label><button class=\"btn primary\">Create engine</button></form>",
-                field("Machine", html(raw("<select name=\"machine\" required>"), core.listMachines().map { h("<option>{}</option>", it.record.id) }, raw("</select>"))),
+                field("Machine", html(raw("<select name=\"machine\" required>"), operable.map { h("<option>{}</option>", it.record.id) }, raw("</select>"))),
                 field("Engine id", raw("<input name=\"id\" placeholder=\"optional\">")),
             )
         }
@@ -149,8 +156,8 @@ internal class OverviewPages(private val core: ManagementCore) {
         )
     }
 
-    private fun tagsForm(session: Session, base: String, roles: List<String>, labels: Map<String, String>): Html =
-        if (!session.can(Permission.OPERATE)) {
+    private fun tagsForm(session: Session, base: String, roles: List<String>, labels: Map<String, String>, scopes: List<cringle.router.users.Scope>): Html =
+        if (!session.canFor(Permission.OPERATE, scopes)) {
             Html("")
         } else {
             h(
@@ -162,17 +169,18 @@ internal class OverviewPages(private val core: ManagementCore) {
         }
 
     private suspend fun fabrics(session: Session, message: String?): Html {
-        val rows = core.listFabrics(null, null).map { f ->
+        val rows = core.listFabrics(null, null).filter { session.canFor(Permission.READ, core.access.fabric(it.machine, it.info.fabricId.value)) }.map { f ->
             val id = f.info.fabricId.value
+            val scopes = core.access.fabric(f.machine, id)
             val base = "/fabrics/${f.machine}/${f.engineId}/$id"
             val running = f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING || f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_STARTING
             h(
                 "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
                 base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"),
                 actionsCell(
-                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop")
-                    else button(session, Permission.OPERATE, if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) "Retry" else "Start", "$base/start"),
-                    button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?"),
+                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop", scopes = scopes)
+                    else button(session, Permission.OPERATE, if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) "Retry" else "Start", "$base/start", scopes = scopes),
+                    button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?", scopes),
                 ),
             )
         }
