@@ -4,6 +4,7 @@ package cringle.gradle
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
@@ -22,6 +23,7 @@ import kotlin.io.path.readText
  * `<artifactId>-*<extension>` instead of the plain name that `./gradlew publishToMavenLocal` writes. The version
  * itself is the one of the version catalog and is part of every POM and of every folder.
  */
+@Tag("integration")
 class LocalRepoPublicationTest {
 
     /** The folder the task `publishToLocalRepo` of the root build has written before the tests start. */
