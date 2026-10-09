@@ -23,6 +23,9 @@ public class Cli(
     /** The version `--version` prints; by default the one of the distribution the CLI was started from. */
     private val version: String = Distribution.version(),
 ) {
+    // one reader for all lines a command reads (a token, the answers of `setup`): a new buffered reader per line would swallow the rest of the input
+    private val lines by lazy { stdin.bufferedReader() }
+
     /** Runs one command line and returns the exit code. */
     public fun run(args: List<String>): Int {
         var command: Command? = null
@@ -101,7 +104,7 @@ public class Cli(
                 },
                 profile = effective,
                 profileFile = profileFile,
-                readSecret = { stdin.bufferedReader().readLine() },
+                readSecret = { lines.readLine() },
                 save = { it.save(profileFile) },
                 warn = { err.println("warning: $it") },
                 environment = environment,

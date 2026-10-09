@@ -93,7 +93,10 @@ public class ManagementServer(
     onAuthenticated: (token: String) -> Unit = {},
     /** If set, the web interface (#207) listens on this port (0: any) on [webHost]. */
     webPort: Int? = null,
-    webHost: String = "127.0.0.1",
+    /** Where the web interface listens; `null` follows [bindHost]. */
+    webHost: String? = null,
+    /** Where the gRPC server listens (`loopback`, `all` or an address, see [cringle.common.BindAddress]); `null` is the loopback interface. */
+    bindHost: String? = null,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
@@ -103,7 +106,7 @@ public class ManagementServer(
     }
 
     private val server: Server = NettyServerBuilder
-        .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        .forAddress(cringle.common.BindAddress.socketAddress(bindHost, port))
         .maxInboundMessageSize(1024 * 1024)
         // TLS 1.3 with the identity of the server; a client needs no certificate (the user is authenticated by the token), the
         // CLI pins the fingerprint of the key. A client that does present a certificate is checked for validity only.
@@ -122,7 +125,7 @@ public class ManagementServer(
         .build()
 
     /** The web interface; `null` if no web port was given. Pages register their routes before [start]. */
-    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost) }
+    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost) }
 
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
     @Volatile

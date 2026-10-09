@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>] [--trust-local]"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>] [--bind <loopback|all|address>] [--trust-local]"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -31,7 +31,8 @@ public fun main(args: Array<String>) {
     var auth = false
     var trustLocal = false
     var webPort: Int? = null
-    var webHost = "127.0.0.1"
+    var webHost: String? = null
+    var bind: String? = cringle.common.BindAddress.fromEnvironment()
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -60,9 +61,15 @@ public fun main(args: Array<String>) {
             "--trust-local" -> trustLocal = true
             "--web-port" -> webPort = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--web-port must be 0..65535")
             "--web-host" -> webHost = value(option)
+            "--bind" -> bind = value(option)
             else -> fail("unknown argument '$option'")
         }
         i += 1
+    }
+    try {
+        cringle.common.BindAddress.socketAddress(bind, 0)
+    } catch (e: IllegalArgumentException) {
+        fail(e.message ?: "invalid --bind")
     }
     CringleLogging.init(CringleHome.resolve(home), "management", "main")
     val base = CringleHome.resolve(home).resolve("management")
@@ -88,11 +95,15 @@ public fun main(args: Array<String>) {
     } else {
         System.err.println("WARNING: no --auth: everybody who can reach the port is administrator")
     }
-    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost)
+    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost, bindHost = bind)
     Runtime.getRuntime().addShutdownHook(Thread({ certificateWatcher.close(); server.close() }, "management-shutdown"))
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
     println("management-port=${server.port}")
+    if (cringle.common.BindAddress.isOpen(bind)) {
+        LoggerFactory.getLogger("cringle.management").warn("listening on {}, not only on the loopback interface: the server is reachable from the network", bind)
+        println("listening=$bind")
+    }
     // the fingerprint that CLI and WebUI pin the server to ('cringle login --fingerprint'); it does not change while the key stays
     println("fingerprint=${identity.publicKeyFingerprint}")
     server.web?.let { println("web-port=${it.port}") }

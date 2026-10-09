@@ -2,7 +2,7 @@
 #
 # Installer of Cringle for Windows (docs/daemon-service.md). Run it in an administrative PowerShell:
 #
-#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Start]
+#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Bind <loopback|all|address>] [-Port <n>] [-WebPort <n>] [-Start]
 #   .\install.ps1 -FromBuild <dir> [-Version <version>] [-DaemonOnly] [-Start]
 #   .\install.ps1 -Uninstall [-Purge]
 #
@@ -14,6 +14,13 @@
 #                       `.\gradlew.bat cringleInstallLocal` builds and runs this.
 #   -DaemonOnly         run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
 #                       user logins) and the repository (port 7600) as programs it supervises
+#   -Bind <value>       where the servers listen: loopback (default), all (every network interface) or an address
+#   -Port <n>           port of the management server (default 7500)
+#   -WebPort <n>        port of the web interface (default 8443)
+#   -RepositoryPort <n> port of the repository (default 7600)
+#   -DaemonPort <n>     port of the daemon (default 7400)
+#                       The values are kept as <env> elements in the service file of the daemon and stay when the script is run
+#                       again without them; change them later with `cringle setup`.
 #   -WithManagement     no longer needed (the default); accepted for old scripts
 #   -Start              start the registered services (default: they start at the next boot only)
 #   -Uninstall          stop and remove the services, the PATH entry and the program files; the data stays
@@ -33,6 +40,11 @@ param(
     [string]$Version,
     [switch]$WithManagement,
     [switch]$DaemonOnly,
+    [string]$Bind,
+    [string]$Port,
+    [string]$WebPort,
+    [string]$RepositoryPort,
+    [string]$DaemonPort,
     [switch]$Start,
     [switch]$Uninstall,
     [switch]$Purge,
@@ -56,17 +68,16 @@ $LatestApi = 'https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest'
 # the service wrapper of a release (docs/releasing.md); a local build downloads it from here when it is not in the build folder
 $WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
 $WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
-$DaemonPort = 7400
-$ManagementPort = 7500
-$WebPort = 8443
-$RepositoryPort = 7600
-$DaemonArguments = "--port $DaemonPort --combined"
-if (-not $DaemonOnly) { $DaemonArguments += " --with-management $ManagementPort --web-port $WebPort --with-repository $RepositoryPort" }
+# the settings of the services: <env> elements of the service file of the daemon, which the arguments refer to as %KEY% (cringle setup changes them)
+$SettingDefaults = [ordered]@{ CRINGLE_BIND = 'loopback'; CRINGLE_DAEMON_PORT = '7400'; CRINGLE_MANAGEMENT_PORT = '7500'; CRINGLE_WEB_PORT = '8443'; CRINGLE_REPOSITORY_PORT = '7600' }
+$SettingGiven = @{ CRINGLE_BIND = $Bind; CRINGLE_DAEMON_PORT = $DaemonPort; CRINGLE_MANAGEMENT_PORT = $Port; CRINGLE_WEB_PORT = $WebPort; CRINGLE_REPOSITORY_PORT = $RepositoryPort }
+$DaemonArguments = '--port %CRINGLE_DAEMON_PORT% --combined'
+if (-not $DaemonOnly) { $DaemonArguments += ' --with-management %CRINGLE_MANAGEMENT_PORT% --web-port %CRINGLE_WEB_PORT% --with-repository %CRINGLE_REPOSITORY_PORT%' }
 $Services = @(
     @{ Id = 'cringle-daemon'; Name = 'Cringle Daemon'; Script = 'cringle-daemon.bat'
        Arguments = $DaemonArguments; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
     @{ Id = 'cringle-management'; Name = 'Cringle Management Server'; Script = 'cringle-management-server.bat'
-       Arguments = "--port $ManagementPort"; Description = 'Cringle management server' }
+       Arguments = '--port %CRINGLE_MANAGEMENT_PORT%'; Description = 'Cringle management server' }
 )
 
 function Write-Info([string]$Message) {
@@ -255,7 +266,34 @@ function Invoke-WinSW([string]$Exe, [string]$Command) {
     }
 }
 
+# the value of every setting: the one given as an option, else the one in the service file that is there, else the default
+function Get-Settings([string]$Path) {
+    $result = [ordered]@{}
+    $existing = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
+    foreach ($key in $SettingDefaults.Keys) {
+        $value = $SettingGiven[$key]
+        if (-not $value -and $existing -match ('<env name="' + $key + '" value="([^"]*)"')) { $value = $Matches[1] }
+        if (-not $value) { $value = $SettingDefaults[$key] }
+        $result[$key] = $value
+    }
+    return $result
+}
+
+function Assert-Settings {
+    foreach ($key in $SettingGiven.Keys) {
+        $value = $SettingGiven[$key]
+        if (-not $value) { continue }
+        if ($key -eq 'CRINGLE_BIND') {
+            if ($value -notmatch '^[A-Za-z0-9.:_-]+$') { throw "-Bind needs loopback, all or an address, not '$value'" }
+        } elseif ($value -notmatch '^[0-9]{1,5}$' -or [int]$value -lt 1 -or [int]$value -gt 65535) {
+            throw "a port needs a number from 1 to 65535, not '$value' ($key)"
+        }
+    }
+}
+
 function Write-ServiceConfig($Service, [string]$Path) {
+    $settings = Get-Settings $Path
+    $envXml = ($settings.Keys | ForEach-Object { '  <env name="' + $_ + '" value="' + [Security.SecurityElement]::Escape($settings[$_]) + '"/>' }) -join "`n"
     $bat = Join-Path (Join-Path (Join-Path $InstallRoot 'current') 'bin') $Service.Script
     $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
     $esc = { param($Text) [Security.SecurityElement]::Escape($Text) }
@@ -267,6 +305,7 @@ function Write-ServiceConfig($Service, [string]$Path) {
   <executable>$(& $esc $cmd)</executable>
   <arguments>$(& $esc ('/c ""' + $bat + '" ' + $Service.Arguments + '"'))</arguments>
   <env name="CRINGLE_HOME" value="$(& $esc $DataRoot)"/>
+$envXml
   <logpath>$(& $esc (Join-Path $DataRoot 'logs'))</logpath>
   <log mode="roll"/>
   <onfailure action="restart" delay="5 sec"/>
@@ -436,6 +475,8 @@ function Invoke-Uninstall {
 
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
+    Assert-Settings
+    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort)) { throw '-Uninstall cannot be combined with -Bind or the port options' }
     if ($Uninstall -and ($Version -or $WithManagement -or $DaemonOnly -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -DaemonOnly, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     if (-not $NoService -and -not (Test-Admin)) {

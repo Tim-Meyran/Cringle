@@ -14,10 +14,10 @@ To update one: fetch the package from the npm registry (`npm pack <name>@<versio
 ## Starting it
 
 ```
-management-server --web-port 8443 [--web-host 127.0.0.1] [--auth]
+management-server --web-port 8443 [--web-host 127.0.0.1] [--bind loopback|all|address] [--auth]
 ```
 
-Without `--web-port` there is no web interface. The default host is `127.0.0.1`: the interface is reachable from the machine of the ManagementServer only; use `--web-host 0.0.0.0` or a reverse proxy to open it. The start prints `web-port=<port>`.
+Without `--web-port` there is no web interface. The default host is `127.0.0.1`: the interface is reachable from the machine of the ManagementServer only; use `--bind all` (the gRPC port and the web interface listen on all interfaces, see `management-server.md`), `--web-host <address>` for the web interface alone, or a reverse proxy to open it. The start prints `web-port=<port>`.
 
 The interface is served over **HTTPS (TLS 1.3)** with the identity of the ManagementServer. The certificate is self-signed, so a browser asks once: compare the key shown by the browser's certificate details with the **server key** printed at the start (`fingerprint=...`), shown on the login page and in the footer of every page.
 
@@ -182,6 +182,7 @@ Without a page:
 | `cringle cert status` | reads the certificate files of the local home; no server involved |
 | `cringle cert renew` | renews the certificate files of the local home; no server involved |
 | `cringle self-update` | updates the installation of the command line tool |
+| `cringle setup` | changes the settings file of the installed services on this machine; no server involved |
 | `cringle shell` | the interactive mode of the command line tool; the web interface is the interactive way there |
 
 ## How the lists refresh (#242)

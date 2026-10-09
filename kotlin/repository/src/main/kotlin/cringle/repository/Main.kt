@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 import org.slf4j.LoggerFactory
 
-private const val USAGE = "usage: repository [--home <dir>] [--port <port>] [--auth] [--trust-local]"
+private const val USAGE = "usage: repository [--home <dir>] [--port <port>] [--auth] [--bind <loopback|all|address>] [--trust-local]"
 
 /** The Cringle home: [explicit], `CRINGLE_HOME` or `~/.cringle`. */
 private fun resolveHome(explicit: Path?): Path =
@@ -33,7 +33,7 @@ private fun resolveHome(explicit: Path?): Path =
  * second. With [auth] the calls need user tokens (`<home>/repository/users.json`); [bootstrapToken] is the token of the admin user
  * on the first start.
  */
-public class RepositoryProgram(home: Path, port: Int = 0, auth: Boolean = false, trustLocal: Boolean = false) : AutoCloseable {
+public class RepositoryProgram(home: Path, port: Int = 0, auth: Boolean = false, trustLocal: Boolean = false, bind: String? = null) : AutoCloseable {
     private val base = home.resolve("repository")
 
     /** The identity of the repository. */
@@ -71,6 +71,7 @@ public class RepositoryProgram(home: Path, port: Int = 0, auth: Boolean = false,
             users,
             Files.createDirectories(base.resolve("upload")),
             RepositoryTls(identity, trustStore),
+            bind,
         )
     }
 
@@ -98,6 +99,7 @@ public fun main(args: Array<String>) {
     var port = 0
     var auth = false
     var trustLocal = false
+    var bind: String? = cringle.common.BindAddress.fromEnvironment()
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -110,13 +112,18 @@ public fun main(args: Array<String>) {
             "--port" -> port = args.getOrNull(++i)?.toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--port must be 0..65535")
             "--auth" -> auth = true
             "--trust-local" -> trustLocal = true
+            "--bind" -> bind = args.getOrNull(++i) ?: fail("$option needs a value")
             else -> fail("unknown argument '$option'")
         }
         i += 1
     }
     val homeDir = resolveHome(home)
     CringleLogging.init(homeDir, "repository", "main")
-    val program = RepositoryProgram(homeDir, port, auth, trustLocal)
+    val program = try {
+        RepositoryProgram(homeDir, port, auth, trustLocal, bind)
+    } catch (e: IllegalArgumentException) {
+        fail(e.message ?: "invalid --bind")
+    }
     Runtime.getRuntime().addShutdownHook(Thread({ program.close() }, "repository-shutdown"))
     program.start()
     LoggerFactory.getLogger("cringle.repository").info("repository started on port {}", program.port)

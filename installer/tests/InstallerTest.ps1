@@ -231,7 +231,8 @@ try {
             Check 'the service Cringle Daemon exists' ($null -ne $daemon)
             Check 'the service starts automatically' ((Get-CimInstance Win32_Service -Filter "Name='cringle-daemon'").StartMode -eq 'Auto')
             Check 'no service of its own for the management server' ($null -eq (Get-Service -Name 'cringle-management' -ErrorAction SilentlyContinue))
-            Check 'the daemon runs management server and repository' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('--with-management 7500 --web-port 8443 --with-repository 7600'))
+            Check 'the daemon runs management server and repository' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('--with-management %CRINGLE_MANAGEMENT_PORT% --web-port %CRINGLE_WEB_PORT% --with-repository %CRINGLE_REPOSITORY_PORT%'))
+            Check 'the settings have their defaults' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_MANAGEMENT_PORT" value="7500"/>') -and (Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains('<env name="CRINGLE_BIND" value="loopback"/>'))
             Check 'CRINGLE_HOME is in the service configuration' ((Get-Content (Join-Path $r5.Install 'service\cringle-daemon.xml') -Raw).Contains($r5.Data))
             Check 'PATH has the entry' (((& $machinePath) -split ';') -contains $binDir)
             Start-Service 'cringle-daemon'
