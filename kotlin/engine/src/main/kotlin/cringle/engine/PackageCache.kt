@@ -185,12 +185,24 @@ public class PackageCache internal constructor(
             } catch (e: PackageHashMismatchException) {
                 throw PackageCacheException(true, "${a.label}: downloaded file has hash ${e.actual}, expected ${e.expected}", e)
             }
-            Files.createDirectories(dir.parent)
-            SafeUnzip.extract(file, staging)
-            Files.writeString(marker(staging), a.sha256.lowercase() + "\n")
-            touch(staging)
-            Files.move(staging, dir, StandardCopyOption.ATOMIC_MOVE)
-            return true
+            // A cleanup of another engine removes name directories that are empty, also the one this install has just created, and Windows
+            // refuses to create or move something into a directory that is being deleted: a failed step is tried again from the beginning.
+            var attempt = 1
+            while (true) {
+                try {
+                    Files.createDirectories(dir.parent)
+                    SafeUnzip.extract(file, staging)
+                    Files.writeString(marker(staging), a.sha256.lowercase() + "\n")
+                    touch(staging)
+                    Files.move(staging, dir, StandardCopyOption.ATOMIC_MOVE)
+                    return true
+                } catch (e: IOException) {
+                    if (attempt >= INSTALL_ATTEMPTS) throw e
+                    runCatching { ops.deleteTree(staging) }
+                    attempt += 1
+                    Thread.sleep(10L * attempt)
+                }
+            }
         } catch (e: PackageHashMismatchException) {
             throw PackageCacheException(true, "${a.label}: downloaded file does not match the expected hash (${e.message})", e)
         } catch (e: PackageFormatException) {
@@ -273,6 +285,10 @@ public class PackageCache internal constructor(
         val lines = try {
             Files.readAllLines(file)
         } catch (e: java.nio.file.NoSuchFileException) {
+            return emptyList()
+        } catch (e: java.nio.file.FileSystemException) {
+            // Windows: a file that another thread is deleting right now cannot be opened (access denied or sharing violation), it is gone
+            if (Files.exists(file)) throw e
             return emptyList()
         }
         return lines.filter { it.isNotBlank() }.map { line ->
@@ -447,6 +463,8 @@ public class PackageCache internal constructor(
 
         /** Directories of an unfinished installation or removal: `<version>.installing-<uuid>`, `<version>.removing-<uuid>`. */
         private val LEFTOVER = Regex(".+\\.(installing|removing)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+        private const val INSTALL_ATTEMPTS = 5
 
         /** Name of the marker file inside an installed version. */
         public const val MARKER: String = ".cringle-installed"
