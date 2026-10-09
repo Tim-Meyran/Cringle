@@ -43,6 +43,66 @@ service DaemonService {
 
   // The entries the collector has kept for an Engine.
   rpc QueryCollectedLogs(QueryCollectedLogsRequest) returns (QueryCollectedLogsResponse);
+
+  // The settings of the machine (the key-value store `<home>/config/cringle.conf`, #314): every key of the catalog with its value.
+  rpc ListConfig(ListConfigRequest) returns (ListConfigResponse);
+
+  // One setting.
+  rpc GetConfig(GetConfigRequest) returns (ConfigEntry);
+
+  // Changes a setting and restarts what it affects (the repository, the management server, the set of programs); a change of the address or
+  // the port of the daemon itself is saved and `restart_required` says so.
+  rpc SetConfig(SetConfigRequest) returns (ConfigChange);
+
+  // Removes a setting from the store: its default is in effect again. Restarts like SetConfig.
+  rpc UnsetConfig(UnsetConfigRequest) returns (ConfigChange);
+}
+
+// A setting of the machine with the value in effect.
+message ConfigEntry {
+  string key = 1;
+  string value = 2;
+  string default_value = 3;
+  // Whether the store has the key (otherwise `value` is the default).
+  bool is_set = 4;
+  // `port`, `loopback|all`, `list` or `url`.
+  string type = 5;
+  string description = 6;
+  // What a change restarts: `daemon`, `management`, `repository` or `components`.
+  repeated string restarts = 7;
+  // The daemon was started with an argument for this key; the argument wins over the store until the daemon is started without it.
+  bool overridden = 8;
+}
+
+message ListConfigRequest {}
+
+message ListConfigResponse {
+  repeated ConfigEntry entries = 1;
+  // Lines of the file that cannot be used (unknown key, a value the catalog refuses).
+  repeated string problems = 2;
+}
+
+message GetConfigRequest {
+  string key = 1;
+}
+
+message SetConfigRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message UnsetConfigRequest {
+  string key = 1;
+}
+
+message ConfigChange {
+  ConfigEntry entry = 1;
+  // The programs that were restarted: `repository`, `management`.
+  repeated string restarted = 2;
+  // The daemon itself has to be restarted for the change to take effect.
+  bool restart_required = 3;
+  // Said to the person when `restart_required` is set or the key is overridden by an argument.
+  string note = 4;
 }
 
 // State of an Engine process as seen by the Daemon.

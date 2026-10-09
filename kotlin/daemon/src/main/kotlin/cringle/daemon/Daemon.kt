@@ -56,11 +56,19 @@ public class Daemon(
     private val companions: Companions = Companions(),
     /** Where the daemon, its router and the engines listen: `null` or `loopback` (default) or `all` (every network interface), see [cringle.common.BindAddress]. */
     bindHost: String? = null,
+    /**
+     * The settings store of the machine (#314): without [companions] being given, what the daemon runs besides itself and the ports of it come from here.
+     * `null`: the daemon takes [companions] as it is, as before.
+     */
+    private val config: cringle.common.config.ConfigStore? = null,
+    /** The settings the daemon was started with as arguments (`management.port` ...): they win over the store (#314). */
+    private val overrides: Map<String, String> = emptyMap(),
 ) : AutoCloseable {
     private val bind: String? = cringle.common.BindAddress.interfaceChoice(bindHost)
 
     /** Whether the components of this home trust each other by their key files; always when the daemon runs the management server or the repository. */
-    private val localTrust: Boolean = trustLocal || companions.any
+    // with a settings store the programs can be added later by a change of `components`: their keys are made and trusted from the start
+    private val localTrust: Boolean = trustLocal || config != null || deriveCompanions().any
     private val daemonDir = home.resolve("daemon")
     private val daemonIdentity: Identity = Identity.loadOrCreate(daemonDir, ComponentKind.DAEMON.commonName("daemon"))
     private val daemonTrustStore: TrustStore = TrustStore(daemonDir.resolve("trust.json"))
@@ -74,13 +82,13 @@ public class Daemon(
     } else null
 
     /** The key of the repository of this home when the daemon runs it: its identity is made now, so the engines trust it from their first start. */
-    private val localRepository: String? = if (companions.repositoryPort != null) {
+    private val localRepository: String? = if (config != null || companions.repositoryPort != null) {
         LocalTrust.ensure(home.resolve("repository"), ComponentKind.REPOSITORY.commonName("repository")).also {
             LocalTrust.trust(daemonTrustStore, it, "repository", TrustKind.COMPONENT)
         }
     } else null
 
-    private val companionProcesses = ArrayList<CompanionProcess>()
+    private val companionProcesses = LinkedHashMap<String, CompanionProcess>()
 
     /** The fingerprint of the key of the daemon, which the engines and the management server have to trust. */
     public val identityFingerprint: String get() = daemonIdentity.publicKeyFingerprint
@@ -162,25 +170,109 @@ public class Daemon(
         return this
     }
 
+    /** The value in effect of the setting [key]: the argument the daemon was started with, else the store, else the default (#314). */
+    public fun effectiveValue(key: String): String =
+        overrides[key] ?: config?.get(key) ?: (cringle.common.config.ConfigCatalog.find(key) ?: throw IllegalArgumentException("unknown key '$key'")).default
+
+    /** Whether the daemon was started with an argument for [key], which wins over the store. */
+    public fun isOverridden(key: String): Boolean = key in overrides
+
+    /** The store of the settings, `null` if the daemon was created without one. */
+    public val settings: cringle.common.config.ConfigStore? get() = config
+
+    /** What the daemon runs besides itself now: from the settings if it has a store, else the [companions] it was given. */
+    private fun deriveCompanions(): Companions {
+        if (config == null) return companions
+        val components = effectiveValue("components").split(',')
+        val management = "management" in components
+        return Companions(
+            managementPort = if (management) effectiveValue("management.port").toInt() else null,
+            webPort = if (management) effectiveValue("management.web.port").toInt() else null,
+            repositoryPort = if ("repository" in components) effectiveValue("repository.port").toInt() else null,
+            command = companions.command,
+            webUrl = effectiveValue("management.web.url").takeIf { it.isNotEmpty() },
+        )
+    }
+
     /** Starts the repository and then the management server, if the daemon is to run them. */
     private fun startCompanions() {
+        synchronized(companionProcesses) {
+            val current = deriveCompanions()
+            if (current.repositoryPort != null) startCompanion("repository", current)
+            if (current.managementPort != null) startCompanion("management", current)
+        }
+    }
+
+    /** Starts the program [name] (`repository` or `management`) with the arguments the settings give; the caller holds the lock of [companionProcesses]. */
+    private fun startCompanion(name: String, current: Companions) {
         val environment = mapOf("CRINGLE_HOME" to home.toString(), LocalTrust.ENV to "1")
         val logs = daemonDir.resolve("logs")
-        companions.repositoryPort?.let { repositoryPort ->
-            companionProcesses += CompanionProcess(
-                "repository", companions.command, "cringle.repository.MainKt",
+        if (name == "repository") {
+            val repositoryPort = current.repositoryPort ?: return
+            companionProcesses[name] = CompanionProcess(
+                "repository", current.command, "cringle.repository.MainKt",
                 listOf("--home", home.toString(), "--port", repositoryPort.toString(), "--trust-local") + bindArguments(),
                 environment, logs,
             ).also { it.start() }
-        }
-        companions.managementPort?.let { managementPort ->
+        } else {
+            val managementPort = current.managementPort ?: return
             val arguments = arrayListOf("--home", home.toString(), "--port", managementPort.toString(), "--auth", "--trust-local", "--machine", "local=127.0.0.1:$port")
             arguments += bindArguments()
-            companions.webPort?.let { arguments += listOf("--web-port", it.toString()) }
-            companions.repositoryPort?.let { arguments += listOf("--repository", "127.0.0.1:$it") }
+            current.webPort?.let { arguments += listOf("--web-port", it.toString()) }
+            current.webUrl?.let { arguments += listOf("--web-url", it) }
+            current.repositoryPort?.let { arguments += listOf("--repository", "127.0.0.1:$it") }
             router?.let { arguments += listOf("--router", "127.0.0.1:${it.port}") }
-            companionProcesses += CompanionProcess("management", companions.command, "cringle.management.MainKt", arguments, environment, logs).also { it.start() }
+            companionProcesses[name] = CompanionProcess("management", current.command, "cringle.management.MainKt", arguments, environment, logs).also { it.start() }
         }
+    }
+
+    private fun stopCompanion(name: String) {
+        companionProcesses.remove(name)?.close()
+    }
+
+    /** What [applyConfig] did: the programs it started, restarted or stopped (`restarted repository`), and whether the daemon itself has to be restarted. */
+    public data class ConfigApplied(val actions: List<String>, val restartRequired: Boolean)
+
+    /**
+     * Applies the change of the setting [key] that the store already has (#315): restarts the programs the key affects with the new arguments. A key
+     * that affects the daemon itself (its address and port) restarts nothing and is answered with `restartRequired`: the daemon does not restart itself
+     * from inside the call that asked for it.
+     */
+    public fun applyConfig(key: String): ConfigApplied {
+        val configKey = cringle.common.config.ConfigCatalog.find(key) ?: throw IllegalArgumentException("unknown key '$key'")
+        val actions = ArrayList<String>()
+        var restartRequired = false
+        synchronized(companionProcesses) {
+            val current = deriveCompanions()
+            val wanted = mapOf("repository" to (current.repositoryPort != null), "management" to (current.managementPort != null))
+            fun restart(name: String) {
+                if (wanted.getValue(name) && name in companionProcesses) {
+                    stopCompanion(name)
+                    startCompanion(name, current)
+                    actions += "restarted $name"
+                }
+            }
+            for (target in configKey.restarts) {
+                when (target) {
+                    cringle.common.config.RestartTarget.DAEMON -> restartRequired = true
+                    cringle.common.config.RestartTarget.REPOSITORY -> restart("repository")
+                    cringle.common.config.RestartTarget.MANAGEMENT -> restart("management")
+                    cringle.common.config.RestartTarget.COMPONENTS -> {
+                        for (name in listOf("repository", "management")) {
+                            val running = name in companionProcesses
+                            if (wanted.getValue(name) && !running) {
+                                startCompanion(name, current)
+                                actions += "started $name"
+                            } else if (!wanted.getValue(name) && running) {
+                                stopCompanion(name)
+                                actions += "stopped $name"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ConfigApplied(actions.distinct(), restartRequired)
     }
 
     private fun bindArguments(): List<String> = bind?.let { listOf("--bind", it) }.orEmpty()
@@ -292,7 +384,7 @@ public class Daemon(
 
     /** Stops the gRPC server, the router and all engine processes. */
     override fun close() {
-        companionProcesses.reversed().forEach { it.close() }
+        synchronized(companionProcesses) { companionProcesses.values.reversed().forEach { it.close() } }
         certificateWatchers.forEach { it.close() }
         collector.close()
         server.shutdown()

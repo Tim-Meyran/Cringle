@@ -59,7 +59,7 @@ class CliTest {
         home = Files.createDirectories(dir.resolve("home"))
         cliHome = dir.resolve("cli-home")
         tls = ManagementTls(dir.resolve("tls"))
-        daemon = Daemon(home).start()
+        daemon = Daemon(home, config = cringle.common.config.ConfigStore(home.resolve("config").resolve("cringle.conf"))).start()
         closeables += daemon
         tls.trust(daemon)
         val repositoryServer = tls.startRepository(PackageRepository(dir.resolve("repo")))
@@ -342,6 +342,39 @@ class CliTest {
         assertTrue(noUrl.code != 0 && noUrl.err.contains("--qr needs --web-url"), noUrl.err)
         assertTrue(cli("token", "create", id, "--web-url", "http://h.example", token = adminToken).code != 0)
         assertTrue(cli("token", "create", id, "--web-url", "https://h.example/path", token = adminToken).code != 0)
+    }
+
+    /** #316: the settings of a machine through the management server, with the rights of the caller. */
+    @Test
+    fun theSettingsOfAMachineAreReadAndChangedThroughTheManagementServer() {
+        machine()
+        val list = ok("config", "list", "m1").out
+        assertTrue(list.contains("management.web.port") && list.contains("8443") && list.contains("repository.port"), list)
+        val set = json(ok("config", "set", "m1", "management.web.port", "9443", "--json")) as JsonObject
+        assertEquals("9443", field(set, "value"))
+        assertEquals("false", field(set, "restartRequired"))
+        assertTrue(ok("config", "get", "m1", "management.web.port").out.contains("9443"))
+        // without the machine the settings of the machine local are meant: it is not registered here
+        assertTrue(cli("config", "get", "management.web.port", token = adminToken).code != 0)
+        val daemonPort = json(ok("config", "set", "m1", "daemon.port", "7411", "--json")) as JsonObject
+        assertEquals("true", field(daemonPort, "restartRequired"))
+        assertTrue(field(daemonPort, "note").contains("daemon has to be restarted"))
+        val reset = json(ok("config", "unset", "m1", "management.web.port", "--json")) as JsonObject
+        assertEquals("8443", field(reset, "value"))
+        assertEquals("false", field(reset, "set"))
+        assertTrue(cli("config", "set", "m1", "daemon.port", "70000", token = adminToken).code != 0)
+        assertTrue(cli("config", "set", "m1", "no.such.key", "1", token = adminToken).code != 0)
+
+        // a viewer reads and does not change; the role admin for the function config only changes the settings
+        val viewer = json(ok("user", "create", "vera", "--role", "viewer", "--json")) as JsonObject
+        val viewerToken = field(json(ok("token", "create", field(viewer, "id"), "--json")) as JsonObject, "token")
+        assertTrue(ok("config", "list", "m1", token = viewerToken).out.contains("bind"))
+        assertTrue(cli("config", "set", "m1", "bind", "all", token = viewerToken).code != 0)
+        val keeper = json(ok("user", "create", "karl", "--role", "viewer", "--json")) as JsonObject
+        ok("user", "grant", field(keeper, "id"), "admin", "--scope", "function:config")
+        val keeperToken = field(json(ok("token", "create", field(keeper, "id"), "--json")) as JsonObject, "token")
+        assertEquals("all", field(json(ok("config", "set", "m1", "bind", "all", "--json", token = keeperToken)) as JsonObject, "value"))
+        assertTrue(cli("machine", "add", "x", "127.0.0.1:1", token = keeperToken).code != 0, "that role does not reach beyond the settings")
     }
 
     @Test

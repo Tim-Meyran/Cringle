@@ -23,7 +23,8 @@ public fun main(args: Array<String>) {
     var managementPort: Int? = null
     var webPort: Int? = null
     var repositoryPort: Int? = null
-    var bind: String? = cringle.common.BindAddress.fromEnvironment()
+    var bind: String? = null
+    var portGiven = false
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -40,7 +41,10 @@ public fun main(args: Array<String>) {
     while (i < args.size) {
         when (val option = args[i]) {
             "--home" -> home = Paths.get(value(option))
-            "--port" -> port = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--port must be 0..65535")
+            "--port" -> {
+                port = value(option).toIntOrNull()?.takeIf { it in 0..65535 } ?: fail("--port must be 0..65535")
+                portGiven = true
+            }
             "--router" -> router = value(option)
             "--combined" -> combined = true
             "--bind" -> bind = value(option)
@@ -59,8 +63,33 @@ public fun main(args: Array<String>) {
     } catch (e: IllegalArgumentException) {
         fail(e.message ?: "invalid --bind")
     }
-    CringleLogging.init(CringleHome.resolve(home), "daemon", "main")
-    val daemon = Daemon(CringleHome.resolve(home), port, router, combined, trustLocal = LocalTrust.enabled(trustLocal), companions = Companions(managementPort, webPort, repositoryPort), bindHost = bind)
+    val homeDir = CringleHome.resolve(home)
+    CringleLogging.init(homeDir, "daemon", "main")
+    // the settings (#314): what the arguments give wins, the rest comes from <home>/config/cringle.conf, then from the defaults
+    val overrides = LinkedHashMap<String, String>()
+    bind?.let { overrides["bind"] = it }
+    if (portGiven) overrides["daemon.port"] = port.toString()
+    if (managementPort != null || repositoryPort != null) {
+        overrides["components"] = listOfNotNull(managementPort?.let { "management" }, repositoryPort?.let { "repository" }).joinToString(",")
+    }
+    managementPort?.let { overrides["management.port"] = it.toString() }
+    webPort?.let { overrides["management.web.port"] = it.toString() }
+    repositoryPort?.let { overrides["repository.port"] = it.toString() }
+    val store = cringle.common.config.ConfigStore(homeDir.resolve("config").resolve("cringle.conf"))
+    // the first start: the file is made from the old CRINGLE_* variables and the arguments, once
+    if (store.migrate(System.getenv(), overrides)) LoggerFactory.getLogger("cringle.daemon").info("settings file {} created", store.file)
+    store.problems.forEach { LoggerFactory.getLogger("cringle.daemon").warn("{}: {}", store.file, it) }
+    val effectiveBind = overrides["bind"] ?: store.get("bind")
+    val effectivePort = overrides["daemon.port"]?.toInt() ?: store.get("daemon.port").toInt()
+    try {
+        cringle.common.BindAddress.interfaceChoice(effectiveBind)
+    } catch (e: IllegalArgumentException) {
+        fail(e.message ?: "invalid bind")
+    }
+    val daemon = Daemon(
+        homeDir, effectivePort, router, combined, trustLocal = LocalTrust.enabled(trustLocal), companions = Companions(managementPort, webPort, repositoryPort),
+        bindHost = effectiveBind, config = store, overrides = overrides,
+    )
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))
     daemon.start()
     LoggerFactory.getLogger("cringle.daemon").info("daemon started on port {}", daemon.port)

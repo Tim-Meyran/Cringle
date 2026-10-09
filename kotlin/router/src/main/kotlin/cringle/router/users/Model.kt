@@ -81,7 +81,7 @@ public data class Scope(val kind: ScopeKind, val name: String = "") {
 
     public companion object {
         /** The framework functions a role can be limited to: trust of components, trust of plugins, users and groups. */
-        public val FUNCTIONS: List<String> = listOf("trust", "plugin-trust", "users")
+        public val FUNCTIONS: List<String> = listOf("trust", "plugin-trust", "users", "config")
 
         private val NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 

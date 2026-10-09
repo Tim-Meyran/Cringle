@@ -76,6 +76,7 @@ public class WebServer(
         server.createContext("/") { exchange -> runCatching { handle(exchange) }.onFailure { fail(exchange, it) } }
         registerFoundation()
         OverviewPages(core).register(this)
+        ConfigPages(core).register(this)
         DeploymentPages(core).register(this)
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
