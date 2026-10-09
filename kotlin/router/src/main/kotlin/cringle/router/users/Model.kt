@@ -110,6 +110,19 @@ public data class Group(val name: String, val roles: Set<UserRole>, val scoped: 
 /** A user with the global roles it has including those of its groups, and the same for the scoped ones. */
 public data class UserView(val user: User, val effectiveRoles: Set<UserRole>, val effectiveScoped: Set<RoleAssignment> = emptySet())
 
+/**
+ * A registry of another site that this one trusts (Architecture 6.2): its users come as `name@registry` with a token that the registry signed
+ * with the key [publicKey] (Base64 of the X.509 encoding; [fingerprint] is the SHA-256 of that encoding, the thing the administrator confirmed).
+ * [roles] and [scoped] are what every user of the registry may do; a stored user with the id `name@registry` adds to it.
+ */
+public data class TrustedRegistry(
+    val name: String,
+    val fingerprint: String,
+    val publicKey: String,
+    val roles: Set<UserRole> = emptySet(),
+    val scoped: Set<RoleAssignment> = emptySet(),
+)
+
 /** A stored token. Only the SHA-256 hash of the token value is kept, never the value. */
 public data class TokenRecord(
     val id: String,
@@ -141,6 +154,8 @@ public data class UserData(
     val tokens: List<TokenRecord> = emptyList(),
     /** Whether the bootstrap admin was created (and its token shown). */
     val bootstrapped: Boolean = false,
+    /** The registries of other sites that are trusted (#231). */
+    val registries: List<TrustedRegistry> = emptyList(),
 )
 
 /** Persistence of [UserData]. */
