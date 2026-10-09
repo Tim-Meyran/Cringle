@@ -11,6 +11,7 @@ import cringle.contract.SchemaRef
 import cringle.contract.TetherType
 import cringle.engine.Engine
 import cringle.engine.EngineArgs
+import cringle.engine.v1.AssertionState
 import cringle.engine.v1.DeployFabricRequest
 import cringle.engine.v1.DeployedPlugin
 import cringle.engine.v1.EngineManagementServiceGrpcKt.EngineManagementServiceCoroutineStub
@@ -96,6 +97,12 @@ class FabricManagementTest {
         val project = TestProjectBuilder("demo", "0.1.0")
             .dependency("acme-demo", "^1.0.0")
             .blueprint(Blueprint("main", listOf(block("m1", m1), block("m2", m2)), emptyList()))
+            .blueprint(
+                Blueprint(
+                    "checked", listOf(block("m1", m1), block("m2", m2)), emptyList(),
+                    assertions = listOf(cringle.packaging.FabricRunning(), cringle.packaging.BlockRunning("m2", name = "second block")),
+                ),
+            )
             .build(work, listOf(plugin.pkg))
         SafeUnzip.extract(plugin.file, home.resolve("plugins/acme-demo/1.0.0"))
         SafeUnzip.extract(project.file, home.resolve("projects/demo/0.1.0"))
@@ -160,6 +167,22 @@ class FabricManagementTest {
         assertEquals("stopped", Files.readString(m2))
         assertTrue(stub.listFabrics(ListFabricsRequest.getDefaultInstance()).fabricsList.isEmpty())
         assertEquals(Status.Code.NOT_FOUND, code { stub.getFabricStatus(fabricRequest("shop-1")) })
+    }
+
+    @Test
+    fun theAssertionsOfTheBlueprintAreReportedWithTheStatusOfTheFabric() = withEngine { stub, _, _ ->
+        val deployed = stub.deployFabric(deploy("checked-1", ProtoTrust.PLUGIN_TRUST_TRUSTED, blueprint = "checked"))
+        assertEquals(emptyList<String>(), deployed.assertionsList.map { it.id })
+        val started = stub.startFabric(fabricRequest("checked-1"))
+        assertEquals(listOf("fabric-running", "second block"), started.assertionsList.map { it.id })
+        assertEquals(listOf("fabric-running", "block-running"), started.assertionsList.map { it.type })
+        assertEquals(List(2) { AssertionState.ASSERTION_STATE_OK }, stub.getFabricStatus(fabricRequest("checked-1")).assertionsList.map { it.state })
+        assertTrue(started.assertionsList.all { it.since.seconds > 0 })
+        val stopped = stub.stopFabric(fabricRequest("checked-1"))
+        assertEquals(List(2) { AssertionState.ASSERTION_STATE_UNKNOWN }, stopped.assertionsList.map { it.state })
+        // a blueprint without assertions reports none
+        stub.deployFabric(deploy("plain-1", ProtoTrust.PLUGIN_TRUST_TRUSTED))
+        assertEquals(emptyList<String>(), stub.startFabric(fabricRequest("plain-1")).assertionsList.map { it.id })
     }
 
     @Test

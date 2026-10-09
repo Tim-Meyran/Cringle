@@ -78,6 +78,8 @@ public class FabricSpec(
     public val recorder: cringle.engine.dwh.TetherRecorder? = null,
     /** Migrates the persistent data folders before the blocks start (#258); `null` if the fabric has none. */
     public val migrations: DataMigrations? = null,
+    /** How often the assertions of the blueprint are evaluated (#233). */
+    public val assertionInterval: Duration = Duration.ofSeconds(5),
 )
 
 /**
@@ -115,6 +117,11 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
 
     @Volatile private var currentExecution: String? = null
 
+    private val assertionEvaluator = spec.blueprint.assertions.takeIf { it.isNotEmpty() }?.let { AssertionEvaluator(it) }
+    private val assertionTimer = assertionEvaluator?.let { Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "fabric-${spec.id}-assertions").also { t -> t.isDaemon = true } } }
+
+    @Volatile private var assertionResults: List<AssertionResult> = emptyList()
+
     private val mutableStatus: MutableStateFlow<FabricStatus>
 
     /** The current status; a new value is published on every change of the fabric or of one of its blocks. */
@@ -135,6 +142,28 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         hosts = entries.map { BlockHost(it) }
         mutableStatus = MutableStateFlow(computeStatus())
         startWatchdog()
+        startAssertions()
+    }
+
+    /** Evaluates the assertions every [FabricSpec.assertionInterval] and publishes the results with the status. */
+    private fun startAssertions() {
+        val intervalMs = spec.assertionInterval.toMillis().coerceAtLeast(1)
+        assertionTimer?.scheduleWithFixedDelay({ evaluateAssertions() }, intervalMs, intervalMs, TimeUnit.MILLISECONDS)
+    }
+
+    /** Evaluates the assertions now (if the blueprint has any) and publishes the status; also called after a start and a stop, so the result is there at once. */
+    private fun evaluateAssertions() {
+        val evaluator = assertionEvaluator ?: return publish()
+        try {
+            val status = computeStatus()
+            val stats = stats()
+            assertionResults = evaluator.evaluate(
+                AssertionInput(status.state, status.blocks.associate { it.id to it.state }, stats.tethers.associate { it.id to it.messages }, stats.errors),
+            )
+        } catch (e: Exception) {
+            log(FabricLogger.Level.WARN, "fabric '${spec.id}': the assertions could not be evaluated: ${e.message}")
+        }
+        publish()
     }
 
     private fun resolveEntries(): List<Entry> {
@@ -169,7 +198,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
                 if (blocks.any { it.state == BlockState.FAILED }) FabricState.FAILED else FabricState.RUNNING
             else -> phase
         }
-        return FabricStatus(spec.id, spec.blueprint.name, state, blocks, migrationFailure ?: startFailure)
+        return FabricStatus(spec.id, spec.blueprint.name, state, blocks, migrationFailure ?: startFailure, assertionResults)
     }
 
     private fun publish() {
@@ -243,7 +272,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
                 throw FabricException(message, e)
             }
             phase = FabricState.RUNNING
-            publish()
+            evaluateAssertions()
         }
     }
 
@@ -261,7 +290,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             withContext(dispatcher) { hosts.asReversed().forEach { it.stopHost() } }
             phase = FabricState.STOPPED
             log(FabricLogger.Level.INFO, "fabric '${spec.id}' stopped")
-            publish()
+            evaluateAssertions()
         }
     }
 
@@ -314,6 +343,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             network?.release()
             spec.recorder?.close()
             watchdog?.shutdownNow()
+            assertionTimer?.shutdownNow()
             scope.cancel()
             executor.shutdown()
             spec.onClose?.close()
