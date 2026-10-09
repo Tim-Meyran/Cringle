@@ -10,4 +10,19 @@ A role is **global** (the `roles` of a user or group, as before) or **scoped**: 
 - **Rules:** `END_USER` cannot be scoped (it is not a management role); a global role is not given as a scoped one; granting twice is fine; revoking a role the subject does not have is `NOT_FOUND`.
 - **API:** `UserService.GrantRole` / `RevokeRole` (`MANAGE_USERS`), subject a `user_id` or a `group`. `User` and `Group` messages carry `scoped_roles` (and `effective_scoped_roles` for a user).
 - **Storage:** an optional `"scoped": [{"role": "OPERATOR", "scope": "machine:m1"}]` in the user or group object; a `users.json` without it loads unchanged.
-- **Not yet:** the ManagementServer, the CLI and the WebUI do not look at scopes (#230); today they check the global roles only.
+- **Enforcement in the ManagementServer (#269):** the interceptor in front of a method lets a call in if the caller has the permission globally or for any scope (`allowedAnywhere`); the method then asks `Access` (`ManagementCore.access`) with the scopes of the object. Without `--auth` everything is allowed. A refusal is `PERMISSION_DENIED: insufficient rights for <scopes>`.
+
+  | Call | Scopes that allow it (or the role globally) |
+  |---|---|
+  | machine and engine calls, `CreateEngine`, `Start|Stop|DeleteEngine`, `SetEngineTags`, `SetLogCollection`, `CleanupCache` (with a machine), reading engines, logs, metrics | `machine:<id>` |
+  | `Start|Stop|RemoveFabric`, `GetFabric`, `SetRecording`, `SetDwhRetention`, `QueryDwh`, `ListDwhPartitions` | `fabric:<id>`, the `machine:` it runs on, the `project:` it was deployed from |
+  | `DeployFabric` | the `machine:` or the `project:` of the request |
+  | `Deploy`, `Rollback`, `Undeploy`, `Bind`, `Unbind`, `ListBindings` | `project:<name>` |
+  | remote routers, `ListTrust`, `AddTrustedComponent`, `RemoveTrust` | `function:trust` |
+  | `SetPluginTrust` | `function:plugin-trust` |
+  | user service (`UserService`) | `function:users` |
+  | `AddMachine`, `RemoveMachine`, `Recover`, a list or query without a filter that is not scoped | the role globally |
+  | packages of the repository (`PublishPackage`, `ListPackages`, `ListVersions`, `GetPackage`, `DownloadPackage`) | the role globally or for any scope (the repository is not scoped yet) |
+
+  List calls (`ListMachines`, `ListEngines`, `ListFabrics`, `ListBindings`, `ListDwhPartitions`, `GetMetrics`, `QueryLogs`) return only what the caller may read. A role on a machine covers what runs on it; a role on a project covers its fabrics wherever they run; a deploy needs the role for the project only.
+- **Not yet:** the WebUI does not look at scopes (#271), the CLI cannot grant them (#270).

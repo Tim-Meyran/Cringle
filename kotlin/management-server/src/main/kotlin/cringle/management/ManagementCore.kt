@@ -143,6 +143,17 @@ public class ManagementCore(
         result
     }
 
+    /** Checks of permissions against the object of a call; set by the [ManagementServer] when it has user management, otherwise everything is allowed. */
+    public var access: Access = Access(this, null)
+        internal set
+
+    /** The project a fabric was deployed from, or `null`. */
+    internal fun projectOfFabric(fabricId: String?): String? =
+        snapshot().fabrics.firstOrNull { it.fabricId == fabricId }?.let { projectOf(it).ifEmpty { null } }
+
+    /** The machine a fabric runs on, or `null` if it is unknown. */
+    internal fun machineOfFabric(fabricId: String?): String? = snapshot().fabrics.firstOrNull { it.fabricId == fabricId }?.machine
+
     private fun snapshot(): ManagementData = synchronized(lock) { data }
 
     /**
