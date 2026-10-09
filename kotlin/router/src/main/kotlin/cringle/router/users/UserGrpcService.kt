@@ -41,6 +41,14 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
         }.withDescription(e.message).asException()
     }
 
+    /** The user functions need `MANAGE_USERS` globally or for `function:users`; the interceptor only knew that the caller has it somewhere. */
+    private fun requireUsers() {
+        val caller = AuthInterceptor.CURRENT_USER.get() ?: return
+        if (!users.allowed(caller, Permission.MANAGE_USERS, USERS_SCOPE)) {
+            throw Status.PERMISSION_DENIED.withDescription("insufficient rights for $USERS_SCOPE").asException()
+        }
+    }
+
     private fun toRole(r: UserRole): Role = when (r) {
         UserRole.ADMIN -> Role.ROLE_ADMIN
         UserRole.OPERATOR -> Role.ROLE_OPERATOR
@@ -103,42 +111,56 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
         .setId(t.id).setUserId(t.userId).setLabel(t.label).setCreatedAt(ts(t.createdAt)).setRevoked(t.revoked)
         .also { b -> t.expiresAt?.let { b.setExpiresAt(ts(it)) } }.build()
 
-    override suspend fun createUser(request: CreateUserRequest): CreateUserResponse =
+    override suspend fun createUser(request: CreateUserRequest): CreateUserResponse = run {
+        requireUsers()
         CreateUserResponse.newBuilder().setUser(proto(call { users.createUser(request.name, fromRoles(request.rolesList), request.groupsList.toSet()) })).build()
+    }
 
-    override suspend fun listUsers(request: ListUsersRequest): ListUsersResponse =
+    override suspend fun listUsers(request: ListUsersRequest): ListUsersResponse = run {
+        requireUsers()
         ListUsersResponse.newBuilder().addAllUsers(users.listUsers().map(::proto)).build()
+    }
 
     override suspend fun deleteUser(request: DeleteUserRequest): DeleteUserResponse {
+        requireUsers()
         call { users.deleteUser(request.userId) }
         return DeleteUserResponse.getDefaultInstance()
     }
 
     override suspend fun createGroup(request: CreateGroupRequest): CreateGroupResponse {
+        requireUsers()
         val g = call { users.createGroup(request.name, fromRoles(request.rolesList)) }
         return CreateGroupResponse.newBuilder().setGroup(proto(g)).build()
     }
 
-    override suspend fun listGroups(request: ListGroupsRequest): ListGroupsResponse = ListGroupsResponse.newBuilder()
+    override suspend fun listGroups(request: ListGroupsRequest): ListGroupsResponse = run {
+        requireUsers()
+        ListGroupsResponse.newBuilder()
         .addAllGroups(users.listGroups().map(::proto))
         .build()
+    }
 
     override suspend fun createToken(request: CreateTokenRequest): CreateTokenResponse {
+        requireUsers()
         val created = call {
             users.createToken(request.userId, request.label, request.ttlSeconds.takeIf { it > 0 }?.let { Duration.ofSeconds(it) })
         }
         return CreateTokenResponse.newBuilder().setToken(created.secret).setInfo(proto(created.info)).build()
     }
 
-    override suspend fun listTokens(request: ListTokensRequest): ListTokensResponse =
+    override suspend fun listTokens(request: ListTokensRequest): ListTokensResponse = run {
+        requireUsers()
         ListTokensResponse.newBuilder().addAllTokens(call { users.listTokens(request.userId) }.map(::proto)).build()
+    }
 
     override suspend fun revokeToken(request: RevokeTokenRequest): RevokeTokenResponse {
+        requireUsers()
         call { users.revokeToken(request.tokenId) }
         return RevokeTokenResponse.getDefaultInstance()
     }
 
     private fun change(request: cringle.user.v1.RoleScopeRequest, grant: Boolean): RoleScopeResponse {
+        requireUsers()
         val role = fromRoles(listOf(request.role)).single()
         val scope = fromProto(request.scope)
         if ((request.userId.isEmpty()) == (request.group.isEmpty())) throw Status.INVALID_ARGUMENT.withDescription("name exactly one of user_id and group").asException()
@@ -164,6 +186,8 @@ public class UserGrpcService(private val users: UserManager) : UserServiceGrpcKt
     }
 
     public companion object {
+        private val USERS_SCOPE = Scope(ScopeKind.FUNCTION, "users")
+
         /** Permission per method for the [AuthInterceptor]. */
         public val REQUIRED_PERMISSIONS: Map<String, Permission> = mapOf(
             "cringle.user.v1.UserService/CreateUser" to Permission.MANAGE_USERS,

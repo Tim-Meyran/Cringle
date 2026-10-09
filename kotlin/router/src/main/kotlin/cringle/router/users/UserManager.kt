@@ -96,6 +96,17 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
         effectiveScoped(stored).any { it.scope in scopes && permission in Permission.of(it.role) }
     }
 
+    /**
+     * Whether [user] has [permission] globally or for any scope. This is the question of the interceptor in front of a method: the object a call touches
+     * is only known inside the method, which then asks [allowed] with the scopes of that object (#269).
+     */
+    public fun allowedAnywhere(user: AuthenticatedUser, permission: Permission): Boolean = synchronized(lock) {
+        if (permission == Permission.AUTHENTICATED) return true
+        if (user.roles.any { permission in Permission.of(it) }) return true
+        val stored = data.users.firstOrNull { it.id == user.id } ?: return false
+        effectiveScoped(stored).any { permission in Permission.of(it.role) }
+    }
+
     /** Whether [user] has [permission] for [scope] (see the other [allowed]). */
     public fun allowed(user: AuthenticatedUser, permission: Permission, scope: Scope): Boolean = allowed(user, permission, listOf(scope))
 

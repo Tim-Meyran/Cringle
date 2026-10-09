@@ -43,7 +43,7 @@ public class AuthInterceptor(
         val token = header?.takeIf { it.startsWith("Bearer ") }?.removePrefix("Bearer ")?.trim()
         val user = token?.takeIf { it.isNotEmpty() }?.let { users.authenticate(it) }
             ?: return reject(call, Status.UNAUTHENTICATED.withDescription("missing or invalid credentials"))
-        if (permission !in users.permissions(user)) {
+        if (!users.allowedAnywhere(user, permission)) {
             return reject(call, Status.PERMISSION_DENIED.withDescription("insufficient rights"))
         }
         try {

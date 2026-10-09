@@ -97,6 +97,11 @@ public class ManagementServer(
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
+    init {
+        // with user management, the methods check the permission against the object they touch (#269)
+        if (users != null) core.access = Access(core, users)
+    }
+
     private val server: Server = NettyServerBuilder
         .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
         .maxInboundMessageSize(1024 * 1024)
@@ -168,25 +173,29 @@ public class ManagementServer(
         .setMachineId(v.machine).setEngineId(EngineId.newBuilder().setValue(v.engineId)).setInfo(v.info).setDesiredRunning(v.desiredRunning).build()
 
     private inner class Service : ManagementServiceGrpcKt.ManagementServiceCoroutineImplBase() {
+        private val access get() = core.access
+
+        private fun need(permission: Permission, scopes: List<cringle.router.users.Scope>) = access.require(permission, scopes)
+
         private suspend fun <T> guard(body: suspend () -> T): T = try {
             body()
         } catch (e: ManagementException) {
             throw StatusException(e.code.toStatus().withDescription(e.message))
         }
 
-        override suspend fun addMachine(request: AddMachineRequest): MachineInfo = guard {
+        override suspend fun addMachine(request: AddMachineRequest): MachineInfo = guard { need(Permission.ADMINISTER, emptyList());
             machineInfo(core.addMachine(request.machineId, request.daemonAddress, request.host, request.repositoryAddress))
         }
 
-        override suspend fun removeMachine(request: MachineRequest): RemoveMachineResponse = guard {
+        override suspend fun removeMachine(request: MachineRequest): RemoveMachineResponse = guard { need(Permission.ADMINISTER, emptyList());
             core.removeMachine(request.machineId)
             RemoveMachineResponse.getDefaultInstance()
         }
 
         override suspend fun listMachines(request: ListMachinesRequest): ListMachinesResponse =
-            ListMachinesResponse.newBuilder().addAllMachines(core.listMachines().map(::machineInfo)).build()
+            ListMachinesResponse.newBuilder().addAllMachines(core.listMachines().filter { access.allowed(Permission.READ, access.machine(it.record.id)) }.map(::machineInfo)).build()
 
-        override suspend fun createEngine(request: CreateEngineRequest): ManagedEngine = guard {
+        override suspend fun createEngine(request: CreateEngineRequest): ManagedEngine = guard { need(Permission.OPERATE, access.machine(request.machineId));
             engineInfo(
                 core.createEngine(
                     request.machineId, request.engineId, request.name, if (request.hasAutostart()) request.autostart else true,
@@ -195,76 +204,79 @@ public class ManagementServer(
             )
         }
 
-        override suspend fun setEngineTags(request: cringle.management.v1.SetEngineTagsRequest): ManagedEngine = guard {
+        override suspend fun setEngineTags(request: cringle.management.v1.SetEngineTagsRequest): ManagedEngine = guard { need(Permission.OPERATE, access.machine(request.engine.machineId));
             engineInfo(core.setEngineTags(request.engine.machineId, request.engine.engineId.value, request.rolesList, request.labelsMap))
         }
 
-        override suspend fun deploy(request: cringle.management.v1.DeployProjectRequest): cringle.management.v1.DeployProjectResponse = guard {
+        override suspend fun deploy(request: cringle.management.v1.DeployProjectRequest): cringle.management.v1.DeployProjectResponse = guard { need(Permission.OPERATE, access.project(request.project));
             val r = core.deploy(request.project, request.versionRange, if (request.hasStart()) request.start else true, request.relock, !request.noBlueGreen)
             cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).setStrategy(r.strategy).build()
         }
 
-        override suspend fun rollback(request: cringle.management.v1.RollbackRequest): cringle.management.v1.DeployProjectResponse = guard {
+        override suspend fun rollback(request: cringle.management.v1.RollbackRequest): cringle.management.v1.DeployProjectResponse = guard { need(Permission.OPERATE, access.project(request.project));
             val r = core.rollback(request.project, request.version.ifEmpty { null })
             cringle.management.v1.DeployProjectResponse.newBuilder().setProject(r.project).setVersion(r.version).setLock(r.lock).addAllFabrics(r.fabrics.map(::fabricInfo)).setStrategy(r.strategy).build()
         }
 
-        override suspend fun undeploy(request: cringle.management.v1.UndeployRequest): cringle.management.v1.UndeployResponse = guard {
+        override suspend fun undeploy(request: cringle.management.v1.UndeployRequest): cringle.management.v1.UndeployResponse = guard { need(Permission.OPERATE, access.project(request.project));
             cringle.management.v1.UndeployResponse.newBuilder().addAllRemoved(core.undeploy(request.project)).build()
         }
 
-        override suspend fun cleanupCache(request: cringle.management.v1.CleanupCacheRequest): cringle.management.v1.CleanupCacheResponse = guard {
+        override suspend fun cleanupCache(request: cringle.management.v1.CleanupCacheRequest): cringle.management.v1.CleanupCacheResponse = guard { need(Permission.OPERATE, access.machine(request.machineId));
             val (removed, problems) = core.cleanupCache(request.machineId, request.minUnusedSeconds)
             cringle.management.v1.CleanupCacheResponse.newBuilder().addAllRemoved(removed).addAllProblems(problems).build()
         }
 
-        override suspend fun startEngine(request: EngineRef): ManagedEngine = guard { engineInfo(core.startEngine(request.machineId, request.engineId.value)) }
+        override suspend fun startEngine(request: EngineRef): ManagedEngine = guard { need(Permission.OPERATE, access.machine(request.machineId)); engineInfo(core.startEngine(request.machineId, request.engineId.value)) }
 
-        override suspend fun stopEngine(request: EngineRef): ManagedEngine = guard { engineInfo(core.stopEngine(request.machineId, request.engineId.value)) }
+        override suspend fun stopEngine(request: EngineRef): ManagedEngine = guard { need(Permission.OPERATE, access.machine(request.machineId)); engineInfo(core.stopEngine(request.machineId, request.engineId.value)) }
 
-        override suspend fun deleteEngine(request: DeleteEngineRequest): DeleteEngineResponse = guard {
+        override suspend fun deleteEngine(request: DeleteEngineRequest): DeleteEngineResponse = guard { need(Permission.OPERATE, access.machine(request.engine.machineId));
             core.deleteEngine(request.engine.machineId, request.engine.engineId.value, request.deleteData)
             DeleteEngineResponse.getDefaultInstance()
         }
 
         override suspend fun listEngines(request: ListEnginesRequest): ListEnginesResponse = guard {
-            ListEnginesResponse.newBuilder().addAllEngines(core.listEngines(request.machineId).map(::engineInfo)).build()
+            if (request.machineId.isNotEmpty()) need(Permission.READ, access.machine(request.machineId))
+            ListEnginesResponse.newBuilder().addAllEngines(core.listEngines(request.machineId).filter { access.allowed(Permission.READ, access.machine(it.machine)) }.map(::engineInfo)).build()
         }
 
-        override suspend fun getEngine(request: EngineRef): ManagedEngine = guard { engineInfo(core.getEngine(request.machineId, request.engineId.value)) }
+        override suspend fun getEngine(request: EngineRef): ManagedEngine = guard { need(Permission.READ, access.machine(request.machineId)); engineInfo(core.getEngine(request.machineId, request.engineId.value)) }
 
-        override suspend fun deployFabric(request: DeployFabricRequest): ManagedFabric = guard {
+        override suspend fun deployFabric(request: DeployFabricRequest): ManagedFabric = guard { need(Permission.OPERATE, access.machine(request.engine.machineId) + access.project(request.deploy.project.name));
             fabricInfo(core.deployFabric(request.engine.machineId, request.engine.engineId.value, request.deploy, request.start))
         }
 
-        override suspend fun startFabric(request: FabricRef): ManagedFabric = guard {
+        override suspend fun startFabric(request: FabricRef): ManagedFabric = guard { need(Permission.OPERATE, access.fabric(request.engine.machineId, request.fabricId.value));
             fabricInfo(core.startFabric(request.engine.machineId, request.engine.engineId.value, request.fabricId.value))
         }
 
-        override suspend fun stopFabric(request: FabricRef): ManagedFabric = guard {
+        override suspend fun stopFabric(request: FabricRef): ManagedFabric = guard { need(Permission.OPERATE, access.fabric(request.engine.machineId, request.fabricId.value));
             fabricInfo(core.stopFabric(request.engine.machineId, request.engine.engineId.value, request.fabricId.value))
         }
 
-        override suspend fun removeFabric(request: FabricRef): RemoveFabricResponse = guard {
+        override suspend fun removeFabric(request: FabricRef): RemoveFabricResponse = guard { need(Permission.OPERATE, access.fabric(request.engine.machineId, request.fabricId.value));
             core.removeFabric(request.engine.machineId, request.engine.engineId.value, request.fabricId.value)
             RemoveFabricResponse.getDefaultInstance()
         }
 
-        override suspend fun getFabric(request: FabricRef): ManagedFabric = guard {
+        override suspend fun getFabric(request: FabricRef): ManagedFabric = guard { need(Permission.READ, access.fabric(request.engine.machineId, request.fabricId.value));
             fabricInfo(core.getFabric(request.engine.machineId, request.engine.engineId.value, request.fabricId.value))
         }
 
-        override suspend fun bind(request: cringle.management.v1.Binding): cringle.management.v1.Binding = guard {
+        override suspend fun bind(request: cringle.management.v1.Binding): cringle.management.v1.Binding = guard { need(Permission.OPERATE, access.project(request.consumerProject));
             bindingInfo(core.bind(request.consumerProject, request.service, request.targetsList))
         }
 
-        override suspend fun unbind(request: cringle.management.v1.UnbindRequest): cringle.management.v1.UnbindResponse = guard {
+        override suspend fun unbind(request: cringle.management.v1.UnbindRequest): cringle.management.v1.UnbindResponse = guard { need(Permission.OPERATE, access.project(request.consumerProject));
             core.unbind(request.consumerProject, request.service)
             cringle.management.v1.UnbindResponse.getDefaultInstance()
         }
 
         override suspend fun listBindings(request: cringle.management.v1.ListBindingsRequest): cringle.management.v1.ListBindingsResponse = guard {
-            cringle.management.v1.ListBindingsResponse.newBuilder().addAllBindings(core.listBindings(request.consumerProject).map(::bindingInfo)).build()
+            if (request.consumerProject.isNotEmpty()) need(Permission.READ, access.project(request.consumerProject))
+            cringle.management.v1.ListBindingsResponse.newBuilder()
+                .addAllBindings(core.listBindings(request.consumerProject).filter { access.allowed(Permission.READ, access.project(it.consumerProject)) }.map(::bindingInfo)).build()
         }
 
         private fun bindingInfo(b: BindingRecord): cringle.management.v1.Binding =
@@ -272,18 +284,23 @@ public class ManagementServer(
 
         override suspend fun listFabrics(request: ListFabricsRequest): ListFabricsResponse = guard {
             val e = request.engine
-            ListFabricsResponse.newBuilder().addAllFabrics(core.listFabrics(e.machineId, e.engineId.value).map(::fabricInfo)).build()
+            if (e.machineId.isNotEmpty()) need(Permission.READ, access.machine(e.machineId))
+            ListFabricsResponse.newBuilder()
+                .addAllFabrics(core.listFabrics(e.machineId, e.engineId.value).filter { access.allowed(Permission.READ, access.fabric(it.machine, it.info.fabricId.value)) }.map(::fabricInfo))
+                .build()
         }
 
         override suspend fun queryDwh(request: cringle.management.v1.QueryDwhRequest): cringle.management.v1.QueryDwhResponse = guard {
+            need(Permission.READ, access.fabricById(request.fabric))
             cringle.management.v1.QueryDwhResponse.newBuilder().addAllRecords(core.queryDwh(request).recordsList).build()
         }
 
         override suspend fun listDwhPartitions(request: cringle.management.v1.ListDwhPartitionsRequest): cringle.management.v1.ListDwhPartitionsResponse = guard {
+            if (request.fabric.isNotEmpty()) need(Permission.READ, access.fabricById(request.fabric))
             val (partitions, problems) = core.listDwhPartitions(request.fabric)
             cringle.management.v1.ListDwhPartitionsResponse.newBuilder()
                 .addAllPartitions(
-                    partitions.map { (machine, engine, p) ->
+                    partitions.filter { (machine, _, p) -> access.allowed(Permission.READ, access.fabric(machine, p.fabric)) }.map { (machine, engine, p) ->
                         cringle.management.v1.ManagedDwhPartition.newBuilder().setMachineId(machine).setEngineId(EngineId.newBuilder().setValue(engine)).setPartition(p).build()
                     },
                 )
@@ -291,26 +308,27 @@ public class ManagementServer(
                 .build()
         }
 
-        override suspend fun setRecording(request: cringle.management.v1.SetRecordingRequest): cringle.management.v1.SetRecordingResponse = guard {
+        override suspend fun setRecording(request: cringle.management.v1.SetRecordingRequest): cringle.management.v1.SetRecordingResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
             core.setRecording(request.fabric, request.all, if (request.hasDefaultRetention()) request.defaultRetention else null)
             cringle.management.v1.SetRecordingResponse.getDefaultInstance()
         }
 
-        override suspend fun setDwhRetention(request: cringle.management.v1.SetDwhRetentionRequest): cringle.management.v1.SetDwhRetentionResponse = guard {
+        override suspend fun setDwhRetention(request: cringle.management.v1.SetDwhRetentionRequest): cringle.management.v1.SetDwhRetentionResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
             core.setDwhRetention(request)
             cringle.management.v1.SetDwhRetentionResponse.getDefaultInstance()
         }
 
-        override suspend fun setLogCollection(request: cringle.management.v1.SetLogCollectionRequest): cringle.management.v1.SetLogCollectionResponse = guard {
+        override suspend fun setLogCollection(request: cringle.management.v1.SetLogCollectionRequest): cringle.management.v1.SetLogCollectionResponse = guard { need(Permission.OPERATE, access.machine(request.engine.machineId));
             core.setLogCollection(request.engine.machineId, request.engine.engineId.value, request.enabled)
             cringle.management.v1.SetLogCollectionResponse.getDefaultInstance()
         }
 
         override suspend fun getMetrics(request: cringle.management.v1.GetMetricsRequest): cringle.management.v1.GetMetricsResponse = guard {
+            if (request.engine.machineId.isNotEmpty()) need(Permission.READ, access.machine(request.engine.machineId))
             val result = core.getMetrics(request.engine.machineId, request.engine.engineId.value)
             cringle.management.v1.GetMetricsResponse.newBuilder()
                 .addAllMetrics(
-                    result.metrics.map {
+                    result.metrics.filter { access.allowed(Permission.READ, access.machine(it.machine)) }.map {
                         cringle.management.v1.ManagedMetrics.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setMetrics(it.metrics).build()
                     },
                 )
@@ -322,39 +340,41 @@ public class ManagementServer(
             val engineRequest = cringle.engine.v1.QueryLogsRequest.newBuilder()
                 .setFabric(request.fabric).setBlock(request.block).setMinLevel(request.minLevel).setLimit(request.limit)
             if (request.hasSince()) engineRequest.since = request.since
+            if (request.engine.machineId.isNotEmpty()) need(Permission.READ, access.machine(request.engine.machineId))
             val result = core.queryLogs(request.engine.machineId, request.engine.engineId.value, engineRequest.build())
             QueryLogsResponse.newBuilder()
-                .addAllEntries(result.entries.map { ManagedLogEntry.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setEntry(it.entry).setCollected(it.collected).build() })
+                .addAllEntries(result.entries.filter { access.allowed(Permission.READ, access.machine(it.machine)) }.map { ManagedLogEntry.newBuilder().setMachineId(it.machine).setEngineId(EngineId.newBuilder().setValue(it.engineId)).setEntry(it.entry).setCollected(it.collected).build() })
                 .addAllProblems(result.problems)
                 .build()
         }
 
-        override suspend fun addRemoteRouter(request: AddRemoteRouterRequest): AddRemoteRouterResponse = guard { core.router().addRemoteRouter(request) }
+        override suspend fun addRemoteRouter(request: AddRemoteRouterRequest): AddRemoteRouterResponse = guard { need(Permission.ADMINISTER, access.function("trust")); core.router().addRemoteRouter(request) }
 
-        override suspend fun removeRemoteRouter(request: RemoveRemoteRouterRequest): RemoveRemoteRouterResponse = guard { core.router().removeRemoteRouter(request) }
+        override suspend fun removeRemoteRouter(request: RemoveRemoteRouterRequest): RemoveRemoteRouterResponse = guard { need(Permission.ADMINISTER, access.function("trust")); core.router().removeRemoteRouter(request) }
 
-        override suspend fun listRemoteRouters(request: ListRemoteRoutersRequest): ListRemoteRoutersResponse = guard { core.router().listRemoteRouters(request) }
+        override suspend fun listRemoteRouters(request: ListRemoteRoutersRequest): ListRemoteRoutersResponse = guard { need(Permission.READ, access.function("trust")); core.router().listRemoteRouters(request) }
 
-        override suspend fun listTrust(request: ListTrustRequest): ListTrustResponse = guard { ListTrustResponse.newBuilder().addAllEntries(core.listTrust()).build() }
+        override suspend fun listTrust(request: ListTrustRequest): ListTrustResponse = guard { need(Permission.READ, access.function("trust")); ListTrustResponse.newBuilder().addAllEntries(core.listTrust()).build() }
 
         override suspend fun addTrustedComponent(request: AddTrustedComponentRequest): TrustEntryInfo =
-            guard { core.addTrustedComponent(request.fingerprint, request.name, request.kind, request.address) }
+            guard { need(Permission.ADMINISTER, access.function("trust")); core.addTrustedComponent(request.fingerprint, request.name, request.kind, request.address) }
 
         override suspend fun removeTrust(request: RemoveTrustRequest): RemoveTrustResponse =
-            guard { RemoveTrustResponse.newBuilder().setRemovedEntries(core.removeTrust(request.fingerprint)).build() }
+            guard { need(Permission.ADMINISTER, access.function("trust")); RemoveTrustResponse.newBuilder().setRemovedEntries(core.removeTrust(request.fingerprint)).build() }
 
-        override suspend fun publishPackage(requests: Flow<PublishRequest>): PublishResponse = guard { core.repository().publishPackage(requests) }
+        override suspend fun publishPackage(requests: Flow<PublishRequest>): PublishResponse = guard { access.requireAnywhere(Permission.OPERATE); core.repository().publishPackage(requests) }
 
-        override suspend fun listPackages(request: ListPackagesRequest): ListPackagesResponse = guard { core.repository().listPackages(request) }
+        override suspend fun listPackages(request: ListPackagesRequest): ListPackagesResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listPackages(request) }
 
-        override suspend fun listVersions(request: ListVersionsRequest): ListVersionsResponse = guard { core.repository().listVersions(request) }
+        override suspend fun listVersions(request: ListVersionsRequest): ListVersionsResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listVersions(request) }
 
-        override suspend fun getPackage(request: GetPackageRequest): PackageMetadata = guard { core.repository().getPackage(request) }
+        override suspend fun getPackage(request: GetPackageRequest): PackageMetadata = guard { access.requireAnywhere(Permission.READ); core.repository().getPackage(request) }
 
-        override suspend fun setPluginTrust(request: SetPluginTrustRequest): PackageMetadataList = guard { core.repository().setPluginTrust(request) }
+        override suspend fun setPluginTrust(request: SetPluginTrustRequest): PackageMetadataList = guard { need(Permission.ADMINISTER, access.function("plugin-trust")); core.repository().setPluginTrust(request) }
 
         override fun downloadPackage(request: DownloadRequest): Flow<DownloadResponse> = flow {
             val stub = try {
+                access.requireAnywhere(Permission.READ)
                 core.repository()
             } catch (e: ManagementException) {
                 throw StatusException(e.code.toStatus().withDescription(e.message))
@@ -363,6 +383,11 @@ public class ManagementServer(
         }
 
         override suspend fun recover(request: RecoverRequest): RecoverResponse {
+            try {
+                need(Permission.OPERATE, emptyList())
+            } catch (e: ManagementException) {
+                throw StatusException(e.code.toStatus().withDescription(e.message))
+            }
             val report = core.recover()
             return RecoverResponse.newBuilder().setEnginesStarted(report.enginesStarted).setFabricsRestored(report.fabricsRestored).addAllProblems(report.problems).build()
         }

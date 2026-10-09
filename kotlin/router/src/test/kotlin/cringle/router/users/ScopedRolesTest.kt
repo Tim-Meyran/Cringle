@@ -145,4 +145,17 @@ class ScopedRolesTest {
         val both = request(true, cringle.user.v1.ScopeKind.SCOPE_KIND_MACHINE, "m1").toBuilder().setGroup("g").build()
         assertEquals(io.grpc.Status.Code.INVALID_ARGUMENT, assertThrows<StatusException> { runBlocking { service.grantRole(both) } }.status.code)
     }
+
+    @Test
+    fun allowedAnywhereIsTheQuestionOfTheInterceptor() {
+        val m = manager()
+        val none = asUser(m, m.createUser("none", emptySet()).user.id)
+        val scoped = m.createUser("sco", emptySet()).user.id.also { m.grantUser(it, UserRole.OPERATOR, shop) }
+        val u = asUser(m, scoped)
+        assertFalse(m.allowedAnywhere(none, Permission.READ))
+        assertTrue(m.allowedAnywhere(none, Permission.AUTHENTICATED))
+        assertTrue(m.allowedAnywhere(u, Permission.OPERATE) && m.allowedAnywhere(u, Permission.READ))
+        assertFalse(m.allowedAnywhere(u, Permission.ADMINISTER))
+        assertFalse(m.allowed(u, Permission.OPERATE, emptyList())) // not globally
+    }
 }
