@@ -55,7 +55,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** An error of the ManagementServer with the gRPC status it is reported as. */
-public class ManagementException(public val code: Status.Code, message: String) : RuntimeException(message)
+public open class ManagementException(public val code: Status.Code, message: String) : RuntimeException(message)
+
+/**
+ * A fabric was deployed but its migration of persisted data failed (processors, Architecture 14.3). The fabric stays on its engine in the state
+ * `MIGRATION_FAILED` and is wanted running, so that starting it retries; nothing is cleaned up and the previous version is not restored, because
+ * its data may have been changed by the migration.
+ */
+public class MigrationFailedException(public val fabricId: String, message: String) : ManagementException(Status.Code.FAILED_PRECONDITION, message)
 
 /** The outcome of [ManagementCore.recover]. */
 public data class RecoveryReport(val enginesStarted: Int, val fabricsRestored: Int, val problems: List<String>)
@@ -357,7 +364,17 @@ public class ManagementCore(
         }
         applyRecording(api, fabricId)
         if (start) {
-            info = api.startFabric(fabricRef(fabricId))
+            info = try {
+                api.startFabric(fabricRef(fabricId))
+            } catch (e: StatusException) {
+                val now = runCatching { api.getFabricStatus(fabricRef(fabricId)) }.getOrNull()
+                if (now?.state != cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) throw e
+                setDesired(machineId, id, fabricId, true)
+                throw MigrationFailedException(
+                    fabricId,
+                    "fabric $fabricId is not started, ${now.failure}; it stays stopped (migration failed) and the previous version is not restored. Fix the cause and start the fabric again to retry.",
+                )
+            }
             setDesired(machineId, id, fabricId, true)
         }
         return FabricView(machineId, id, info, start)
@@ -759,7 +776,7 @@ public class ManagementCore(
         val previous = snapshot().fabrics.filter { projectOf(it) == project }
         // Blue-Green (Architecture 14.2): the new fabrics run next to the old ones, under the other of two colors of fabric ids, and replace them when they run
         val previousColor = if (previous.any { BLUE_ID.containsMatchIn(it.fabricId) }) COLOR_B else COLOR_A
-        val strategyReason = if (previous.isEmpty()) null else stopThenStartReason(project, blueGreen, start, configs.map { c -> projectPackage.blueprints.first { it.name == c.blueprint } }, lock, repo)
+        val strategyReason = if (previous.isEmpty()) null else stopThenStartReason(project, blueGreen, start, configs.map { c -> projectPackage.blueprints.first { it.name == c.blueprint } }, projectPackage.manifest.processors != cringle.packaging.ProcessorSet(), lock, repo)
         val sideBySide = previous.isNotEmpty() && strategyReason == null
         val color = if (sideBySide) (if (previousColor == COLOR_A) COLOR_B else COLOR_A) else COLOR_A
         val idMap = LinkedHashMap<String, String>() // old fabric id to the new one, for what is carried over
@@ -841,6 +858,8 @@ public class ManagementCore(
                 }
             }
             if (sideBySide) for ((machineId, engineId, fabricId) in touched) awaitRunning(machineId, engineId, fabricId)
+        } catch (e: MigrationFailedException) {
+            throw e
         } catch (e: Exception) {
             // cleanup must not be cancelled with the call that failed
             val notRestored = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
@@ -876,6 +895,7 @@ public class ManagementCore(
         blueGreen: Boolean,
         start: Boolean,
         blueprints: List<cringle.packaging.Blueprint>,
+        projectMigrates: Boolean,
         lock: LockFile,
         repo: cringle.repository.RepositoryClient,
     ): String? {
@@ -884,9 +904,15 @@ public class ManagementCore(
         // consumers are bound to the ids of the fabrics that provide a service
         if (blueprints.any { it.provides.isNotEmpty() }) return "it provides a service, and consumers are bound to the fabric"
         val definitions = HashMap<String, cringle.contract.BlockDefinition>()
+        val migrating = ArrayList<String>()
+        if (projectMigrates) migrating += project
         for ((name, locked) in lock.packages.filterKeys { it != project }) {
-            readPluginPackage(repo, name, locked.version).manifest.blocks.forEach { definitions["$name/${it.name}"] = it }
+            val manifest = readPluginPackage(repo, name, locked.version).manifest
+            manifest.blocks.forEach { definitions["$name/${it.name}"] = it }
+            if (manifest.processors != cringle.packaging.ProcessorSet()) migrating += name
         }
+        // a processor works on the data folder, which the old fabric still uses until it is stopped
+        if (migrating.isNotEmpty()) return "it migrates data (processors of ${migrating.joinToString()})"
         val exclusive = blueprints.flatMap { cringle.packaging.ExclusiveResources.of(it) { ref -> definitions[ref] } }
         return if (exclusive.isEmpty()) null else "it holds exclusive resources: ${exclusive.joinToString("; ")}"
     }
@@ -910,6 +936,7 @@ public class ManagementCore(
             }
             when (info.state) {
                 cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING -> return
+                cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED -> throw ManagementException(Status.Code.FAILED_PRECONDITION, "fabric $fabricId is not started, ${info.failure}")
                 cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED -> throw ManagementException(Status.Code.FAILED_PRECONDITION, "fabric $fabricId failed to start: ${info.failure}")
                 else -> {}
             }

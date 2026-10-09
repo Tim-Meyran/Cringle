@@ -53,7 +53,7 @@ The functions of `cringle machine|engine|fabric ...`. Each page is a list that r
 |---|---|---|---|
 | Machines | `GET /machines`, `GET /machines/list` | `READ` | add `POST /machines`, remove `POST /machines/{id}/remove` (`ADMINISTER`) |
 | Engines | `GET /engines`, `GET /engines/list` | `READ` | create `POST /engines`, `POST /engines/{machine}/{id}/start\|stop\|delete\|tags` (`OPERATE`) |
-| Fabrics | `GET /fabrics`, `GET /fabrics/list`, `GET /fabrics/{machine}/{engine}/{fabric}` (blocks, last error) | `READ` | `POST .../start\|stop\|remove` (`OPERATE`) |
+| Fabrics (a failed migration shows as *migration failed* with step and backup, the *Start* button reads *Retry*; the dashboard lists it) | `GET /fabrics`, `GET /fabrics/list`, `GET /fabrics/{machine}/{engine}/{fabric}` (blocks, last error) | `READ` | `POST .../start\|stop\|remove` (`OPERATE`) |
 
 Tags are entered as roles `a, b` and labels `key=value, key2=value2`. Buttons and forms the user may not use are not rendered.
 
