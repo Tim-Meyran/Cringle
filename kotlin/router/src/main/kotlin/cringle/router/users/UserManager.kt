@@ -277,12 +277,18 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
 
     /** Creates a user; names are unique. */
     public fun createUser(name: String, roles: Set<UserRole>, groups: Set<String> = emptySet()): UserView = synchronized(lock) {
-        if (name.isBlank() || name.length > 128) throw UserException(UserException.Kind.INVALID, "user name must be 1 to 128 characters")
+        checkLocalName(name)
         if (data.users.any { it.name == name }) throw UserException(UserException.Kind.CONFLICT, "user '$name' already exists")
         for (g in groups) if (data.groups.none { it.name == g }) throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$g'")
         val user = User(UUID.randomUUID().toString(), name, roles, groups)
         update { it.copy(users = it.users + user) }
         view(user)
+    }
+
+    /** A local user name: 1 to 128 characters, no `@`: `name@registry` is how the users of a trusted registry are shown, a local user must not look like one. */
+    private fun checkLocalName(name: String) {
+        if (name.isBlank() || name.length > 128) throw UserException(UserException.Kind.INVALID, "user name must be 1 to 128 characters")
+        if ('@' in name) throw UserException(UserException.Kind.INVALID, "user name must not contain @ (name@registry is the form of a user of another registry)")
     }
 
     /** All users. */
@@ -363,7 +369,7 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     private fun openInvite(secret: String): Invite? {
         val h = hash(secret)
         val now = clock.instant()
-        return data.invites.firstOrNull { it.hash == h && it.usedAt == null && !it.revoked && it.expiresAt.isAfter(now) }
+        return data.invites.firstOrNull { MessageDigest.isEqual(it.hash.toByteArray(), h.toByteArray()) && it.usedAt == null && !it.revoked && it.expiresAt.isAfter(now) }
     }
 
     /**
@@ -373,7 +379,7 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
      */
     public fun redeemInvite(secret: String, name: String, tokenLabel: String = "invite", tokenTtl: Duration? = null): RedeemedInvite = synchronized(lock) {
         val invite = openInvite(secret) ?: throw UserException(UserException.Kind.NOT_FOUND, "the invite is not valid")
-        if (name.isBlank() || name.length > 128) throw UserException(UserException.Kind.INVALID, "user name must be 1 to 128 characters")
+        checkLocalName(name)
         if (data.users.any { it.name == name }) throw UserException(UserException.Kind.CONFLICT, "user '$name' already exists")
         if (tokenTtl != null && (tokenTtl.isNegative || tokenTtl.isZero)) throw UserException(UserException.Kind.INVALID, "token lifetime must be positive")
         val now = clock.instant()

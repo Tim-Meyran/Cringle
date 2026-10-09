@@ -226,6 +226,8 @@ class WebServerTest {
         // the login link /login#token=... is handled in the page, the fragment never reaches the server
         val script = get("/static/app.js").body()
         assertTrue(script.contains("#token=") && script.contains("history.replaceState") && script.contains("form[action=\"/login\"]"))
+        // the link only fills in the token: the person signs in (a link of someone else would sign the person in as that someone)
+        assertTrue(!script.contains("form.submit()") && script.contains("Sign in only if it comes from your administrator"))
     }
 
     @Test
