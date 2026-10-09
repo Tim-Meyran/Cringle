@@ -1,0 +1,46 @@
+name: Installer
+
+# The tests of install.sh (in containers) and install.ps1 (a real service): they run when the installer changes, nightly and by hand.
+on:
+  push:
+    branches: [master]
+    paths: ["installer/**", ".github/workflows/installer.yml"]
+  pull_request:
+    paths: ["installer/**", ".github/workflows/installer.yml"]
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer-linux:
+    name: Installer (${{ matrix.image }})
+    runs-on: [self-hosted, Linux, X64, rocky]
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu:24.04, debian:stable]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test install.sh in a container
+        run: installer/tests/test-install-container.sh ${{ matrix.image }}
+
+  installer-windows:
+    name: Installer (windows)
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # the runner is administrative: this includes the tests of the service and of PATH
+      - name: Test install.ps1
+        shell: powershell
+        run: .\installer\tests\InstallerTest.ps1
