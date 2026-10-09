@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 @Tag("integration")
 class WebShellTest : ServiceTestBase() {
@@ -103,5 +104,22 @@ class WebShellTest : ServiceTestBase() {
         page = admin.get("/").body()
         assertFalse(page.contains("Everything runs as it should."), page)
         assertTrue(page.contains("<strong>e-auto</strong>") && page.contains("href=\"/engines\""), page)
+    }
+
+    @Test
+    fun aFailedMigrationNeedsAttentionAndTheFabricCanBeRetried() {
+        web()
+        runBlocking { core.deploy("mig-app", "1.0.0", true, false, true) }
+        assertThrows<cringle.management.MigrationFailedException> { runBlocking { core.deploy("mig-app", "2.0.0", true, false, true) } }
+        val f = runBlocking { core.listFabrics(null, null).single { it.info.fabricId.value.startsWith("mig-app") } }
+        val base = "/fabrics/${f.machine}/${f.engineId}/${f.info.fabricId.value}"
+        val dashboard = admin.get("/").body()
+        assertTrue(dashboard.contains("migration failed") && dashboard.contains("cannot convert 1.0.0 to 2.0.0") && dashboard.contains("href=\"$base\""), dashboard)
+        val detail = admin.get(base).body()
+        assertTrue(detail.contains("badge bad") && detail.contains("the migration is retried"), detail)
+        assertTrue(admin.get("/fabrics/list").body().contains("Retry"))
+        java.nio.file.Files.writeString(dir.resolve("home/data/mig-app/app/1/c1/fixed"), "")
+        admin.post("$base/start", emptyMap())
+        assertTrue(admin.get("/fabrics/list").body().contains("badge ok"))
     }
 }

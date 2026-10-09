@@ -106,11 +106,11 @@ internal fun badge(text: String, tone: Tone = Tone.NEUTRAL): Html = h("<span cla
 
 /** The badge for a state word of an engine, a fabric, a block, a machine or a trust status. Unknown words are neutral. */
 internal fun stateBadge(state: String): Html = badge(
-    state,
+    state.replace('_', ' '),
     when (state.lowercase()) {
         "running", "reachable", "trusted", "ok", "valid" -> Tone.OK
         "starting", "stopping", "created" -> Tone.WARN
-        "failed", "crashed", "not reachable", "untrusted", "violated" -> Tone.BAD
+        "failed", "migration_failed", "crashed", "not reachable", "untrusted", "violated" -> Tone.BAD
         else -> Tone.NEUTRAL
     },
 )

@@ -78,7 +78,7 @@ internal class OverviewPages(private val core: ManagementCore) {
                 val f = core.getFabric(req.params.getValue("machine"), req.params.getValue("engine"), req.params.getValue("fabric"))
                 html(
                     pageHeader("Fabric ${f.info.fabricId.value}", "Blueprint ${f.info.blueprint} on engine ${f.engineId} of machine ${f.machine}.", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")),
-                    h("<section class=\"panel facts\"><dl><dt>State</dt><dd>{}</dd><dt>Wanted</dt><dd>{}</dd></dl>{}</section>", stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"), if (f.info.failure.isNotEmpty()) h("<p class=\"notice error\" role=\"alert\">{}</p>", f.info.failure) else Html("")),
+                    h("<section class=\"panel facts\"><dl><dt>State</dt><dd>{}</dd><dt>Wanted</dt><dd>{}</dd></dl>{}{}</section>", stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"), if (f.info.failure.isNotEmpty()) h("<p class=\"notice error\" role=\"alert\">{}</p>", f.info.failure) else Html(""), if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) h("<p class=\"hint\">{}</p>", "The data was backed up before the migration and is not changed back. Fix the cause (or restore the backup), then start the fabric again: the migration is retried.") else Html("")),
                     raw("<h2>Blocks</h2>"),
                     dataTable(
                         listOf("Block", "State", "Restarts", "Last error"),
@@ -170,7 +170,8 @@ internal class OverviewPages(private val core: ManagementCore) {
                 "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
                 base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"),
                 actionsCell(
-                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop") else button(session, Permission.OPERATE, "Start", "$base/start"),
+                    if (running) button(session, Permission.OPERATE, "Stop", "$base/stop")
+                    else button(session, Permission.OPERATE, if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) "Retry" else "Start", "$base/start"),
                     button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?"),
                 ),
             )

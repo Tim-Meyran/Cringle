@@ -326,6 +326,9 @@ enum FabricRuntimeState {
   FABRIC_RUNTIME_STATE_STOPPING = 4;
   FABRIC_RUNTIME_STATE_STOPPED = 5;
   FABRIC_RUNTIME_STATE_FAILED = 6;
+  // A migration of persisted data failed (processors, Architecture 14.3); `failure` says which step and where the backup is.
+  // The fabric is stopped; starting it retries the migration.
+  FABRIC_RUNTIME_STATE_MIGRATION_FAILED = 7;
 }
 
 // Lifecycle state of a block.

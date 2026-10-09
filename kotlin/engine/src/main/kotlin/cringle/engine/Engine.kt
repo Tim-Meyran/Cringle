@@ -490,7 +490,8 @@ public class Engine private constructor(
                 FabricState.RUNNING -> FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING
                 FabricState.STOPPING -> FabricRuntimeState.FABRIC_RUNTIME_STATE_STOPPING
                 FabricState.STOPPED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_STOPPED
-                FabricState.FAILED, FabricState.MIGRATION_FAILED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED
+                FabricState.FAILED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED
+                FabricState.MIGRATION_FAILED -> FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED
             },
         )
         .addAllBlocks(

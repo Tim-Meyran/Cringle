@@ -232,6 +232,40 @@ abstract class ServiceTestBase {
                 .fabric(FabricConfig("app", 1, listOf("a"), emptyMap()))
                 .build(work, listOf(excl.pkg)).file,
         )
+        // a plugin whose second version brings a processor that fails until `fixed` exists in the data folder of the block (#259)
+        val migration = """
+            package com.acme;
+            import cringle.contract.*;
+            import java.nio.file.*;
+            public class MigUp implements Processor {
+                public void migrate(MigrationContext c) {
+                    try {
+                        if (!Files.exists(c.getDataDirectory().resolve("fixed"))) throw new MigrationException("step 2.0.0: cannot convert " + c.getFrom() + " to " + c.getTo(), null);
+                        Files.writeString(c.getDataDirectory().resolve("migrated"), c.getFrom() + "->" + c.getTo());
+                    } catch (java.io.IOException e) {
+                        throw new MigrationException(e.getMessage(), e);
+                    }
+                }
+            }
+        """.trimIndent()
+        for (v in listOf("1.0.0", "2.0.0")) {
+            val mig = TestPluginBuilder("acme-mig", v)
+                .provider("com.acme.SvcProvider")
+                .block(BlockDefinition("caller", emptyList(), listOf(PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "String"))), emptyList(), SchemaRef("acme.svc", "CallerConfig")))
+                .schema("svc.json", schema)
+                .lib("svc.jar", TestJar.fromJavaSources(sources + ("com.acme.MigUp" to migration)))
+                .also { if (v == "2.0.0") it.processors(update = "com.acme.MigUp") }
+                .build(work)
+            repository.publish(mig.file)
+            repository.publish(
+                TestProjectBuilder("mig-app", v)
+                    .dependency("acme-mig", "^$v")
+                    .blueprint(Blueprint("app", listOf(BlueprintBlock("c1", "acme-mig/caller", config = JsonObject(mapOf("message" to JsonPrimitive("from-mig"))))), emptyList()))
+                    .fabric(FabricConfig("app", 1, listOf("a"), emptyMap()))
+                    .build(work, listOf(mig.pkg)).file,
+            )
+        }
+        repository.setTrust("acme-mig", cringle.repository.PluginTrust.TRUSTED)
         repository.setTrust("acme-svc", cringle.repository.PluginTrust.TRUSTED)
 
         tls = ManagementTls(dir.resolve("tls"))
