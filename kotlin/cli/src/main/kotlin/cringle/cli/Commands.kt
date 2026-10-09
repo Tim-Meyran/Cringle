@@ -124,6 +124,19 @@ private fun certRow(name: String, identity: cringle.common.Identity): Map<String
 
 private fun opt(name: String, description: String, placeholder: String = "VALUE", repeatable: Boolean = false) = OptionSpec(name, description, true, repeatable, placeholder)
 
+/** `https://host[:port]` from [url], or a [UsageException]: a login link needs an https address without path, query or fragment. */
+private fun webBase(url: String): String {
+    val uri = try {
+        java.net.URI(url.trim())
+    } catch (e: java.net.URISyntaxException) {
+        throw UsageException("--web-url is not a URL: $url")
+    }
+    if (uri.scheme != "https" || uri.host.isNullOrEmpty() || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null || !(uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")) {
+        throw UsageException("--web-url must be an https URL like https://host:port, without path, query or fragment")
+    }
+    return "https://" + uri.rawAuthority
+}
+
 private fun flag(name: String, description: String) = OptionSpec(name, description, takesValue = false)
 
 private fun engineRef(machine: String, engine: String) = EngineRef.newBuilder().setMachineId(machine).setEngineId(EngineId.newBuilder().setValue(engine)).build()
@@ -834,12 +847,26 @@ internal val COMMANDS: List<Command> = listOf(
     },
     Command(
         listOf("token", "create"), "<user-id>", "Create a token for a user; the value is shown once",
-        listOf(opt("label", "what the token is for", "LABEL"), opt("ttl-days", "lifetime in days; default: does not expire", "DAYS")), 1,
+        listOf(
+            opt("label", "what the token is for", "LABEL"), opt("ttl-days", "lifetime in days; default: does not expire", "DAYS"),
+            opt("web-url", "public https address of the web interface: adds the login link <url>/login#token=...", "URL"),
+            flag("qr", "also draw the QR code of the login link in the terminal (needs --web-url)"),
+        ), 1,
     ) { env, a ->
+        val base = a.option("web-url")?.let(::webBase)
+        if (a.flag("qr") && base == null) throw UsageException("--qr needs --web-url (the QR code holds the login link)")
         val r = env.users.createToken(
             CreateTokenRequest.newBuilder().setUserId(a.positional[0]).setLabel(a.option("label").orEmpty()).setTtlSeconds((a.long("ttl-days") ?: 0) * 86_400).build(),
         )
-        Output.Detail(linkedMapOf("token" to r.token, "id" to r.info.id, "user" to r.info.userId, "label" to r.info.label, "expires" to r.info.expiresAt.iso()))
+        val fields = linkedMapOf<String, Any?>("token" to r.token, "id" to r.info.id, "user" to r.info.userId, "label" to r.info.label, "expires" to r.info.expiresAt.iso())
+        if (base != null) fields["loginLink"] = "$base/login#token=${r.token}"
+        if (a.flag("qr")) {
+            // the QR code is for the eyes: the JSON output has the fields only
+            val qr = cringle.common.qr.QrCode.encode(fields["loginLink"] as String).toText()
+            Output.Lines(fields.map { "${it.key}: ${it.value}" } + "" + qr.trimEnd('\n').split('\n'), listOf(fields))
+        } else {
+            Output.Detail(fields)
+        }
     },
     // --- registries of other sites (federation, #295) ---
     Command(listOf("registry", "key"), "", "Show the public key with which this site signs federated tokens (the other site enters it with 'registry trust')") { env, _ ->
