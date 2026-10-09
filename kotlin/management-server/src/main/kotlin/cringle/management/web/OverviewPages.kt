@@ -138,7 +138,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         } else {
             h(
                 "<form class=\"form-row\" hx-post=\"/engines\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<label class=\"check\"><input type=\"checkbox\" name=\"autostart\"> Start with the daemon</label><button class=\"btn primary\">Create engine</button></form>",
-                field("Machine", raw("<input name=\"machine\" placeholder=\"m1\" required>")),
+                field("Machine", html(raw("<select name=\"machine\" required>"), core.listMachines().map { h("<option>{}</option>", it.record.id) }, raw("</select>"))),
                 field("Engine id", raw("<input name=\"id\" placeholder=\"optional\">")),
             )
         }
