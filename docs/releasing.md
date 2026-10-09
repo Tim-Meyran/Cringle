@@ -77,7 +77,7 @@ There is no version in a file. A release gets its version from the build propert
 
 ## Making a release step by step
 
-> **Note:** GitHub does not start Actions for this repository at the moment (billing), so `.github/workflows/release.yml` has never run and is **not verified**. Make releases by hand as described below. Do not push test tags.
+> **Note:** The workflows run on self-hosted runners (`docs/ci.md`). `.github/workflows/release.yml` makes the release when a tag `v*` is pushed (it attaches the archives, `SHA256SUMS`, `manifest.json`, `winsw.exe`, `install.sh` and `install.ps1`); the steps below are the way by hand. A test tag creates a real release: use a pre-release version (`v0.0.1-test.1`) and delete the release afterwards.
 
 1. Make sure `master` is what should be released and `./gradlew build integrationTest` (all modules, both test suites) is green.
 2. Build the distribution with a concrete version number, for example:
@@ -115,16 +115,16 @@ There is no version in a file. A release gets its version from the build propert
 ### Notes
 
 - **Linux start scripts:** the archive is checked for layout, shebang, line ends and permissions (755), and the scripts are only run with the `sh` of Git for Windows (error paths, syntax). They have not been run on a real Linux machine.
-- The workflow `.github/workflows/release.yml` is kept for when GitHub runs Actions again. Until it has run once on a real tag, treat it as unverified.
+- The workflow `.github/workflows/release.yml` has to run once on a real tag before you rely on it (see below).
 - `lib/` holds no test libraries (JUnit, TestKit, test helpers); `DistributionTest` fails if it does.
 
 
-### Checking `release.yml` (only when GitHub runs Actions again)
+### Checking `release.yml`
 
-Not done yet, and no test tag is to be pushed before GitHub starts Actions for the repository. Afterwards, once and whenever the workflow changes:
+Not done yet. Once, and whenever the workflow changes:
 
 1. Push a tag like `v0.0.1-test.1`.
-2. The run of the workflow `Release` has to go through, and the pre-release `Cringle 0.0.1-test.1` has to have four files: both archives, `SHA256SUMS` and `manifest.json`.
+2. The run of the workflow `Release` has to go through, and the pre-release `Cringle 0.0.1-test.1` has to have seven files: both archives, `SHA256SUMS`, `manifest.json`, `winsw.exe`, `install.sh` and `install.ps1`.
 3. Download them, check `sha256sum -c SHA256SUMS`, unpack one and run `bin/cringle --version`; it has to print `cringle 0.0.1-test.1`.
 4. Delete the test release and the tag: `gh release delete v0.0.1-test.1 --cleanup-tag --yes`.
 

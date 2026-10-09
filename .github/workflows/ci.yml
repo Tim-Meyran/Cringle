@@ -9,14 +9,23 @@ on:
 permissions:
   contents: read
 
+# one runner runs one job at a time: a newer push to the same branch replaces the run that is still going
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    name: Build & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build & Test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - name: linux
+            runner: [self-hosted, Linux, X64, rocky]
+          - name: windows
+            runner: [self-hosted, Windows, X64]
 
     steps:
       - name: Checkout repository
@@ -36,7 +45,7 @@ jobs:
 
   installer-linux:
     name: Installer (${{ matrix.image }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, rocky]
     strategy:
       fail-fast: false
       matrix:
@@ -49,8 +58,8 @@ jobs:
         run: installer/tests/test-install-container.sh ${{ matrix.image }}
 
   installer-windows:
-    name: Installer (windows-latest)
-    runs-on: windows-latest
+    name: Installer (windows)
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
