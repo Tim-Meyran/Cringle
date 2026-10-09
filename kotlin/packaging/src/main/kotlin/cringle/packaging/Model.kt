@@ -76,6 +76,18 @@ public data class ProjectManifest(
     public val processors: ProcessorSet = ProcessorSet(),
 )
 
+/**
+ * The id of a tether between two local ports, as the engine names it in its metrics and logs (`c1.out -> s1.in`, `a.many[2] -> b.in` for a VarArg port);
+ * `null` for a tether that has a `remote` or a `service` end.
+ */
+public fun TetherDef.localId(): String? {
+    val f = from ?: return null
+    val t = to ?: return null
+    if (remote != null || service != null) return null
+    fun label(e: Endpoint) = "${e.block}.${e.port}${e.index?.let { "[$it]" }.orEmpty()}"
+    return "${label(f)} -> ${label(t)}"
+}
+
 /** One end of a tether. [index] selects the slot of a VarArg port and must be `null` for plain ports. */
 public data class Endpoint(public val block: String, public val port: String, public val index: Int? = null)
 
@@ -219,6 +231,43 @@ public data class BlueprintBlock(
     public val varArgCounts: Map<String, Int> = emptyMap(),
 )
 
+/**
+ * A check of a running fabric that the author of the blueprint declares (Architecture 16.3). The engine evaluates it (#233); this is only the declaration.
+ * [name] is an optional label for messages and status.
+ */
+public sealed interface Assertion {
+    /** The type as written in the blueprint file. */
+    public val type: String
+
+    /** An optional label, 1 to 100 characters. */
+    public val name: String?
+}
+
+/** The fabric is running. */
+public data class FabricRunning(override val name: String? = null) : Assertion {
+    override val type: String get() = "fabric-running"
+}
+
+/** The block [block] (an id of the blueprint) is running. */
+public data class BlockRunning(public val block: String, override val name: String? = null) : Assertion {
+    override val type: String get() = "block-running"
+}
+
+/** At least [min] messages pass the local tether [tether] (its id, see `TetherDef.localId`) in every window of [perSeconds] seconds. */
+public data class TetherFlow(public val tether: String, public val min: Long, public val perSeconds: Long, override val name: String? = null) : Assertion {
+    init {
+        require(min >= 1) { "min must be at least 1" }
+        require(perSeconds >= 1) { "perSeconds must be at least 1" }
+    }
+
+    override val type: String get() = "tether-flow"
+}
+
+/** No block and no tether of the fabric reports an error. */
+public data class NoErrors(override val name: String? = null) : Assertion {
+    override val type: String get() = "no-errors"
+}
+
 /** A blueprint. It has no version of its own and no engine placement; it always runs in one engine. */
 public data class Blueprint(
     public val name: String,
@@ -226,6 +275,8 @@ public data class Blueprint(
     public val tethers: List<TetherDef>,
     /** The services this blueprint provides; empty for an ordinary blueprint. */
     public val provides: List<ProvidedService> = emptyList(),
+    /** The checks of the running fabric (#232); empty if the author declared none. */
+    public val assertions: List<Assertion> = emptyList(),
 )
 
 /** A read project package. [schemas] maps ZIP entry to schema text; [files] lists every entry name, sorted. */

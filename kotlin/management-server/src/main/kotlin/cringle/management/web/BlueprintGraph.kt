@@ -124,10 +124,10 @@ internal object BlueprintGraph {
         graph["drawflow"]?.jsonObject?.get("Home")?.jsonObject?.get("data")?.jsonObject ?: throw GraphException("the graph has no nodes element")
 
     /**
-     * The blueprint [name] for [graph]; [options] holds the options of the edges, [kept] are the tethers and the services the graph cannot show.
+     * The blueprint [name] for [graph]; [options] holds the options of the edges, [kept] are the tethers and the services the graph cannot show, [assertions] those of the draft (the editor cannot edit them, but must not lose them).
      * The type of a tether is the first one its two ports share; an edge whose ports share none is an error.
      */
-    fun toBlueprint(name: String, graph: JsonObject, options: JsonObject, kept: List<TetherDef>, provides: List<cringle.packaging.ProvidedService>, definition: (String) -> BlockDefinition?): Blueprint {
+    fun toBlueprint(name: String, graph: JsonObject, options: JsonObject, kept: List<TetherDef>, provides: List<cringle.packaging.ProvidedService>, assertions: List<cringle.packaging.Assertion> = emptyList(), definition: (String) -> BlockDefinition?): Blueprint {
         val nodes = nodes(graph)
         val byNumber = HashMap<String, BlueprintBlock>()
         for ((number, n) in nodes) {
@@ -163,7 +163,7 @@ internal object BlueprintGraph {
         }
         // the blocks in the order of the graph numbers, so that saving twice gives the same blueprint
         val blocks = byNumber.entries.sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }.map { it.value }
-        return Blueprint(name, blocks, tethers.sortedBy { key(it.from!!, it.to!!) } + kept, provides)
+        return Blueprint(name, blocks, tethers.sortedBy { key(it.from!!, it.to!!) } + kept, provides, assertions)
     }
 
     /** The edge options of [blueprint] in the form that the editor sends. */

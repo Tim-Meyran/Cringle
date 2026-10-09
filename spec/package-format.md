@@ -95,7 +95,7 @@ A fabric config entry is `{"blueprint": <name>, "instances": <n>, "roles": [...]
 (default 1, at least 1) copies of the blueprint on engines that have all listed logical roles and labels.
 Fabric configs never name concrete engines. This is the **only** place where placement is expressed.
 
-A blueprint is `{"name", "blocks", "tethers"}` and optionally `"provides"` (see "Services" below); its `name` uses the package-name grammar of section 3. It has no
+A blueprint is `{"name", "blocks", "tethers"}` and optionally `"provides"` (see "Services" below) and `"assertions"` (see "Assertions" below); its `name` uses the package-name grammar of section 3. It has no
 version of its own and no engine, role or label fields, so it always runs entirely inside one engine
 (chapter 9.1); any such key is rejected as unknown.
 
@@ -164,6 +164,32 @@ engine refuses a fabric that still has an unbound service tether.
   { "type": "MESSAGE", "from": { "block": "source", "port": "out" }, "remote": { "service": "orders" } }
   ```
 
+### Assertions (Architecture chapter 16.3)
+
+`assertions` (optional, a list) are checks of the running fabric that the author of the blueprint declares; the engine evaluates them and reports ok or violated
+(`docs/observability.md`). Every entry is an object with a `type` and an optional `name` (a label for messages and status, 1 to 100 characters); a key that
+does not belong to the type is rejected:
+
+| `type` | Keys | Holds when |
+|---|---|---|
+| `fabric-running` | | the fabric is running |
+| `block-running` | `block` (a block id of the blueprint) | that block is running |
+| `tether-flow` | `tether` (the id of a local tether), `min` (integer >= 1), `perSeconds` (integer >= 1) | at least `min` messages pass the tether in every window of `perSeconds` seconds |
+| `no-errors` | | no block and no tether of the fabric reports an error |
+
+The id of a local tether (a tether between two ports of the blueprint, with no `remote` and no `service`) is `<from block>.<from port> -> <to block>.<to port>`, with
+`[<index>]` after a VarArg port: `{"type": "tether-flow", "tether": "source.out -> sink.in", "min": 1, "perSeconds": 60}`. It is the id that the metrics and logs of the
+engine show. The same check twice (same type and target, for `tether-flow` also the same window) is a validation problem; the `name` does not make two checks different.
+
+  ```json
+  "assertions": [
+    { "type": "fabric-running" },
+    { "type": "block-running", "block": "sink", "name": "the sink runs" },
+    { "type": "tether-flow", "tether": "source.out -> sink.in", "min": 1, "perSeconds": 60 },
+    { "type": "no-errors" }
+  ]
+  ```
+
 ## 6. Semantic validation
 
 Validators return a list of problems, each with a path and a message, and never stop at the first one. Plugin
@@ -196,6 +222,8 @@ blueprint:
 14. a `remote` with a `service` has a name in the package-name grammar and no other key; every `provides` entry has
     a valid service name that is unique in the blueprint and names an existing `IN` port of an existing block; its `type`
     is a type that can end on another engine and that the port supports, and is given if the port supports several.
+15. a `block-running` assertion names a block id of the blueprint; a `tether-flow` assertion names the id of a local tether of the blueprint; no assertion is
+    declared twice (see "Assertions").
 
 Validation reports all of these together; reading a package reports the first violation it meets, because parsing
 stops there.
