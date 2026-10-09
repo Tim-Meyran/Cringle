@@ -35,7 +35,8 @@ public class WebServer(
     public val core: ManagementCore,
     private val users: UserManager?,
     port: Int,
-    private val host: String = "127.0.0.1",
+    /** Where the web interface listens: see [cringle.common.BindAddress]; `null` is the loopback interface. */
+    private val host: String? = null,
     clock: Clock = Clock.systemUTC(),
     idleTimeout: Duration = Duration.ofHours(8),
     /** The pause after a failed login. */
@@ -54,7 +55,7 @@ public class WebServer(
     private val fingerprint = core.identity.publicKeyFingerprint
     private val layout = Layout(navigation, version(), fingerprint)
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
-    private val server: HttpsServer = HttpsServer.create(InetSocketAddress(host, port), 0)
+    private val server: HttpsServer = HttpsServer.create(cringle.common.BindAddress.socketAddress(host, port), 0)
 
     /** The port; valid after [start]. */
     public val port: Int get() = server.address.port
@@ -94,7 +95,7 @@ public class WebServer(
     /** Starts the server. */
     public fun start(): WebServer {
         server.start()
-        log.info("web interface on https://{}:{}/ (server key {})", host, port, fingerprint)
+        log.info("web interface on https://{}:{}/ (server key {})", host ?: cringle.common.BindAddress.LOOPBACK, this.port, fingerprint)
         return this
     }
 

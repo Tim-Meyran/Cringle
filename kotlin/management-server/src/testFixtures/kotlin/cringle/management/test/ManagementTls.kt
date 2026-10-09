@@ -78,7 +78,7 @@ public class ManagementTls(private val root: Path) {
      * server and the engines of the daemons given to [trust], and the engines are told to trust it (it is a `COMPONENT` of
      * every daemon given to [trust], which is why [trust] comes first and the engines start afterwards).
      */
-    public fun startRepository(repository: PackageRepository, users: UserManager? = null): RepositoryServer {
+    public fun startRepository(repository: PackageRepository, users: UserManager? = null, bindHost: String? = null): RepositoryServer {
         val name = "repository-${repositories.size}"
         val identity = tls.identity(name, ComponentKind.REPOSITORY)
         val store = tls.trustStore(name)
@@ -87,7 +87,7 @@ public class ManagementTls(private val root: Path) {
         repositories += store
         trustStore.add(TrustEntry(identity.publicKeyFingerprint, name, TrustKind.COMPONENT))
         daemons.forEach { it.trustStore.add(TrustEntry(identity.publicKeyFingerprint, name, TrustKind.COMPONENT)) }
-        return RepositoryServer(repository, users = users, tls = RepositoryTls(identity, store)).start()
+        return RepositoryServer(repository, users = users, tls = RepositoryTls(identity, store), bindHost = bindHost).start()
     }
 
     /**

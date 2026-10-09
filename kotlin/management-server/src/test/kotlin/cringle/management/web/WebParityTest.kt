@@ -52,6 +52,7 @@ class WebParityTest {
         "cert status" to "reads the certificate files of the local home; no server involved",
         "cert renew" to "renews the certificate files of the local home; no server involved",
         "self-update" to "updates the installation of the command line tool",
+        "setup" to "changes the settings file of the installed services on this machine; no server involved",
         "shell" to "the interactive mode of the command line tool; the web interface is the interactive way there",
     )
 

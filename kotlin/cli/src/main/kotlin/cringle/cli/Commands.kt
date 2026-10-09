@@ -869,6 +869,73 @@ internal val COMMANDS: List<Command> = listOf(
 
     // --- installation ---
     Command(
+        listOf("setup"), "[--bind <loopback|all|address>] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
+        "Change the address and the ports of the installed services (without options: ask for each, an empty answer keeps the value) and restart them",
+        listOf(
+            opt("bind", "loopback (default), all (every network interface) or an address", "ADDRESS"),
+            opt("port", "port of the management server (default 7500)", "PORT"),
+            opt("web-port", "port of the web interface (default 8443)", "PORT"),
+            opt("repository-port", "port of the repository (default 7600)", "PORT"),
+            opt("daemon-port", "port of the daemon (default 7400)", "PORT"),
+            opt("config-file", "the settings file (default: /etc/cringle/cringle.env, on Windows service/cringle-daemon.xml of the installation)", "FILE"),
+            opt("install-root", "the installation root (default: the parent of cringle.home)", "DIR"),
+            flag("show", "only show the current settings"),
+            flag("no-restart", "do not restart the services"),
+        ),
+        needsServer = false,
+    ) { env, a ->
+        val platform = Platform.current()
+        val root = a.option("install-root")?.let { Paths.get(it).toAbsolutePath().normalize() }
+            ?: System.getProperty(Distribution.HOME_PROPERTY)?.takeIf { it.isNotBlank() }?.let { Paths.get(it).toRealPath().parent }
+        val file = a.option("config-file")?.let { Paths.get(it) } ?: ServiceSettings.defaultFile(platform, root)
+        if (!Files.isRegularFile(file)) throw UsageException("$file does not exist: Cringle is not installed here (use --config-file <file>)")
+        val current = ServiceSettings.read(file, platform)
+        val given = linkedMapOf(
+            ServiceSettings.BIND to a.option("bind"), ServiceSettings.MANAGEMENT_PORT to a.option("port"), ServiceSettings.WEB_PORT to a.option("web-port"),
+            ServiceSettings.REPOSITORY_PORT to a.option("repository-port"), ServiceSettings.DAEMON_PORT to a.option("daemon-port"),
+        )
+        val changes = LinkedHashMap<String, String>()
+        if (a.flag("show")) {
+            // nothing to change
+        } else if (given.values.all { it == null }) {
+            val labels = mapOf(
+                ServiceSettings.BIND to "Listen on (loopback, all or an address)", ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
+                ServiceSettings.WEB_PORT to "Port of the web interface", ServiceSettings.REPOSITORY_PORT to "Port of the repository", ServiceSettings.DAEMON_PORT to "Port of the daemon",
+            )
+            for (key in given.keys) {
+                System.err.print("${labels.getValue(key)} [${current.getValue(key)}]: ")
+                System.err.flush()
+                val answer = env.readSecret()?.trim().orEmpty()
+                if (answer.isNotEmpty() && answer != current[key]) changes[key] = answer
+            }
+        } else {
+            for ((key, value) in given) if (value != null) changes[key] = value
+        }
+        for ((key, value) in changes) ServiceSettings.problem(key, value)?.let { throw UsageException("${key.removePrefix("CRINGLE_").lowercase()}: $it") }
+        val result = LinkedHashMap<String, Any?>()
+        if (changes.isNotEmpty()) {
+            ServiceSettings.write(file, changes)
+            if (a.flag("no-restart")) {
+                env.warn("the services keep the old settings until they are restarted")
+            } else {
+                val services = if (platform == Platform.WINDOWS) WindowsServiceController() else SystemdServiceController()
+                val name = if (platform == Platform.WINDOWS) "cringle-daemon" else "cringle-daemon.service"
+                if (services.isActive(name)) {
+                    services.restart(name)
+                    result["restarted"] = name
+                }
+            }
+        }
+        val now = current + changes
+        result["file"] = file.toString()
+        result["listen"] = now.getValue(ServiceSettings.BIND)
+        result["managementPort"] = now.getValue(ServiceSettings.MANAGEMENT_PORT)
+        result["webPort"] = now.getValue(ServiceSettings.WEB_PORT)
+        result["repositoryPort"] = now.getValue(ServiceSettings.REPOSITORY_PORT)
+        result["daemonPort"] = now.getValue(ServiceSettings.DAEMON_PORT)
+        Output.Detail(result)
+    },
+    Command(
         listOf("self-update"), "[--version <v>]", "Update this installation to a newer release (or --check for the available version)",
         listOf(
             flag("check", "only show the current and the latest version"),

@@ -67,10 +67,12 @@ public class RepositoryServer(
     users: UserManager? = null,
     private val tempDir: Path = Files.createTempDirectory("cringle-repository-upload"),
     tls: RepositoryTls,
+    /** Where the server listens (`loopback`, `all` or an address, see [cringle.common.BindAddress]); `null` is the loopback interface. */
+    bindHost: String? = null,
 ) {
     private val service = Service()
     private val server: Server = NettyServerBuilder
-        .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        .forAddress(cringle.common.BindAddress.socketAddress(bindHost, port))
         .maxInboundMessageSize(CHUNK_BYTES * 4)
         .sslContext(TlsHelper.serverCredentials(tls.identity, tls.trustStore))
         .addService(

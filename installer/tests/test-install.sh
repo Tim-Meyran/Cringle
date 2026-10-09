@@ -86,7 +86,8 @@ ok "config file" test -f "$P/etc/cringle/cringle.env"
 ok "data dir" test -d "$P/var/lib/cringle"
 ok "daemon unit" test -f "$P/etc/systemd/system/cringle-daemon.service"
 not "no unit of its own for the management server" test -e "$P/etc/systemd/system/cringle-management.service"
-ok "the daemon runs management server and repository" grep -q '^ExecStart=.* --with-management 7500 --web-port 8443 --with-repository 7600$' "$P/etc/systemd/system/cringle-daemon.service"
+ok "the daemon runs management server and repository, ports from the env file" grep -qF -- '--port ${CRINGLE_DAEMON_PORT} --combined --with-management ${CRINGLE_MANAGEMENT_PORT} --web-port ${CRINGLE_WEB_PORT} --with-repository ${CRINGLE_REPOSITORY_PORT}' "$P/etc/systemd/system/cringle-daemon.service"
+eq "default ports and address in the env file" "CRINGLE_BIND=loopback CRINGLE_DAEMON_PORT=7400 CRINGLE_MANAGEMENT_PORT=7500 CRINGLE_WEB_PORT=8443 CRINGLE_REPOSITORY_PORT=7600" "$(grep '^CRINGLE_' "$P/etc/cringle/cringle.env" | tr '\n' ' ' | sed 's/ $//')"
 ok "unit starts current/bin" grep -q '^ExecStart=/opt/cringle/current/bin/cringle-daemon ' "$P/etc/systemd/system/cringle-daemon.service"
 ok "unit sets CRINGLE_HOME" grep -q '^Environment=CRINGLE_HOME=/var/lib/cringle$' "$P/etc/systemd/system/cringle-daemon.service"
 ok "unit enabled" test -L "$P/etc/systemd/system/multi-user.target.wants/cringle-daemon.service"
@@ -128,6 +129,21 @@ run --release 2.0.0 > /dev/null 2>&1 || fail "installing the same version again 
 eq "same version again" "2.0.0" "$(readlink "$P/opt/cringle/current")"
 run --release v3.0.0-rc.1 > /dev/null 2>&1 || fail "pre-release failed"
 eq "pre-release" "3.0.0-rc.1" "$(readlink "$P/opt/cringle/current")"
+
+echo "== bind address and ports"
+new_root
+run --release 1.0.0 --bind all --port 7501 --web-port 9443 > /dev/null 2>&1 || fail "install with --bind failed"
+eq "bind and ports are written" "CRINGLE_BIND=all CRINGLE_DAEMON_PORT=7400 CRINGLE_MANAGEMENT_PORT=7501 CRINGLE_WEB_PORT=9443 CRINGLE_REPOSITORY_PORT=7600" "$(grep '^CRINGLE_' "$P/etc/cringle/cringle.env" | tr '\n' ' ' | sed 's/ $//')"
+echo "JAVA_HOME=/my/jdk" >> "$P/etc/cringle/cringle.env"
+run --release 1.0.0 > /dev/null 2>&1 || fail "install again failed"
+ok "a later installation without options keeps the values" grep -q '^CRINGLE_BIND=all$' "$P/etc/cringle/cringle.env"
+ok "and the rest of the file" grep -q '^JAVA_HOME=/my/jdk$' "$P/etc/cringle/cringle.env"
+run --release 1.0.0 --bind loopback > /dev/null 2>&1 || fail "install with --bind loopback failed"
+eq "an option changes the value" "1" "$(grep -c '^CRINGLE_BIND=loopback$' "$P/etc/cringle/cringle.env")"
+not "a bad port is refused" run --release 1.0.0 --web-port 70000
+not "a word instead of a port is refused" run --release 1.0.0 --port abc
+not "an option without a value is refused" run --release 1.0.0 --bind
+not "ports cannot be combined with --uninstall" run --uninstall --bind all
 
 echo "== management server"
 new_root

@@ -46,6 +46,16 @@ irm https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/install.ps1 -
 
 The daemon alone (a machine that is not the central one of a site): add `--daemon-only` (Linux) or `-DaemonOnly` (Windows). Remove everything but the data: `... | sudo sh -s -- --uninstall` and `powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`.
 
+**Address and ports.** By default every server listens on the loopback interface only, with the ports 7400 (daemon), 7500 (management server), 8443 (web interface) and 7600 (repository). Change them at the installation with `--bind <loopback|all|address>`, `--port`, `--web-port`, `--repository-port`, `--daemon-port` (Windows: `-Bind`, `-Port`, `-WebPort`, `-RepositoryPort`, `-DaemonPort`), for example `... | sudo sh -s -- --bind all --web-port 9443 --start`, or later with `cringle setup` (as root, or in an administrative PowerShell), which asks for each value, writes it and restarts the daemon:
+
+```bash
+sudo cringle setup                        # asks; an empty answer keeps the value
+sudo cringle setup --bind all --web-port 9443
+cringle setup --show                      # the current values
+```
+
+The values are `CRINGLE_BIND`, `CRINGLE_DAEMON_PORT`, `CRINGLE_MANAGEMENT_PORT`, `CRINGLE_WEB_PORT` and `CRINGLE_REPOSITORY_PORT` in `/etc/cringle/cringle.env` (Windows: `<env>` elements of the service file `cringle-daemon.xml`). A later installation keeps them unless an option gives a new value. `--bind all` opens the management server and the repository to the network (`management-server.md`); the daemon, the router and the engines follow the setting once #300 is done.
+
 After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
 
 ```bash
