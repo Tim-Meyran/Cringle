@@ -74,6 +74,10 @@ subprojects {
         }
         systemProperty("java.io.tmpdir", tempDir.absolutePath)
         for (variable in listOf("TMP", "TEMP", "TMPDIR")) environment(variable, tempDir.absolutePath)
+        // A test that forgets to set a home must not find the real one: the default home (~/.cringle, or CRINGLE_HOME of an installed service
+        // such as %ProgramData%\Cringle) is a folder in the temp folder, for the test JVM and for the processes it starts.
+        systemProperty("user.home", File(tempDir, "user-home").absolutePath)
+        environment("CRINGLE_HOME", File(tempDir, "cringle-home").absolutePath)
     }
 
     tasks.named<Test>("test") {
