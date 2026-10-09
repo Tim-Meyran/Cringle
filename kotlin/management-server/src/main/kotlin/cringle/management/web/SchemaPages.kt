@@ -100,7 +100,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
             )
         }
         return html(
-            notice(error), info(done),
+            flash(error, done),
             dataTable(listOf("Kind", "Name", "Version", "Revision", ""), rows, raw("No draft yet. Create a schema for your data types or a project with a blueprint below.")),
             formPanel("Create a draft", "The editors open from the list. Nothing reaches the repository before you publish.", form),
         )

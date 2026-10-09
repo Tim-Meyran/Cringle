@@ -79,7 +79,7 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
             if (session == null) {
                 html(raw("<main class=\"bare\">"), content, raw("</main>"))
             } else {
-                html(raw("<div class=\"app\">"), sidebar(session, path), raw("<div class=\"content\"><main>"), content, raw("</main></div></div>"))
+                html(raw("<div class=\"app\">"), sidebar(session, path), raw("<div class=\"content\"><main><div id=\"flash\" class=\"flash\" role=\"region\" aria-label=\"Messages\" aria-live=\"polite\"></div>"), content, raw("</main></div></div>"))
             },
             raw("</body></html>"),
         )

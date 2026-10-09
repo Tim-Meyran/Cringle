@@ -64,9 +64,9 @@ class WebOverviewTest : ServiceTestBase() {
         val tagged = admin.post("/engines/m1/e-a/tags", mapOf("roles" to "a, extra", "labels" to "zone=north")).body()
         assertTrue(tagged.contains("zone=north") && tagged.contains("a, extra"), tagged)
         val bad = admin.post("/engines/m1/e-a/tags", mapOf("roles" to "a", "labels" to "broken")).body()
-        assertTrue(bad.contains("class=\"error\"") && bad.contains("INVALID_ARGUMENT"), bad)
+        assertTrue(bad.contains("class=\"notice error\"") && bad.contains("INVALID_ARGUMENT"), bad)
         val unknown = admin.post("/engines/m1/nope/stop").body()
-        assertTrue(unknown.contains("class=\"error\""), unknown)
+        assertTrue(unknown.contains("class=\"notice error\""), unknown)
         runBlocking { assertTrue(core.listEngines("m1").any { it.process.engineId.value == "e-a" }) }
     }
 

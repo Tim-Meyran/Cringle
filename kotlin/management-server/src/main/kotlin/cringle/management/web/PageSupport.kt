@@ -11,6 +11,27 @@ internal fun fragment(content: Html): WebResponse = WebResponse.page(200, conten
 /** An error message above a list; nothing for `null`. */
 internal fun notice(message: String?): Html = if (message == null) Html("") else h("<p class=\"error\" role=\"alert\">{}</p>", message)
 
+/**
+ * What a request did, for the person who made it: an error, a success message, a result that is shown once (a new token), or a form that continues
+ * a flow. It is an out-of-band part of the response (`hx-swap-oob="beforeend:#flash"`), so it ends up in `#flash` of the page frame, **never in `#list`**:
+ * the refresh of a list replaces everything in it, and an event that lived there would vanish with the next poll. The poll (`GET .../list`) passes
+ * nothing, so it sends no OOB part and leaves `#flash` alone. An item stays until the user closes it (`app.js` keeps the last few); `detail` and
+ * `form` items are sticky. Nothing: `Html("")`. See `.claude/skills/htmx/SKILL.md`.
+ */
+internal fun flash(error: String? = null, done: String? = null, detail: Html? = null, form: Html? = null): Html {
+    fun item(kind: String, role: String, sticky: Boolean, content: Html): Html = h(
+        "<div class=\"notice {}\" role=\"{}\"{} x-data>{}<button type=\"button\" class=\"flash-close\" aria-label=\"Dismiss\" @click=\"\$el.parentElement.remove()\">&times;</button></div>",
+        kind, role, if (sticky) raw(" data-sticky") else Html(""), content,
+    )
+    val items = listOfNotNull(
+        error?.let { item("error", "alert", false, h("{}", it)) },
+        done?.let { item("info", "status", false, h("{}", it)) },
+        detail?.let { item("info", "status", true, it) },
+        form?.let { item("confirm", "status", true, it) },
+    )
+    return if (items.isEmpty()) Html("") else html(raw("<div hx-swap-oob=\"beforeend:#flash\">"), items, raw("</div>"))
+}
+
 /** A success message above a list. */
 internal fun info(message: String?): Html = if (message == null) Html("") else h("<p class=\"info\" role=\"status\">{}</p>", message)
 

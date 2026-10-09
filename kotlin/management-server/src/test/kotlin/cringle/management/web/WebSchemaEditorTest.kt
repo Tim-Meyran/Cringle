@@ -57,7 +57,7 @@ class WebSchemaEditorTest {
     fun aSchemaIsCreatedEditedSavedAndPublished() {
         assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders")).body().contains("<strong>acme-orders</strong>"))
         assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders")).body().contains("ALREADY_EXISTS"))
-        assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "Bad Name")).body().contains("class=\"error\""))
+        assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "Bad Name")).body().contains("class=\"notice error\""))
 
         // the editor page carries the form data of the draft
         val page = admin.get("/schemas/acme-orders").body()

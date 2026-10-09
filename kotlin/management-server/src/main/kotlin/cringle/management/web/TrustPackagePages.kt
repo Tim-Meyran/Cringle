@@ -140,7 +140,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(error), if (extra is Html && error == null && extra.value.startsWith("<form")) extra else if (extra is Html) html(raw("<p class=\"notice info\" role=\"status\">"), extra, raw("</p>")) else Html(""),
+            flash(error, form = (extra as? Html)?.takeIf { error == null && it.value.startsWith("<form") }, detail = (extra as? Html)?.takeIf { !(error == null && it.value.startsWith("<form")) }),
             dataTable(listOf("Fingerprint", "Kind", "Name", "Address", "Via router", ""), entries, raw("Nothing is trusted yet.")),
             raw("<h2>Connected routers</h2>"),
             dataTable(listOf("Address", "Engines", "Last error", ""), routers, raw("No other router is connected (or this server has no router of its own).")),
@@ -178,7 +178,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(error), info(done),
+            flash(error, done),
             dataTable(listOf("Kind", "Name", "Version", "Bytes", "Trust", ""), rows, raw("The repository is empty. Publish a package below.")),
             formPanel("Publish a package", "The repository checks the package and its hash.", upload),
         )

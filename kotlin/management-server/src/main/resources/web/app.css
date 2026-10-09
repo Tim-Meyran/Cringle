@@ -181,6 +181,15 @@ details.engine ul { margin: var(--space-2) 0 var(--space-2) var(--space-5); padd
 .notice, p.error, p.info { padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border); border-left-width: 3px; background: var(--surface); }
 .notice.error, p.error { color: var(--danger); background: var(--danger-tint); border-color: rgba(244, 124, 117, 0.3); border-left-color: var(--danger); }
 p.info, .notice.info { color: var(--success); background: var(--success-tint); border-color: rgba(70, 201, 139, 0.3); border-left-color: var(--success); }
+/* Feedback of a request (errors, a new token, a form that continues a flow) lives in #flash, outside the lists that refresh themselves. */
+.flash { display: flex; flex-direction: column; gap: var(--space-2); }
+.flash:not(:empty) { margin-bottom: var(--space-4); }
+.flash .notice { position: relative; padding-right: 44px; margin: 0; }
+.flash .notice.confirm { color: var(--text); background: var(--surface); }
+.flash .notice > .panel { margin: 0; border: 0; padding: 0; background: transparent; }
+.flash-close { position: absolute; top: 6px; right: 8px; min-height: 0; padding: 0 8px; border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1.4; }
+.flash-close:hover { background: transparent; opacity: 0.7; }
+.flash code { user-select: all; cursor: copy; }
 td.error { color: var(--danger); white-space: normal; }
 ul.errors { color: var(--danger); }
 

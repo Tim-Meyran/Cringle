@@ -111,7 +111,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(message),
+            flash(message),
             dataTable(listOf("Machine", "Daemon", "State", ""), rows, raw("No machine yet. Add the first one below: every engine runs on a machine that has a daemon.")),
             formPanel("Add a machine", "The daemon has to run there and has to trust this server, and the other way round.", form),
         )
@@ -143,7 +143,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(message),
+            flash(message),
             dataTable(listOf("Machine", "Engine", "State", "Roles", "Labels", ""), rows, raw("No engine yet. Create one below, then start it.")),
             formPanel("Create an engine", "An engine is created on a machine and started separately. Roles and labels are set afterwards under Tags.", form),
         )
@@ -177,7 +177,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             )
         }
         return html(
-            notice(message),
+            flash(message),
             dataTable(listOf("Fabric", "Engine", "Blueprint", "State", "Wanted", ""), rows, raw("No fabric yet. Fabrics come from a deployed project: see Deployments.")),
         )
     }

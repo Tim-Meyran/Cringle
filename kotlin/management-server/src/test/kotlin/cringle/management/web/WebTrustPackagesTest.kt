@@ -56,7 +56,7 @@ class WebTrustPackagesTest : ServiceTestBase() {
         assertTrue(admin.post("/trust/probe", mapOf("address" to "nonsense")).body().contains("host:port"))
         // the fixture has no router: the second step reports it inline
         val confirmed = admin.post("/trust/routers", mapOf("address" to "localhost:$webPort", "fingerprint" to core.identity.publicKeyFingerprint)).body()
-        assertTrue(confirmed.contains("class=\"error\""), confirmed)
+        assertTrue(confirmed.contains("class=\"notice error\""), confirmed)
         assertTrue(admin.post("/trust/routers", mapOf("address" to "localhost:$webPort", "fingerprint" to "short")).body().contains("INVALID_ARGUMENT"))
     }
 
@@ -72,7 +72,7 @@ class WebTrustPackagesTest : ServiceTestBase() {
         val file = TestPluginBuilder("acme-uploaded", "1.0.0").build(Files.createDirectories(dir.resolve("upload"))).file
         val uploaded = admin.postFile("/packages/upload", "file", "acme-uploaded.cringle", Files.readAllBytes(file)).body()
         assertTrue(uploaded.contains("Published acme-uploaded 1.0.0") && uploaded.contains("<strong>acme-uploaded</strong>"), uploaded)
-        assertTrue(admin.postFile("/packages/upload", "file", "broken.cringle", "not a package".toByteArray()).body().contains("class=\"error\""))
+        assertTrue(admin.postFile("/packages/upload", "file", "broken.cringle", "not a package".toByteArray()).body().contains("class=\"notice error\""))
     }
 
     @Test

@@ -38,7 +38,7 @@ class WebUiEndToEndTest : ServiceTestBase() {
 
         // a user for the operations team, with a token that works
         assertTrue(ui.post("/users", mapOf("name" to "ops", "role-OPERATOR" to "on")).body().contains("<strong>ops</strong>"))
-        val opsToken = Regex("<code>([^<]+)</code> \\(shown once").find(ui.post("/users/${users.listUsers().first { it.user.name == "ops" }.user.id}/tokens", mapOf("label" to "e2e")).body())!!.groupValues[1]
+        val opsToken = Regex("<code data-copy=\"([^\"]+)\"[^>]*>[^<]+</code> \\(shown once").find(ui.post("/users/${users.listUsers().first { it.user.name == "ops" }.user.id}/tokens", mapOf("label" to "e2e")).body())!!.groupValues[1]
         WebTestClient(server.port, core.identity.publicKeyFingerprint).login(opsToken)
 
         // a schema: draft, form, save, publish
