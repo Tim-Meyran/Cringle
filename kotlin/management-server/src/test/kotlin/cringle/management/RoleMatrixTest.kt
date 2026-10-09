@@ -114,7 +114,7 @@ class RoleMatrixTest {
             "AddMachine" to Permission.ADMINISTER, "RemoveMachine" to Permission.ADMINISTER, "ListMachines" to Permission.READ,
             "CreateEngine" to Permission.OPERATE, "StartEngine" to Permission.OPERATE, "StopEngine" to Permission.OPERATE,
             "DeleteEngine" to Permission.OPERATE, "ListEngines" to Permission.READ, "GetEngine" to Permission.READ,
-            "SetEngineTags" to Permission.OPERATE, "Deploy" to Permission.OPERATE, "Undeploy" to Permission.OPERATE,
+            "SetEngineTags" to Permission.OPERATE, "Deploy" to Permission.OPERATE, "Rollback" to Permission.OPERATE, "Undeploy" to Permission.OPERATE,
             "Bind" to Permission.OPERATE, "Unbind" to Permission.OPERATE, "ListBindings" to Permission.READ,
             "CleanupCache" to Permission.OPERATE, "DeployFabric" to Permission.OPERATE, "StartFabric" to Permission.OPERATE,
             "StopFabric" to Permission.OPERATE, "RemoveFabric" to Permission.OPERATE, "GetFabric" to Permission.READ,

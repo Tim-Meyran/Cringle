@@ -73,6 +73,9 @@ service ManagementService {
   // and unpack what they miss. Fabrics of the project that are already deployed are replaced (stop, remove, deploy).
   rpc Deploy(DeployProjectRequest) returns (DeployProjectResponse);
 
+  // Goes back to an earlier version of a project (docs/management-server.md, "Rollback"): a deploy of that version with the lock file it had.
+  rpc Rollback(RollbackRequest) returns (DeployProjectResponse);
+
   // Stops and removes all fabrics of a project.
   rpc Undeploy(UndeployRequest) returns (UndeployResponse);
 
@@ -389,6 +392,12 @@ message DeployProjectRequest {
   bool relock = 4;
   // Replace the running fabrics of the project by stopping them first instead of running the new ones next to them (Blue-Green is the default).
   bool no_blue_green = 5;
+}
+
+message RollbackRequest {
+  string project = 1;
+  // The version to go back to; empty means the one deployed before the running one.
+  string version = 2;
 }
 
 message DeployProjectResponse {

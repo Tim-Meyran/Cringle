@@ -61,7 +61,7 @@ Tags are entered as roles `a, b` and labels `key=value, key2=value2`. Buttons an
 
 | Page | Routes | Permission | Notes |
 |---|---|---|---|
-| Deployments | `GET /deployments`, `GET /deployments/list` | `READ` | deployed projects with their fabrics and states; deploy form (project from the repository, version range, start, relock) `POST /deployments`, `POST /deployments/{project}/undeploy`; bindings of service dependencies `POST /bindings` (fabrics in order of preference), `POST /bindings/{project}/{service}/unbind` (`OPERATE`) |
+| Deployments | `GET /deployments`, `GET /deployments/list` | `READ` | deployed projects with their fabrics and states; deploy form (project from the repository, version range, start, relock) `POST /deployments`, `POST /deployments/{project}/undeploy`, `POST /deployments/{project}/rollback` (button *Roll back* when an earlier version exists); bindings of service dependencies `POST /bindings` (fabrics in order of preference), `POST /bindings/{project}/{service}/unbind` (`OPERATE`) |
 | Logs | `GET /logs`, `GET /logs/list?machine&engine&fabric&block&level&minutes&limit` | `READ` | newest at the bottom; entries from the collector are marked `(collected)`, the file of foreign lines is the source column; an Alpine switch refreshes every 5 s |
 | Metrics | `GET /metrics`, `GET /metrics/list` | `READ` | one block per engine (CPU, heap, threads); click to expand fabrics, blocks and tethers; refreshes every 5 s (an expanded engine collapses on refresh) |
 | Data warehouse | `GET /dwh`, `GET /dwh/list`, `GET /dwh/records?fabric&kind&name&limit` | `READ` | partitions with size and retention, records of a partition; `POST /dwh/recording` (recording on/off with default retention) and `POST /dwh/retention` (`OPERATE`) |
@@ -136,6 +136,7 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle fabric stop` | `POST /fabrics/m1/e1/f1/stop` |
 | `cringle fabric remove` | `POST /fabrics/m1/e1/f1/remove` |
 | `cringle deploy` | `POST /deployments` |
+| `cringle rollback` | `POST /deployments/p/rollback` |
 | `cringle undeploy` | `POST /deployments/p/undeploy` |
 | `cringle bind` | `POST /bindings` |
 | `cringle unbind` | `POST /bindings/p/s/unbind` |
