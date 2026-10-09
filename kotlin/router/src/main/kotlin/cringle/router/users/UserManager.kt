@@ -7,7 +7,11 @@ import cringle.contract.BuiltinDriverTypes
 import cringle.contract.DriverType
 import cringle.contract.UserManagementDriver
 import cringle.contract.UserRole
+import cringle.common.PublicKeyFingerprint
+import java.security.KeyFactory
 import java.security.MessageDigest
+import java.security.PublicKey
+import java.security.spec.X509EncodedKeySpec
 import java.security.SecureRandom
 import java.time.Clock
 import java.time.Duration
@@ -26,6 +30,13 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     private val lock = Any()
     private var data: UserData = store.load()
     private val random = SecureRandom()
+
+    private companion object {
+        val REGISTRY_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+        /** How far in the future the issue time of a federated token may lie (clocks of two sites are not exact). */
+        val CLOCK_SKEW: Duration = Duration.ofMinutes(2)
+    }
 
     private fun update(change: (UserData) -> UserData) {
         val next = change(data)
@@ -74,6 +85,7 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
 
     /** Returns the user of [token], or `null` for an unknown, revoked or expired token. */
     public fun authenticate(token: String): AuthenticatedUser? = synchronized(lock) {
+        if (token.startsWith(FederatedToken.PREFIX)) return authenticateFederated(token)
         val h = hash(token)
         val record = data.tokens.firstOrNull { MessageDigest.isEqual(it.hash.toByteArray(), h.toByteArray()) } ?: return null
         if (record.revoked) return null
@@ -81,6 +93,44 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
         val user = data.users.firstOrNull { it.id == record.userId } ?: return null
         AuthenticatedUser(user.id, user.name, effectiveRoles(user))
     }
+
+    /**
+     * A token of a user of a trusted registry (#231): the registry named in it has to be trusted, the key in the token has to be the trusted one,
+     * the signature has to be valid and the token has to be valid now and not for longer than [FederatedToken.MAX_LIFETIME]. Every failure is `null`.
+     */
+    private fun authenticateFederated(token: String): AuthenticatedUser? {
+        val parsed = FederatedToken.parse(token) ?: return null
+        val claims = parsed.claims
+        val registry = data.registries.firstOrNull { it.name == claims.issuer } ?: return null
+        val key = try {
+            KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(claims.publicKey))
+        } catch (_: Exception) {
+            return null
+        }
+        if (!MessageDigest.isEqual(PublicKeyFingerprint.of(key).toByteArray(), registry.fingerprint.toByteArray())) return null
+        if (!FederatedToken.verify(parsed, key)) return null
+        val now = clock.instant()
+        if (claims.issuedAt.isAfter(now.plus(CLOCK_SKEW)) || !now.isBefore(claims.expiresAt)) return null
+        if (Duration.between(claims.issuedAt, claims.expiresAt) > FederatedToken.MAX_LIFETIME) return null
+        if (!validFederatedName(claims.subject)) return null
+        val id = "${claims.subject}@${registry.name}"
+        val stored = data.users.firstOrNull { it.id == id }
+        return AuthenticatedUser(id, id, registry.roles + stored?.let(::effectiveRoles).orEmpty())
+    }
+
+    /** The registry of a federated user id (`name@registry`), if it is still trusted. */
+    private fun registryOf(id: String): TrustedRegistry? =
+        if ('@' in id) data.registries.firstOrNull { it.name == id.substringAfterLast('@') } else null
+
+    /** The scoped roles of the user with [id]: the stored user's and, for a federated user, those of its registry; `null` for a user that is not known. */
+    private fun scopedOf(id: String): Set<RoleAssignment>? {
+        val stored = data.users.firstOrNull { it.id == id }
+        val registry = registryOf(id)
+        if (stored == null && registry == null) return null
+        return stored?.let(::effectiveScoped).orEmpty() + registry?.scoped.orEmpty()
+    }
+
+    private fun validFederatedName(name: String): Boolean = name.isNotBlank() && name.length <= 128 && '@' !in name && name.none { it.isISOControl() }
 
     /** The permissions of [user], given by its roles. */
     public fun permissions(user: AuthenticatedUser): Set<Permission> = user.roles.flatMap { Permission.of(it) }.toSet() + Permission.AUTHENTICATED
@@ -92,8 +142,8 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     public fun allowed(user: AuthenticatedUser, permission: Permission, scopes: Collection<Scope>): Boolean = synchronized(lock) {
         if (permission == Permission.AUTHENTICATED) return true
         if (user.roles.any { permission in Permission.of(it) }) return true
-        val stored = data.users.firstOrNull { it.id == user.id } ?: return false
-        effectiveScoped(stored).any { it.scope in scopes && permission in Permission.of(it.role) }
+        val scoped = scopedOf(user.id) ?: return false
+        scoped.any { it.scope in scopes && permission in Permission.of(it.role) }
     }
 
     /**
@@ -103,8 +153,8 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     public fun allowedAnywhere(user: AuthenticatedUser, permission: Permission): Boolean = synchronized(lock) {
         if (permission == Permission.AUTHENTICATED) return true
         if (user.roles.any { permission in Permission.of(it) }) return true
-        val stored = data.users.firstOrNull { it.id == user.id } ?: return false
-        effectiveScoped(stored).any { permission in Permission.of(it.role) }
+        val scoped = scopedOf(user.id) ?: return false
+        scoped.any { permission in Permission.of(it.role) }
     }
 
     /** Whether [user] has [permission] for [scope] (see the other [allowed]). */
@@ -113,6 +163,75 @@ public class UserManager(private val store: UserStore, private val clock: Clock 
     private fun checkAssignment(a: RoleAssignment) {
         if (a.role == UserRole.END_USER) throw UserException(UserException.Kind.INVALID, "the role end user cannot be limited to a scope")
         if (a.scope.kind == ScopeKind.GLOBAL) throw UserException(UserException.Kind.INVALID, "a global role is given with the roles of the user or group, not as a scoped one")
+    }
+
+    // --- trusted registries (#231) ---
+
+    /**
+     * Trusts the registry [name], whose tokens are signed with [publicKey] (an EC key): its users are accepted as `name@registry` with [roles]
+     * (none by default: they are authenticated and may do nothing until they are given rights).
+     */
+    public fun trustRegistry(name: String, publicKey: PublicKey, roles: Set<UserRole> = emptySet()): TrustedRegistry = synchronized(lock) {
+        if (!REGISTRY_NAME.matches(name)) throw UserException(UserException.Kind.INVALID, "invalid registry name '$name'")
+        if (publicKey.algorithm != "EC") throw UserException(UserException.Kind.INVALID, "the key of a registry has to be an EC key")
+        if (UserRole.END_USER in roles) throw UserException(UserException.Kind.INVALID, "the role end user cannot be given to a registry")
+        if (data.registries.any { it.name == name }) throw UserException(UserException.Kind.CONFLICT, "registry '$name' is already trusted")
+        val registry = TrustedRegistry(name, PublicKeyFingerprint.of(publicKey), Base64.getEncoder().encodeToString(publicKey.encoded), roles)
+        update { it.copy(registries = it.registries + registry) }
+        registry
+    }
+
+    /** Stops trusting [name]: its tokens are refused from now on, and the stored users `x@name` are deleted. */
+    public fun untrustRegistry(name: String): Unit = synchronized(lock) {
+        if (data.registries.none { it.name == name }) throw UserException(UserException.Kind.NOT_FOUND, "registry '$name' is not trusted")
+        update { d -> d.copy(registries = d.registries.filter { it.name != name }, users = d.users.filter { !it.id.endsWith("@$name") || '@' !in it.id }) }
+    }
+
+    /** The trusted registries. */
+    public fun listRegistries(): List<TrustedRegistry> = synchronized(lock) { data.registries }
+
+    /** Sets the global roles of all users of [name]. */
+    public fun setRegistryRoles(name: String, roles: Set<UserRole>): TrustedRegistry = synchronized(lock) {
+        if (UserRole.END_USER in roles) throw UserException(UserException.Kind.INVALID, "the role end user cannot be given to a registry")
+        changeRegistry(name) { it.copy(roles = roles) }
+    }
+
+    /** Gives all users of [name] the role [role] for [scope]. */
+    public fun grantRegistry(name: String, role: UserRole, scope: Scope): TrustedRegistry = synchronized(lock) {
+        val a = RoleAssignment(role, scope).also(::checkAssignment)
+        changeRegistry(name) { it.copy(scoped = it.scoped + a) }
+    }
+
+    /** Takes the scoped role of a registry back; `NOT_FOUND` if it does not have it. */
+    public fun revokeRegistry(name: String, role: UserRole, scope: Scope): TrustedRegistry = synchronized(lock) {
+        val a = RoleAssignment(role, scope)
+        changeRegistry(name) {
+            if (a !in it.scoped) throw UserException(UserException.Kind.NOT_FOUND, "the registry does not have the role ${role.name.lowercase()} for $scope")
+            it.copy(scoped = it.scoped - a)
+        }
+    }
+
+    private fun changeRegistry(name: String, change: (TrustedRegistry) -> TrustedRegistry): TrustedRegistry {
+        val registry = data.registries.firstOrNull { it.name == name } ?: throw UserException(UserException.Kind.NOT_FOUND, "registry '$name' is not trusted")
+        val next = change(registry)
+        update { d -> d.copy(registries = d.registries.map { if (it.name == name) next else it }) }
+        return next
+    }
+
+    /**
+     * Stores the user `name@registry` so that it can get rights of its own (they add to those of the registry). It is not needed for the user to
+     * log in. The id and the name of the user are `name@registry`.
+     */
+    public fun createFederatedUser(registry: String, name: String, roles: Set<UserRole> = emptySet(), groups: Set<String> = emptySet()): UserView = synchronized(lock) {
+        if (data.registries.none { it.name == registry }) throw UserException(UserException.Kind.NOT_FOUND, "registry '$registry' is not trusted")
+        if (!validFederatedName(name)) throw UserException(UserException.Kind.INVALID, "invalid user name '$name'")
+        if (UserRole.END_USER in roles) throw UserException(UserException.Kind.INVALID, "the role end user cannot be given to a federated user")
+        for (g in groups) if (data.groups.none { it.name == g }) throw UserException(UserException.Kind.NOT_FOUND, "unknown group '$g'")
+        val id = "$name@$registry"
+        if (data.users.any { it.id == id }) throw UserException(UserException.Kind.CONFLICT, "user '$id' already exists")
+        val user = User(id, id, roles, groups)
+        update { it.copy(users = it.users + user) }
+        view(user)
     }
 
     /** Gives [userId] the role [role] for [scope]; giving it twice is fine. */

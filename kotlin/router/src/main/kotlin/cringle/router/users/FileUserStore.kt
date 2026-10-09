@@ -47,6 +47,11 @@ public class FileUserStore(private val file: Path) : UserStore {
                     )
                 },
                 bootstrapped = (root["bootstrapped"] as JsonPrimitive).boolean,
+                // "registries" is optional: a file written before federation existed has none
+                registries = (root["registries"] as? JsonArray)?.map {
+                    val o = it as JsonObject
+                    TrustedRegistry(o.text("name"), o.text("fingerprint"), o.text("publicKey"), roles(o), scoped(o))
+                }.orEmpty(),
             )
         } catch (e: UserStoreException) {
             throw e
@@ -92,6 +97,17 @@ public class FileUserStore(private val file: Path) : UserStore {
                     if (t.expiresAt != null) put("expiresAt", t.expiresAt.toString()) else put("expiresAt", JsonNull)
                     put("revoked", t.revoked)
                 })
+            }
+            if (data.registries.isNotEmpty()) {
+                putJsonArray("registries") {
+                    for (r in data.registries) add(buildJsonObject {
+                        put("name", r.name)
+                        put("fingerprint", r.fingerprint)
+                        put("publicKey", r.publicKey)
+                        putJsonArray("roles") { r.roles.sorted().forEach { add(JsonPrimitive(it.name)) } }
+                        if (r.scoped.isNotEmpty()) putJsonArray("scoped") { writeScoped(r.scoped) }
+                    })
+                }
             }
         }
         Files.createDirectories(file.parent)
