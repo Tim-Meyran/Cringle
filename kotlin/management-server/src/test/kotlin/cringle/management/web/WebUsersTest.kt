@@ -99,4 +99,21 @@ class WebUsersTest {
         assertFalse(home.contains("href=\"/users\""), home)
         assertTrue(admin.get("/").body().contains("href=\"/users\""))
     }
+
+    @Test
+    fun scopedRolesAreGrantedAndRevokedThroughThePage() {
+        val id = users.createUser("sam", emptySet()).user.id
+        users.createGroup("ops", emptySet())
+        val granted = admin.post("/users/$id/grant", mapOf("role" to "OPERATOR", "kind" to "machine", "name" to "m1")).body()
+        assertTrue(granted.contains("<code>machine:m1</code>") && granted.contains("1 scoped"), granted)
+        assertEquals(1, users.listUsers().single { it.user.id == id }.user.scoped.size)
+        val revoked = admin.post("/users/$id/revoke", mapOf("role" to "OPERATOR", "scope" to "machine:m1")).body()
+        assertFalse(revoked.contains("machine:m1"), revoked)
+        // a group, and errors are flashes
+        assertTrue(admin.post("/groups/ops/grant", mapOf("role" to "VIEWER", "kind" to "project", "name" to "shop")).body().contains("<code>project:shop</code>"))
+        val bad = admin.post("/users/$id/grant", mapOf("role" to "OPERATOR", "kind" to "function", "name" to "everything")).body()
+        assertTrue(bad.contains("hx-swap-oob=\"beforeend:#flash\"") && bad.contains("class=\"notice error\"") && bad.contains("unknown function"), bad)
+        assertEquals(403, viewer.post("/users/$id/grant", mapOf("role" to "OPERATOR", "kind" to "machine", "name" to "m1")).statusCode())
+        assertEquals(403, viewer.post("/groups/ops/revoke", mapOf("role" to "VIEWER", "scope" to "project:shop")).statusCode())
+    }
 }
