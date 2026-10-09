@@ -42,9 +42,12 @@ public class WebServer(
     /** The pause after a failed login. */
     private val failedLoginDelay: Duration = Duration.ofSeconds(1),
     private val maxBodyBytes: Int = 1024 * 1024,
+    /** The public address of the web interface for links and QR codes (`https://host[:port]`); `null` uses the `Host` header of the request. */
+    webUrl: String? = null,
 ) : AutoCloseable {
     private val log = LoggerFactory.getLogger("cringle.management.web")
     private val sessions = Sessions(users, clock, idleTimeout)
+    private val publicUrl: String? = webUrl?.let(::checkWebUrl)
 
     /** The routes; the foundation registers `/`, `/login` and `/logout`. */
     public val router: Router = Router()
@@ -74,7 +77,7 @@ public class WebServer(
         registerFoundation()
         OverviewPages(core).register(this)
         DeploymentPages(core).register(this)
-        users?.let { UserPages(it).register(this) }
+        users?.let { UserPages(it, this).register(this) }
         TrustPackagePages(core).register(this)
         val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
         val blueprints = BlueprintPages(core, drafts)
@@ -126,6 +129,9 @@ public class WebServer(
         val dashboard = DashboardPage(core)
         router.get("/", Permission.READ) { r -> render("Dashboard", r, dashboard.content(r.session!!)) }
     }
+
+    /** The address for a link to this server: the configured `--web-url`, else `https://` and the `Host` header of [request]. */
+    public fun baseUrl(request: WebRequest): String = publicUrl ?: ("https://" + (request.headers["host"]?.takeIf { it.matches(HOST) } ?: "localhost"))
 
     /** A full page for [request] with [content] in the frame. */
     public fun render(title: String, request: WebRequest, content: Html): WebResponse =
@@ -283,4 +289,20 @@ public class WebServer(
     }
 
     private fun version(): String = WebServer::class.java.`package`?.implementationVersion ?: "dev"
+}
+
+private val HOST = Regex("([A-Za-z0-9.\\-]+|\\[[0-9A-Fa-f:.]+])(:[0-9]{1,5})?")
+
+/** [url] as `https://authority`, or an [IllegalArgumentException] if it is not an `https` URL without user info, path, query or fragment. */
+internal fun checkWebUrl(url: String): String {
+    val uri = try {
+        java.net.URI(url.trim())
+    } catch (e: java.net.URISyntaxException) {
+        throw IllegalArgumentException("--web-url is not a URL: $url")
+    }
+    require(uri.scheme == "https" && !uri.host.isNullOrEmpty()) { "--web-url must be an https URL like https://host:port" }
+    require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null && (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")) {
+        "--web-url must not have user info, path, query or fragment"
+    }
+    return "https://" + uri.rawAuthority
 }

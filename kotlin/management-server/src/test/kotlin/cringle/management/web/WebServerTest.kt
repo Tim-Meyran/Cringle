@@ -223,6 +223,9 @@ class WebServerTest {
         }
         assertEquals(200, get("/static/app.css").statusCode())
         assertEquals(200, get("/static/app.js").statusCode())
+        // the login link /login#token=... is handled in the page, the fragment never reaches the server
+        val script = get("/static/app.js").body()
+        assertTrue(script.contains("#token=") && script.contains("history.replaceState") && script.contains("form[action=\"/login\"]"))
     }
 
     @Test

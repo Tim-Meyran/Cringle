@@ -217,3 +217,13 @@ document.addEventListener('click', function (event) {
     setTimeout(function () { el.classList.remove('copied'); }, 1200);
   });
 });
+
+// A login link (/login#token=...) signs in without typing: the token goes from the fragment into the form, and the fragment leaves the address bar first.
+(function () {
+  var match = /^#token=([^&]+)$/.exec(location.hash);
+  var form = document.querySelector('form[action="/login"]');
+  if (!match || !form) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  form.querySelector('[name=token]').value = decodeURIComponent(match[1]);
+  form.submit();
+})();
