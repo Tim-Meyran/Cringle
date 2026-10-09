@@ -962,10 +962,11 @@ internal val COMMANDS: List<Command> = listOf(
 
     // --- installation ---
     Command(
-        listOf("setup"), "[--bind <loopback|all>] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
+        listOf("setup"), "[--bind <loopback|all>] [--components LIST] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
         "Change the address and the ports of the installed services (without options: ask for each, an empty answer keeps the value) and restart them",
         listOf(
             opt("bind", "loopback (default) or all (every network interface)", "VALUE"),
+            opt("components", "what the daemon runs besides itself: management, repository, both (comma) or none", "LIST"),
             opt("port", "port of the management server (default 7500)", "PORT"),
             opt("web-port", "port of the web interface (default 8443)", "PORT"),
             opt("repository-port", "port of the repository (default 7600)", "PORT"),
@@ -984,7 +985,8 @@ internal val COMMANDS: List<Command> = listOf(
         if (!Files.isRegularFile(file)) throw UsageException("$file does not exist: Cringle is not installed here (use --config-file <file>)")
         val current = ServiceSettings.read(file, platform)
         val given = linkedMapOf(
-            ServiceSettings.BIND to a.option("bind"), ServiceSettings.MANAGEMENT_PORT to a.option("port"), ServiceSettings.WEB_PORT to a.option("web-port"),
+            ServiceSettings.BIND to a.option("bind"), ServiceSettings.COMPONENTS to a.option("components"),
+            ServiceSettings.MANAGEMENT_PORT to a.option("port"), ServiceSettings.WEB_PORT to a.option("web-port"),
             ServiceSettings.REPOSITORY_PORT to a.option("repository-port"), ServiceSettings.DAEMON_PORT to a.option("daemon-port"),
         )
         val changes = LinkedHashMap<String, String>()
@@ -992,7 +994,8 @@ internal val COMMANDS: List<Command> = listOf(
             // nothing to change
         } else if (given.values.all { it == null }) {
             val labels = mapOf(
-                ServiceSettings.BIND to "Listen on (loopback or all)", ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
+                ServiceSettings.BIND to "Listen on (loopback or all)", ServiceSettings.COMPONENTS to "Components (management, repository, both separated by a comma, or none)",
+                ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
                 ServiceSettings.WEB_PORT to "Port of the web interface", ServiceSettings.REPOSITORY_PORT to "Port of the repository", ServiceSettings.DAEMON_PORT to "Port of the daemon",
             )
             for (key in given.keys) {
@@ -1022,6 +1025,7 @@ internal val COMMANDS: List<Command> = listOf(
         val now = current + changes
         result["file"] = file.toString()
         result["listen"] = now.getValue(ServiceSettings.BIND)
+        result["components"] = ServiceSettings.normalizeComponents(now.getValue(ServiceSettings.COMPONENTS)) ?: now.getValue(ServiceSettings.COMPONENTS)
         result["managementPort"] = now.getValue(ServiceSettings.MANAGEMENT_PORT)
         result["webPort"] = now.getValue(ServiceSettings.WEB_PORT)
         result["repositoryPort"] = now.getValue(ServiceSettings.REPOSITORY_PORT)

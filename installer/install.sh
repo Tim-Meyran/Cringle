@@ -3,12 +3,15 @@
 #
 # Installer of Cringle for Linux with systemd (docs/daemon-service.md).
 #
-#   sudo ./install.sh [--release <version>] [--daemon-only] [--bind <loopback|all>] [--port <n>] [--web-port <n>] [--start]
+#   sudo ./install.sh [--release <version>] [--components <list>] [--bind <loopback|all>] [--port <n>] [--web-port <n>] [--no-ask] [--start]
 #   sudo ./install.sh --uninstall [--purge]
 #
 #   --release <version>  install this version (default: the latest release)
-#   --daemon-only        run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
-#                        user logins) and the repository (port 7600) as programs it supervises
+#   --components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
+#                        user logins), repository (the package repository), both separated by a comma, or none. Default: both.
+#   --daemon-only        the same as --components none
+#   --no-ask             do not ask: on the first installation, in a terminal, the installer asks for every value that no option gives
+#                        (the components, the ports, the address); without a terminal it never asks and takes the options or the defaults
 #   --bind <value>       where the servers listen: loopback (default) or all (every network interface)
 #   --port <n>           port of the management server (default 7500)
 #   --web-port <n>       port of the web interface (default 8443)
@@ -73,7 +76,7 @@ trap cleanup EXIT
 trap 'exit 1' INT TERM
 
 usage() {
-    sed -n '4,26p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,32p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 RELEASE=""
@@ -87,6 +90,112 @@ SET_DAEMON_PORT=""
 SET_MANAGEMENT_PORT=""
 SET_WEB_PORT=""
 SET_REPOSITORY_PORT=""
+SET_COMPONENTS=""
+NO_ASK=0
+
+# normalize_components <list>: "management,repository", "management", "repository" or "none" in this order; fails for anything else
+normalize_components() {
+    m=0
+    r=0
+    old_ifs=$IFS
+    IFS=,
+    for part in $1; do
+        case "$part" in
+            management) m=1 ;;
+            repository) r=1 ;;
+            none | '') ;;
+            *) IFS=$old_ifs; return 1 ;;
+        esac
+    done
+    IFS=$old_ifs
+    if [ $m -eq 1 ] && [ $r -eq 1 ]; then echo "management,repository"
+    elif [ $m -eq 1 ]; then echo "management"
+    elif [ $r -eq 1 ]; then echo "repository"
+    else echo "none"
+    fi
+}
+
+# daemon_arguments <components> <daemon port> <management port> <web port> <repository port>: the command line of the daemon
+daemon_arguments() {
+    args="--port $2 --combined"
+    case ",$1," in *,management,*) args="$args --with-management $3 --web-port $4" ;; esac
+    case ",$1," in *,repository,*) args="$args --with-repository $5" ;; esac
+    echo "$args"
+}
+
+# ---- questions ----
+# On the first installation, in a terminal, the installer asks for what no option gave. The answers are read from the terminal itself (/dev/tty),
+# so they work when the script comes through a pipe (curl ... | sh); CRINGLE_INSTALL_TTY names another file to read them from (for tests).
+# Without a terminal nothing is asked.
+
+ASK_TTY="${CRINGLE_INSTALL_TTY:-/dev/tty}"
+
+# ask <question> <default>: the answer in ANSWER; Enter, or the end of the input, is the default
+ask() {
+    printf '%s [%s]: ' "$1" "$2" >&2
+    if read -r ANSWER <&3; then :; else ANSWER=""; echo >&2; fi
+    [ -n "$ANSWER" ] || ANSWER=$2
+}
+
+# ask_yes <question> <default yes|no>: succeeds for yes
+ask_yes() {
+    tries=0
+    while [ $tries -lt 3 ]; do
+        ask "$1 (yes/no)" "$2"
+        case "$ANSWER" in
+            y | Y | yes | YES | Yes) return 0 ;;
+            n | N | no | NO | No) return 1 ;;
+        esac
+        echo "please answer yes or no" >&2
+        tries=$((tries + 1))
+    done
+    die "no valid answer given"
+}
+
+# ask_port <question> <default>: a port in ANSWER
+ask_port() {
+    tries=0
+    while [ $tries -lt 3 ]; do
+        ask "$1" "$2"
+        case "$ANSWER" in
+            '' | *[!0-9]*) ;;
+            *) if [ "$ANSWER" -ge 1 ] && [ "$ANSWER" -le 65535 ]; then return 0; fi ;;
+        esac
+        echo "that is not a port (1 to 65535)" >&2
+        tries=$((tries + 1))
+    done
+    die "no valid port given"
+}
+
+ask_settings() {
+    [ "$UNINSTALL" -eq 0 ] && [ "$NO_ASK" -eq 0 ] || return 0
+    # a later installation keeps what the first one decided; the options change it
+    [ ! -f "$CONF_DIR/cringle.env" ] || return 0
+    # a subshell: a file that cannot be opened ends the shell that tries to (that is the rule for exec)
+    ( exec 3< "$ASK_TTY" ) 2> /dev/null || return 0
+    exec 3< "$ASK_TTY"
+    echo "Cringle installation: press Enter to take the value in [ ]. (--no-ask or the options skip the questions.)" >&2
+    if [ -z "$SET_COMPONENTS" ]; then
+        chosen=""
+        if ask_yes "Run the management server (web interface, user logins) on this machine?" yes; then chosen="management"; fi
+        if ask_yes "Run the package repository on this machine?" yes; then chosen="$chosen,repository"; fi
+        SET_COMPONENTS=$(normalize_components "$chosen")
+    fi
+    case ",$SET_COMPONENTS," in
+        *,management,*)
+            [ -n "$SET_MANAGEMENT_PORT" ] || { ask_port "Port of the management server" "$MANAGEMENT_PORT"; SET_MANAGEMENT_PORT=$ANSWER; }
+            [ -n "$SET_WEB_PORT" ] || { ask_port "Port of the web interface" "$WEB_PORT"; SET_WEB_PORT=$ANSWER; }
+            ;;
+    esac
+    case ",$SET_COMPONENTS," in
+        *,repository,*) [ -n "$SET_REPOSITORY_PORT" ] || { ask_port "Port of the repository" "$REPOSITORY_PORT"; SET_REPOSITORY_PORT=$ANSWER; } ;;
+    esac
+    [ -n "$SET_DAEMON_PORT" ] || { ask_port "Port of the daemon" "$DAEMON_PORT"; SET_DAEMON_PORT=$ANSWER; }
+    if [ -z "$SET_BIND" ]; then
+        if ask_yes "Listen on all network interfaces (no: only on this machine)?" no; then SET_BIND=all; else SET_BIND=loopback; fi
+    fi
+    exec 3<&-
+}
 
 # option_value <option> <value>: the value of an option that needs one
 option_value() {
@@ -113,6 +222,8 @@ while [ $# -gt 0 ]; do
         --daemon-port) SET_DAEMON_PORT=$(option_value "$@"); shift 2 ;;
         --with-management) WITH_MANAGEMENT=1; shift ;;
         --daemon-only) DAEMON_ONLY=1; shift ;;
+        --components) SET_COMPONENTS=$(option_value "$@"); shift 2 ;;
+        --no-ask) NO_ASK=1; shift ;;
         --start) START=1; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
         --purge) PURGE=1; shift ;;
@@ -130,14 +241,21 @@ for pair in "--port:$SET_MANAGEMENT_PORT" "--web-port:$SET_WEB_PORT" "--reposito
         printf '%s' "$value" | grep -Eq '^[0-9]{1,5}$' && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || die "${pair%%:*} needs a port (1 to 65535), not '$value'"
     fi
 done
+if [ "$DAEMON_ONLY" -eq 1 ]; then
+    [ -z "$SET_COMPONENTS" ] || [ "$SET_COMPONENTS" = none ] || die "--daemon-only and --components exclude each other"
+    SET_COMPONENTS=none
+fi
+if [ -n "$SET_COMPONENTS" ]; then
+    SET_COMPONENTS=$(normalize_components "$SET_COMPONENTS") || die "--components needs management, repository, both separated by a comma, or none, not '$SET_COMPONENTS'"
+fi
 if [ -n "$SET_BIND" ]; then
     case "$SET_BIND" in
         loopback | all) ;;
         *) die "--bind needs loopback or all, not '$SET_BIND'" ;;
     esac
 fi
-if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ]; }; then
-    die "--uninstall cannot be combined with --release, --daemon-only or --start"
+if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT$SET_COMPONENTS" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ] || [ "$NO_ASK" -eq 1 ]; }; then
+    die "--uninstall cannot be combined with --release, --components, --daemon-only, --bind, a port or --start"
 fi
 if [ -n "$RELEASE" ]; then
     printf '%s' "$RELEASE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
@@ -219,25 +337,56 @@ EOF
         fi
         chmod 0640 "$CONF_DIR/cringle.env"
     fi
-    # the settings of the services: missing ones get their defaults, the ones given as options are set (others are left as they are)
-    env_default CRINGLE_BIND "$SET_BIND" loopback
-    env_default CRINGLE_DAEMON_PORT "$SET_DAEMON_PORT" "$DAEMON_PORT"
-    env_default CRINGLE_MANAGEMENT_PORT "$SET_MANAGEMENT_PORT" "$MANAGEMENT_PORT"
-    env_default CRINGLE_WEB_PORT "$SET_WEB_PORT" "$WEB_PORT"
-    env_default CRINGLE_REPOSITORY_PORT "$SET_REPOSITORY_PORT" "$REPOSITORY_PORT"
+    # the settings of the services: an option wins, then the value the file has, then the default (the answers of the questions are options by now);
+    # CRINGLE_DAEMON_ARGS is the command line of the daemon that follows from them, the unit starts the daemon with it (`cringle setup` writes it too)
+    bind=$(setting CRINGLE_BIND "$SET_BIND" loopback)
+    daemon_port=$(setting CRINGLE_DAEMON_PORT "$SET_DAEMON_PORT" "$DAEMON_PORT")
+    management_port=$(setting CRINGLE_MANAGEMENT_PORT "$SET_MANAGEMENT_PORT" "$MANAGEMENT_PORT")
+    web_port=$(setting CRINGLE_WEB_PORT "$SET_WEB_PORT" "$WEB_PORT")
+    repository_port=$(setting CRINGLE_REPOSITORY_PORT "$SET_REPOSITORY_PORT" "$REPOSITORY_PORT")
+    components=$(setting CRINGLE_COMPONENTS "$SET_COMPONENTS" "$(default_components)")
+    env_put CRINGLE_BIND "$bind"
+    env_put CRINGLE_COMPONENTS "$components"
+    env_put CRINGLE_DAEMON_PORT "$daemon_port"
+    env_put CRINGLE_MANAGEMENT_PORT "$management_port"
+    env_put CRINGLE_WEB_PORT "$web_port"
+    env_put CRINGLE_REPOSITORY_PORT "$repository_port"
+    env_put CRINGLE_DAEMON_ARGS "$(daemon_arguments "$components" "$daemon_port" "$management_port" "$web_port" "$repository_port")"
 }
 
-# env_default <key> <given value> <default>: sets the key to the given value; without one it adds the key with the default if it is missing
-env_default() {
-    file="$CONF_DIR/cringle.env"
+# env_get <key>: the value in the env file, empty if there is none
+env_get() {
+    if [ -f "$CONF_DIR/cringle.env" ]; then
+        sed -n "s/^$1=//p" "$CONF_DIR/cringle.env" | tail -n 1
+    fi
+}
+
+# setting <key> <given value> <default>: the given value, else the one in the env file, else the default
+setting() {
     if [ -n "$2" ]; then
-        if grep -q "^$1=" "$file"; then
-            sed "s|^$1=.*|$1=$2|" "$file" > "$file.new" && cat "$file.new" > "$file" && rm -f "$file.new"
-        else
-            printf '%s=%s\n' "$1" "$2" >> "$file"
-        fi
-    elif ! grep -q "^$1=" "$file"; then
-        printf '%s=%s\n' "$1" "$3" >> "$file"
+        echo "$2"
+        return
+    fi
+    existing=$(env_get "$1")
+    if [ -n "$existing" ]; then echo "$existing"; else echo "$3"; fi
+}
+
+# the components of an installation from before they were a setting: the daemon ran the management server unless it was installed daemon only
+default_components() {
+    if [ -f "$UNIT_DIR/cringle-daemon.service" ] && ! grep -q -e '--with-management' -e 'CRINGLE_DAEMON_ARGS' "$UNIT_DIR/cringle-daemon.service"; then
+        echo none
+    else
+        echo "management,repository"
+    fi
+}
+
+# env_put <key> <value>: sets the key in the env file, replacing the line it has
+env_put() {
+    file="$CONF_DIR/cringle.env"
+    if grep -q "^$1=" "$file"; then
+        sed "s|^$1=.*|$1=$2|" "$file" > "$file.new" && cat "$file.new" > "$file" && rm -f "$file.new"
+    else
+        printf '%s=%s\n' "$1" "$2" >> "$file"
     fi
 }
 
@@ -269,12 +418,9 @@ EOF
 }
 
 install_units() {
-    # the ports are read from the env file by systemd (${KEY}), so `cringle setup` can change them without a new unit
-    daemon_args="--port \${CRINGLE_DAEMON_PORT} --combined"
-    if [ "$DAEMON_ONLY" -eq 0 ]; then
-        daemon_args="$daemon_args --with-management \${CRINGLE_MANAGEMENT_PORT} --web-port \${CRINGLE_WEB_PORT} --with-repository \${CRINGLE_REPOSITORY_PORT}"
-    fi
-    write_unit cringle-daemon.service "Cringle daemon" network.target "$RUN_CURRENT/bin/cringle-daemon $daemon_args"
+    # the command line of the daemon is read from the env file by systemd ($CRINGLE_DAEMON_ARGS, split at blanks), so `cringle setup` can change
+    # the components and the ports without a new unit
+    write_unit cringle-daemon.service "Cringle daemon" network.target "$RUN_CURRENT/bin/cringle-daemon \$CRINGLE_DAEMON_ARGS"
     # an older installation ran the management server as a unit of its own; the daemon runs it now
     if [ -e "$UNIT_DIR/cringle-management.service" ]; then
         if systemd_running; then
@@ -382,6 +528,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
     exit 0
 fi
 
+ask_settings
 TMP_DIR=$(mktemp -d)
 if [ -z "$RELEASE" ]; then
     [ "$BASE_URL" = "$REPO_RELEASES/download" ] || die "give the version with --release <version> when CRINGLE_RELEASE_BASE_URL is set"

@@ -44,7 +44,9 @@ curl -fsSL https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/instal
 irm https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version 0.0.3 -Start
 ```
 
-The daemon alone (a machine that is not the central one of a site): add `--daemon-only` (Linux) or `-DaemonOnly` (Windows). Remove everything but the data: `... | sudo sh -s -- --uninstall` and `powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`.
+**Questions.** On the first installation, in a terminal, the installer asks what no option gave: whether to run the management server and the repository on this machine, their ports, the port of the daemon, and whether to listen on all network interfaces (Enter takes the value in the brackets). Without a terminal nothing is asked: the options or the defaults count, so `curl ... | sudo sh` in a script, a container or CI works as before. The answers are read from `/dev/tty`, so the questions also work when the script comes through a pipe; on Windows they are asked in the window of the person before the elevated run starts. `--no-ask` (`-NoAsk`) skips them, an option skips its question, a later installation does not ask again (it keeps the settings, an option changes one).
+
+The daemon alone (a machine that is not the central one of a site): add `--daemon-only` (Linux) or `-DaemonOnly` (Windows). Only the repository, or only the management server: `--components repository` or `--components management` (`-Components`; the default is `management,repository`). Remove everything but the data: `... | sudo sh -s -- --uninstall` and `powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`.
 
 **Address and ports.** By default every server listens on the loopback interface only, with the ports 7400 (daemon), 7500 (management server), 8443 (web interface) and 7600 (repository). Change them at the installation with `--bind <loopback|all>`, `--port`, `--web-port`, `--repository-port`, `--daemon-port` (Windows: `-Bind`, `-Port`, `-WebPort`, `-RepositoryPort`, `-DaemonPort`), for example `... | sudo sh -s -- --bind all --web-port 9443 --start`, or later with `cringle setup` (as root, or in an administrative PowerShell), which asks for each value, writes it and restarts the daemon:
 
@@ -54,7 +56,7 @@ sudo cringle setup --bind all --web-port 9443
 cringle setup --show                      # the current values
 ```
 
-The values are `CRINGLE_BIND`, `CRINGLE_DAEMON_PORT`, `CRINGLE_MANAGEMENT_PORT`, `CRINGLE_WEB_PORT` and `CRINGLE_REPOSITORY_PORT` in `/etc/cringle/cringle.env` (Windows: `<env>` elements of the service file `cringle-daemon.xml`). A later installation keeps them unless an option gives a new value. `--bind all` opens the daemon, its router, the engines (their management API), the management server (gRPC and web interface) and the repository to the network (`management-server.md`); the installed services accept `loopback` and `all` only, because the programs of one machine connect to each other through `127.0.0.1`. A program started by hand (`management-server --bind <address>`) also takes one address. What an engine tells the router about itself is still `127.0.0.1`: reaching engines of other machines through the router is a different topic (M6).
+The values are `CRINGLE_BIND`, `CRINGLE_COMPONENTS` (`management,repository`, `management`, `repository` or `none`), `CRINGLE_DAEMON_PORT`, `CRINGLE_MANAGEMENT_PORT`, `CRINGLE_WEB_PORT` and `CRINGLE_REPOSITORY_PORT`, and the command line of the daemon that follows from them, `CRINGLE_DAEMON_ARGS` (the unit and the Windows service start the daemon with it; the installer and `cringle setup` write it, do not edit it), in `/etc/cringle/cringle.env` (Windows: `<env>` elements of the service file `cringle-daemon.xml`). A later installation keeps them unless an option gives a new value. `--bind all` opens the daemon, its router, the engines (their management API), the management server (gRPC and web interface) and the repository to the network (`management-server.md`); the installed services accept `loopback` and `all` only, because the programs of one machine connect to each other through `127.0.0.1`. A program started by hand (`management-server --bind <address>`) also takes one address. What an engine tells the router about itself is still `127.0.0.1`: reaching engines of other machines through the router is a different topic (M6).
 
 After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
 
@@ -72,10 +74,11 @@ The installers set up the daemon as a service from a release (`docs/releasing.md
 
 ```
 curl -fsSLO https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.sh
-sudo sh install.sh [--release <version>] [--daemon-only] [--start]
+sudo sh install.sh [--release <version>] [--components <list>] [--bind loopback|all] [--port <n>] [--web-port <n>] [--repository-port <n>] [--daemon-port <n>] [--no-ask] [--start]
 ```
 
 - `--release <version>`: install this version (default: the latest release).
+- `--components <list>`: what the daemon runs besides itself: `management`, `repository`, both separated by a comma, or `none` (default: both). `--daemon-only` is `--components none`. `--no-ask`: do not ask the questions (see above). The options for the address and the ports are described above.
 - `--daemon-only`: run the daemon alone. By default the daemon service also runs the management server (port 7500, web interface 8443, with user logins) and the repository (port 7600) as programs it supervises (`--with-management --web-port --with-repository`, see below). An older `cringle-management.service` is removed on upgrade. `--with-management` is accepted and does nothing.
 - `--start`: start the services; without it they are enabled (start at boot), but not started.
 - `--uninstall`: stop and remove the units and the symlinks and delete `/opt/cringle`; `/var/lib/cringle` (data) and `/etc/cringle` (configuration) stay. `--uninstall --purge` removes them and the user `cringle` too; `--purge` alone is an error.
@@ -92,10 +95,11 @@ In a PowerShell (5.1 or newer; it asks for administrative rights when needed):
 
 ```
 Invoke-WebRequest https://github.com/Tim-Meyran/Cringle/releases/latest/download/install.ps1 -OutFile install.ps1
-.\install.ps1 [-Version <version>] [-DaemonOnly] [-Start]
+.\install.ps1 [-Version <version>] [-Components <list>] [-Bind loopback|all] [-Port <n>] [-WebPort <n>] [-RepositoryPort <n>] [-DaemonPort <n>] [-NoAsk] [-Start]
 ```
 
 - `-Version <version>`: install this version (default: the latest release).
+- `-Components <list>`: what the daemon runs besides itself: `management`, `repository`, both separated by a comma, or `none` (default: both). `-DaemonOnly` is `-Components none`. `-NoAsk`: do not ask the questions (see above).
 - `-DaemonOnly`: run the daemon alone. By default the service `Cringle Daemon` also runs the management server (7500, web interface 8443, user logins) and the repository (7600). An older service `Cringle Management Server` is removed on upgrade. `-WithManagement` is accepted and does nothing.
 - `-Start`: start the services; without it they start at the next boot.
 - `-Uninstall`: stop and remove the services, the `PATH` entry and `%ProgramFiles%\Cringle`; the data in `%ProgramData%\Cringle` stays. `-Uninstall -Purge` removes it too; `-Purge` alone is an error.

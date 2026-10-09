@@ -35,7 +35,11 @@ class SetupCommandTest {
         val file = envFile()
         val r = cli("", "--config-file", file.toString(), "--bind", "all", "--web-port", "9443", "--no-restart")
         assertEquals(0, r.code, r.err)
-        assertEquals("# Environment\nJAVA_HOME=/my/jdk\nCRINGLE_BIND=all\nCRINGLE_WEB_PORT=9443\n", Files.readString(file))
+        assertEquals(
+            "# Environment\nJAVA_HOME=/my/jdk\nCRINGLE_BIND=all\nCRINGLE_WEB_PORT=9443\n" +
+                "CRINGLE_DAEMON_ARGS=--port 7400 --combined --with-management 7500 --web-port 9443 --with-repository 7600\n",
+            Files.readString(file),
+        )
         assertTrue(r.out.contains("9443") && r.out.contains("all"), r.out)
         assertTrue(r.err.contains("until they are restarted"), r.err)
     }
@@ -43,10 +47,31 @@ class SetupCommandTest {
     @Test
     fun withoutOptionsEachSettingIsAskedAndAnEmptyAnswerKeepsIt() {
         val file = envFile()
-        // bind, management port, web port, repository port, daemon port
-        val r = cli("all\n\n9443\n\n\n", "--config-file", file.toString(), "--no-restart")
+        // bind, components, management port, web port, repository port, daemon port
+        val r = cli("all\n\n\n9443\n\n\n", "--config-file", file.toString(), "--no-restart")
         assertEquals(0, r.code, r.err)
-        assertEquals("# Environment\nJAVA_HOME=/my/jdk\nCRINGLE_BIND=all\nCRINGLE_WEB_PORT=9443\n", Files.readString(file))
+        assertEquals(
+            "# Environment\nJAVA_HOME=/my/jdk\nCRINGLE_BIND=all\nCRINGLE_WEB_PORT=9443\n" +
+                "CRINGLE_DAEMON_ARGS=--port 7400 --combined --with-management 7500 --web-port 9443 --with-repository 7600\n",
+            Files.readString(file),
+        )
+    }
+
+    @Test
+    fun theComponentsAreChosenAndTheArgumentsOfTheDaemonFollow() {
+        val file = envFile()
+        fun args() = Files.readAllLines(file).first { it.startsWith("CRINGLE_DAEMON_ARGS=") }.removePrefix("CRINGLE_DAEMON_ARGS=")
+        assertEquals(0, cli("", "--config-file", file.toString(), "--components", "repository", "--daemon-port", "7401", "--repository-port", "7601", "--no-restart").code)
+        assertEquals("--port 7401 --combined --with-repository 7601", args())
+        assertEquals(0, cli("", "--config-file", file.toString(), "--components", "repository,management", "--no-restart").code)
+        assertEquals("--port 7401 --combined --with-management 7500 --web-port 8443 --with-repository 7601", args())
+        assertTrue(Files.readString(file).contains("CRINGLE_COMPONENTS=management,repository\n"))
+        assertEquals(0, cli("", "--config-file", file.toString(), "--components", "none", "--no-restart").code)
+        assertEquals("--port 7401 --combined", args())
+        assertEquals(2, cli("", "--config-file", file.toString(), "--components", "management,router", "--no-restart").code)
+        assertEquals("--port 7401 --combined", args())
+        assertEquals("none", ServiceSettings.normalizeComponents(""))
+        assertEquals("management,repository", ServiceSettings.normalizeComponents("repository, management"))
     }
 
     @Test

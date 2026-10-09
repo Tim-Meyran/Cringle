@@ -2,7 +2,7 @@
 #
 # Installer of Cringle for Windows (docs/daemon-service.md). Run it in an administrative PowerShell:
 #
-#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Bind <loopback|all>] [-Port <n>] [-WebPort <n>] [-Start]
+#   .\install.ps1 [-Version <version>] [-Components <list>] [-Bind <loopback|all>] [-Port <n>] [-WebPort <n>] [-NoAsk] [-Start]
 #   .\install.ps1 -FromBuild <dir> [-Version <version>] [-DaemonOnly] [-Start]
 #   .\install.ps1 -Uninstall [-Purge]
 #
@@ -12,8 +12,12 @@
 #                       version is the one of the archive (give -Version if there are several). winsw.exe is taken from <dir>
 #                       if it is there and downloaded otherwise (pinned version and checksum, as in a release).
 #                       `.\gradlew.bat cringleInstallLocal` builds and runs this.
-#   -DaemonOnly         run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
-#                       user logins) and the repository (port 7600) as programs it supervises
+#   -Components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
+#                       user logins), repository (the package repository), both separated by a comma, or none. Default: both.
+#   -DaemonOnly         the same as -Components none
+#   -NoAsk              do not ask: on the first installation, in a console, the script asks for every value that no option gives
+#                       (the components, the ports, the address) before it asks for administrative rights; without a console it
+#                       never asks and takes the options or the defaults
 #   -Bind <value>       where the servers listen: loopback (default) or all (every network interface)
 #   -Port <n>           port of the management server (default 7500)
 #   -WebPort <n>        port of the web interface (default 8443)
@@ -40,6 +44,8 @@ param(
     [string]$Version,
     [switch]$WithManagement,
     [switch]$DaemonOnly,
+    [string]$Components,
+    [switch]$NoAsk,
     [string]$Bind,
     [string]$Port,
     [string]$WebPort,
@@ -69,10 +75,11 @@ $LatestApi = 'https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest'
 $WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
 $WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
 # the settings of the services: <env> elements of the service file of the daemon, which the arguments refer to as %KEY% (cringle setup changes them)
-$SettingDefaults = [ordered]@{ CRINGLE_BIND = 'loopback'; CRINGLE_DAEMON_PORT = '7400'; CRINGLE_MANAGEMENT_PORT = '7500'; CRINGLE_WEB_PORT = '8443'; CRINGLE_REPOSITORY_PORT = '7600' }
-$SettingGiven = @{ CRINGLE_BIND = $Bind; CRINGLE_DAEMON_PORT = $DaemonPort; CRINGLE_MANAGEMENT_PORT = $Port; CRINGLE_WEB_PORT = $WebPort; CRINGLE_REPOSITORY_PORT = $RepositoryPort }
-$DaemonArguments = '--port %CRINGLE_DAEMON_PORT% --combined'
-if (-not $DaemonOnly) { $DaemonArguments += ' --with-management %CRINGLE_MANAGEMENT_PORT% --web-port %CRINGLE_WEB_PORT% --with-repository %CRINGLE_REPOSITORY_PORT%' }
+$SettingDefaults = [ordered]@{ CRINGLE_BIND = 'loopback'; CRINGLE_COMPONENTS = 'management,repository'; CRINGLE_DAEMON_PORT = '7400'; CRINGLE_MANAGEMENT_PORT = '7500'; CRINGLE_WEB_PORT = '8443'; CRINGLE_REPOSITORY_PORT = '7600' }
+if ($DaemonOnly -and -not $Components) { $Components = 'none' }
+$SettingGiven = @{ CRINGLE_COMPONENTS = $Components; CRINGLE_BIND = $Bind; CRINGLE_DAEMON_PORT = $DaemonPort; CRINGLE_MANAGEMENT_PORT = $Port; CRINGLE_WEB_PORT = $WebPort; CRINGLE_REPOSITORY_PORT = $RepositoryPort }
+# the command line of the daemon is the setting CRINGLE_DAEMON_ARGS (never empty), so `cringle setup` can change the components and the ports
+$DaemonArguments = '%CRINGLE_DAEMON_ARGS%'
 $Services = @(
     @{ Id = 'cringle-daemon'; Name = 'Cringle Daemon'; Script = 'cringle-daemon.bat'
        Arguments = $DaemonArguments; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
@@ -266,24 +273,47 @@ function Invoke-WinSW([string]$Exe, [string]$Command) {
     }
 }
 
+# "management,repository", "management", "repository" or "none" for a list in any order; $null if it names anything else
+function ConvertTo-Components([string]$Text) {
+    $parts = @($Text -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -ne '' -and $_ -ne 'none' })
+    if ($parts | Where-Object { $_ -ne 'management' -and $_ -ne 'repository' }) { return $null }
+    $names = @('management', 'repository') | Where-Object { $parts -contains $_ }
+    if ($names) { return ($names -join ',') } else { return 'none' }
+}
+
+# the command line of the daemon for the settings (the same text as install.sh and `cringle setup` write)
+function Get-DaemonArguments($Settings) {
+    $arguments = "--port $($Settings['CRINGLE_DAEMON_PORT']) --combined"
+    $components = $Settings['CRINGLE_COMPONENTS'] -split ','
+    if ($components -contains 'management') { $arguments += " --with-management $($Settings['CRINGLE_MANAGEMENT_PORT']) --web-port $($Settings['CRINGLE_WEB_PORT'])" }
+    if ($components -contains 'repository') { $arguments += " --with-repository $($Settings['CRINGLE_REPOSITORY_PORT'])" }
+    return $arguments
+}
+
 # the value of every setting: the one given as an option, else the one in the service file that is there, else the default
 function Get-Settings([string]$Path) {
     $result = [ordered]@{}
     $existing = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
     foreach ($key in $SettingDefaults.Keys) {
+        if ($key -eq 'CRINGLE_DAEMON_ARGS') { continue }
         $value = $SettingGiven[$key]
         if (-not $value -and $existing -match ('<env name="' + $key + '" value="([^"]*)"')) { $value = $Matches[1] }
         if (-not $value) { $value = $SettingDefaults[$key] }
         $result[$key] = $value
     }
+    $result['CRINGLE_DAEMON_ARGS'] = Get-DaemonArguments $result
     return $result
 }
 
 function Assert-Settings {
-    foreach ($key in $SettingGiven.Keys) {
+    if ($DaemonOnly -and $Components -and $Components -ne 'none') { throw '-DaemonOnly and -Components exclude each other' }
+    foreach ($key in @($SettingGiven.Keys)) {
         $value = $SettingGiven[$key]
         if (-not $value) { continue }
-        if ($key -eq 'CRINGLE_BIND') {
+        if ($key -eq 'CRINGLE_COMPONENTS') {
+            if (-not (ConvertTo-Components $value)) { throw "-Components needs management, repository, both separated by a comma, or none, not '$value'" }
+            $SettingGiven[$key] = ConvertTo-Components $value
+        } elseif ($key -eq 'CRINGLE_BIND') {
             if ($value -notin @('loopback', 'all')) { throw "-Bind needs loopback or all, not '$value'" }
         } elseif ($value -notmatch '^[0-9]{1,5}$' -or [int]$value -lt 1 -or [int]$value -gt 65535) {
             throw "a port needs a number from 1 to 65535, not '$value' ($key)"
@@ -471,14 +501,91 @@ function Invoke-Uninstall {
     }
 }
 
+# ---- questions ----
+# On the first installation, in a console, the script asks for what no option gave: it runs in the window of the person, before the elevated
+# run starts (which has no console of its own). CRINGLE_INSTALL_ANSWERS names a file with the answers, one per line (for tests).
+
+$Answers = $null
+
+function Read-Answer([string]$Question, [string]$Default) {
+    if ($env:CRINGLE_INSTALL_ANSWERS) {
+        if ($null -eq $script:Answers) { $script:Answers = [System.Collections.Generic.Queue[string]]::new([string[]]@(Get-Content -LiteralPath $env:CRINGLE_INSTALL_ANSWERS)) }
+        $text = if ($script:Answers.Count -gt 0) { $script:Answers.Dequeue() } else { '' }
+        Write-Host "$Question [$Default]: $text"
+    } else {
+        $text = Read-Host "$Question [$Default]"
+    }
+    if ($text.Trim()) { return $text.Trim() } else { return $Default }
+}
+
+function Read-Yes([string]$Question, [string]$Default) {
+    for ($try = 0; $try -lt 3; $try++) {
+        $answer = (Read-Answer "$Question (yes/no)" $Default).ToLowerInvariant()
+        if ($answer -in @('y', 'yes')) { return $true }
+        if ($answer -in @('n', 'no')) { return $false }
+        Write-Host 'please answer yes or no'
+    }
+    throw 'no valid answer given'
+}
+
+function Read-Port([string]$Question, [string]$Default) {
+    for ($try = 0; $try -lt 3; $try++) {
+        $answer = Read-Answer $Question $Default
+        if ($answer -match '^[0-9]{1,5}$' -and [int]$answer -ge 1 -and [int]$answer -le 65535) { return $answer }
+        Write-Host 'that is not a port (1 to 65535)'
+    }
+    throw 'no valid port given'
+}
+
+# the console can be asked: not redirected, and only where the person is (the answers file stands in for it in tests)
+function Test-CanAsk {
+    if ($env:CRINGLE_INSTALL_ANSWERS) { return $true }
+    return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+}
+
+function Invoke-Questions {
+    if ($Uninstall -or $NoAsk -or -not (Test-CanAsk)) { return }
+    # a later installation keeps what the first one decided
+    if (Test-Path -LiteralPath (Join-Path (Join-Path $InstallRoot 'service') 'cringle-daemon.xml')) { return }
+    Write-Host 'Cringle installation: press Enter to take the value in [ ]. (-NoAsk or the options skip the questions.)'
+    $set = {
+        param($Key, $ParameterName, $Value)
+        $script:SettingGiven[$Key] = $Value
+        $script:GivenArguments[$ParameterName] = $Value
+    }
+    if (-not $SettingGiven['CRINGLE_COMPONENTS']) {
+        $chosen = @()
+        if (Read-Yes 'Run the management server (web interface, user logins) on this machine?' 'yes') { $chosen += 'management' }
+        if (Read-Yes 'Run the package repository on this machine?' 'yes') { $chosen += 'repository' }
+        & $set 'CRINGLE_COMPONENTS' 'Components' (ConvertTo-Components ($chosen -join ','))
+        # the switch -DaemonOnly would contradict the answer
+        if ($GivenArguments.ContainsKey('DaemonOnly')) { $GivenArguments.Remove('DaemonOnly') | Out-Null }
+    }
+    $components = $SettingGiven['CRINGLE_COMPONENTS'] -split ','
+    if ($components -contains 'management') {
+        if (-not $SettingGiven['CRINGLE_MANAGEMENT_PORT']) { & $set 'CRINGLE_MANAGEMENT_PORT' 'Port' (Read-Port 'Port of the management server' $SettingDefaults['CRINGLE_MANAGEMENT_PORT']) }
+        if (-not $SettingGiven['CRINGLE_WEB_PORT']) { & $set 'CRINGLE_WEB_PORT' 'WebPort' (Read-Port 'Port of the web interface' $SettingDefaults['CRINGLE_WEB_PORT']) }
+    }
+    if ($components -contains 'repository' -and -not $SettingGiven['CRINGLE_REPOSITORY_PORT']) {
+        & $set 'CRINGLE_REPOSITORY_PORT' 'RepositoryPort' (Read-Port 'Port of the repository' $SettingDefaults['CRINGLE_REPOSITORY_PORT'])
+    }
+    if (-not $SettingGiven['CRINGLE_DAEMON_PORT']) { & $set 'CRINGLE_DAEMON_PORT' 'DaemonPort' (Read-Port 'Port of the daemon' $SettingDefaults['CRINGLE_DAEMON_PORT']) }
+    if (-not $SettingGiven['CRINGLE_BIND']) {
+        $all = Read-Yes 'Listen on all network interfaces (no: only on this machine)?' 'no'
+        & $set 'CRINGLE_BIND' 'Bind' $(if ($all) { 'all' } else { 'loopback' })
+    }
+}
+
 # ---- main ----
 
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
     Assert-Settings
-    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort)) { throw '-Uninstall cannot be combined with -Bind or the port options' }
+    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort -or $Components -or $NoAsk)) { throw '-Uninstall cannot be combined with -Bind, -Components, -NoAsk or the port options' }
     if ($Uninstall -and ($Version -or $WithManagement -or $DaemonOnly -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -DaemonOnly, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
+    # before the elevation: the questions need the console of the person, the elevated run has none
+    if (-not $ElevatedLog) { Invoke-Questions }
     if (-not $NoService -and -not (Test-Admin)) {
         if ($NoElevate) {
             throw 'this needs administrative rights: start PowerShell with "Run as administrator" and run the script again'
