@@ -34,6 +34,7 @@ tasks.withType<Test> {
     val dist = rootProject.tasks.named("cringleDist")
     val distDir = rootProject.layout.buildDirectory.dir("dist")
     if (name == "integrationTest") {
+        maxParallelForks = 1 // nested Gradle builds and the unpacked distribution share directories (build/dist, the test home)
         dependsOn(dist)
         inputs.files(dist)
         // the folder exists after `cringleDist`; the fast suite does not read it, and on a clean checkout it is not there

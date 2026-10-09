@@ -80,6 +80,7 @@ val cringleTestHome = rootProject.layout.buildDirectory.dir("cringle-test-home")
 // folder with the layout of Maven Local, which the test passes as -Dmaven.repo.local, so no test ever touches ~/.m2.
 tasks.withType<Test> {
     if (name == "integrationTest") {
+        maxParallelForks = 1 // nested Gradle builds and the unpacked distribution share directories (build/dist, the test home)
         dependsOn(rootProject.tasks.named("publishToLocalRepo"), rootProject.tasks.named("publishToTestMavenLocal"))
     }
     systemProperty("cringle.localRepo", localRepo.get().asFile.absolutePath)
