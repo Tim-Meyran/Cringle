@@ -5,6 +5,8 @@ package cringle.management.web
 import cringle.contract.UserRole
 import cringle.router.users.Permission
 import cringle.router.users.UserException
+import cringle.router.users.RoleAssignment
+import cringle.router.users.Scope
 import cringle.router.users.UserManager
 import java.time.Duration
 
@@ -37,6 +39,17 @@ internal class UserPages(private val users: UserManager) {
             }
             fragment(usersList(error, created))
         }
+        for (grant in listOf(true, false)) {
+            val verb = if (grant) "grant" else "revoke"
+            r.post("/users/{id}/$verb", Permission.MANAGE_USERS) { req ->
+                val error = attempt { change(req.form) { role, scope -> if (grant) users.grantUser(req.params.getValue("id"), role, scope) else users.revokeUser(req.params.getValue("id"), role, scope) } }
+                fragment(usersList(error, null))
+            }
+            r.post("/groups/{name}/$verb", Permission.MANAGE_USERS) { req ->
+                val error = attempt { change(req.form) { role, scope -> if (grant) users.grantGroup(req.params.getValue("name"), role, scope) else users.revokeGroup(req.params.getValue("name"), role, scope) } }
+                fragment(groupsList(error))
+            }
+        }
         r.post("/tokens/{id}/revoke", Permission.MANAGE_USERS) { req -> fragment(usersList(attempt { users.revokeToken(req.params.getValue("id")) }, null)) }
 
         r.get("/groups", Permission.MANAGE_USERS) { web.render("Groups", it, section("Groups", "A group gives its members roles.", "groups", groupsList(null))) }
@@ -46,6 +59,39 @@ internal class UserPages(private val users: UserManager) {
             fragment(groupsList(error))
         }
     }
+
+    /** Reads the role and the scope of a grant or revoke form and runs [action]. */
+    private fun change(form: Map<String, String>, action: (UserRole, Scope) -> Unit) {
+        val role = UserRole.entries.firstOrNull { it.name.equals(form["role"].orEmpty().trim().replace('-', '_'), ignoreCase = true) }
+            ?: throw UserException(UserException.Kind.INVALID, "unknown role '${form["role"].orEmpty()}'")
+        val text = form["scope"]?.trim()?.takeIf { it.isNotEmpty() } ?: "${form["kind"].orEmpty().trim()}:${form["name"].orEmpty().trim()}"
+        val scope = try {
+            Scope.parse(text)
+        } catch (e: IllegalArgumentException) {
+            throw UserException(UserException.Kind.INVALID, e.message ?: "invalid scope")
+        }
+        action(role, scope)
+    }
+
+    /** The scoped roles of a user or group ([base] is `/users/<id>` or `/groups/<name>`): the list with a revoke form each, and the form to grant one. */
+    private fun scopedPopover(base: String, scoped: Set<RoleAssignment>): Html = h(
+        "<details class=\"popover wide\"><summary>{}</summary><div class=\"popover-body\">{}<form class=\"form-row\" hx-post=\"{}/grant\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}<button class=\"btn primary small\">Grant</button></form></div></details>",
+        if (scoped.isEmpty()) "none" else "${scoped.size} scoped",
+        dataTable(
+            listOf("Role", "For", ""),
+            scoped.sortedWith(compareBy({ it.scope.encode() }, { it.role })).map { a ->
+                h(
+                    "<tr><td>{}</td><td><code>{}</code></td><td class=\"actions\"><form hx-post=\"{}/revoke\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"role\" value=\"{}\"><input type=\"hidden\" name=\"scope\" value=\"{}\"><button class=\"btn small\">Revoke</button></form></td></tr>",
+                    a.role.name.lowercase().replace('_', '-'), a.scope.encode(), base, a.role.name, a.scope.encode(),
+                )
+            },
+            raw("No scoped role."),
+        ),
+        base,
+        field("Role", raw("<select name=\"role\"><option value=\"OPERATOR\">operator</option><option value=\"VIEWER\">viewer</option><option value=\"ADMIN\">admin</option></select>")),
+        field("For", raw("<select name=\"kind\"><option>machine</option><option>project</option><option>fabric</option><option>function</option></select>")),
+        field("Name", raw("<input name=\"name\" placeholder=\"m1, shop, trust, ...\" required>"), "function: trust, plugin-trust, users"),
+    )
 
     private fun roleBoxes(): Html = html(
         raw("<fieldset class=\"roles\"><legend>Roles</legend>"),
@@ -60,8 +106,8 @@ internal class UserPages(private val users: UserManager) {
             val u = v.user
             val tokens = users.listTokens(u.id)
             h(
-                "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
-                u.name, tags(v.effectiveRoles.map { it.name.lowercase() }), tags(u.groups), tokenPopover(u.id, tokens),
+                "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                u.name, tags(v.effectiveRoles.map { it.name.lowercase() }), tags(u.groups), scopedPopover("/users/${u.id}", u.scoped), tokenPopover(u.id, tokens),
                 actionsCell(button(NO_SESSION_CHECK, Permission.AUTHENTICATED, "Delete", "/users/${u.id}/delete", "Delete user ${u.name} and its tokens?")),
             )
         }
@@ -73,7 +119,7 @@ internal class UserPages(private val users: UserManager) {
         )
         return html(
             flash(error, detail = created),
-            dataTable(listOf("Name", "Roles", "Groups", "Tokens", ""), rows, raw("No user.")),
+            dataTable(listOf("Name", "Roles", "Groups", "Scoped roles", "Tokens", ""), rows, raw("No user.")),
             formPanel("Create a user", "The new user gets no token yet: create one in the Tokens column. The value is shown once.", createForm),
         )
     }
@@ -98,7 +144,7 @@ internal class UserPages(private val users: UserManager) {
     )
 
     private fun groupsList(error: String?): Html {
-        val rows = users.listGroups().map { h("<tr><td><strong>{}</strong></td><td>{}</td></tr>", it.name, tags(it.roles.map { r -> r.name.lowercase() })) }
+        val rows = users.listGroups().map { h("<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td></tr>", it.name, tags(it.roles.map { r -> r.name.lowercase() }), scopedPopover("/groups/${it.name}", it.scoped)) }
         val form = h(
             "<form class=\"form-row\" hx-post=\"/groups\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary\">Create group</button></form>",
             field("Name", raw("<input name=\"name\" required>")),
@@ -106,7 +152,7 @@ internal class UserPages(private val users: UserManager) {
         )
         return html(
             flash(error),
-            dataTable(listOf("Group", "Roles"), rows, raw("No group yet.")),
+            dataTable(listOf("Group", "Roles", "Scoped roles"), rows, raw("No group yet.")),
             formPanel("Create a group", "Members get the roles of the group in addition to their own.", form),
         )
     }

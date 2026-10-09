@@ -202,12 +202,36 @@ private fun roleOf(name: String): Role = when (name.lowercase()) {
 
 private fun roleName(r: Role) = r.pretty("ROLE_").replace('_', '-')
 
+/** The text form of a scoped role: `operator@machine:m1`. */
+private fun scopedName(a: cringle.user.v1.RoleAssignment): String = "${roleName(a.role)}@${a.scope.kind.pretty("SCOPE_KIND_")}:${a.scope.name}"
+
+/** The scope of `--scope`: `machine:<id>`, `project:<name>`, `fabric:<id>` or `function:<trust|plugin-trust|users>`. */
+private fun scopeOf(text: String): cringle.user.v1.Scope {
+    if (text == "global") throw UsageException("a global role is given with the roles of the user or group ('user create --role'), not with --scope")
+    val kind = when (text.substringBefore(':', "")) {
+        "machine" -> cringle.user.v1.ScopeKind.SCOPE_KIND_MACHINE
+        "project" -> cringle.user.v1.ScopeKind.SCOPE_KIND_PROJECT
+        "fabric" -> cringle.user.v1.ScopeKind.SCOPE_KIND_FABRIC
+        "function" -> cringle.user.v1.ScopeKind.SCOPE_KIND_FUNCTION
+        else -> throw UsageException("invalid scope '$text' (machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>)")
+    }
+    return cringle.user.v1.Scope.newBuilder().setKind(kind).setName(text.substringAfter(':')).build()
+}
+
+private fun roleScope(a: Parsed, group: Boolean): cringle.user.v1.RoleScopeRequest {
+    val scope = a.option("scope") ?: throw UsageException("--scope is required (machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>)")
+    val b = cringle.user.v1.RoleScopeRequest.newBuilder().setRole(roleOf(a.positional[1])).setScope(scopeOf(scope))
+    if (group) b.group = a.positional[0] else b.userId = a.positional[0]
+    return b.build()
+}
+
 private fun userRow(u: cringle.user.v1.User): Map<String, Any?> = linkedMapOf(
     "id" to u.id,
     "name" to u.name,
     "roles" to u.rolesList.map(::roleName),
     "groups" to u.groupsList,
     "effectiveRoles" to u.effectiveRolesList.map(::roleName),
+    "scopedRoles" to u.effectiveScopedRolesList.map(::scopedName),
 )
 
 private fun sha256(file: Path): String {
@@ -745,10 +769,37 @@ internal val COMMANDS: List<Command> = listOf(
         listOf(opt("role", "role: admin, operator, viewer, end-user (repeatable)", "ROLE", repeatable = true)), 1,
     ) { env, a ->
         val g = env.users.createGroup(CreateGroupRequest.newBuilder().setName(a.positional[0]).addAllRoles(a.options("role").map(::roleOf)).build()).group
-        Output.Detail(linkedMapOf("name" to g.name, "roles" to g.rolesList.map(::roleName)))
+        Output.Detail(linkedMapOf("name" to g.name, "roles" to g.rolesList.map(::roleName), "scopedRoles" to g.scopedRolesList.map(::scopedName)))
     },
     Command(listOf("group", "list"), "", "List the groups") { env, _ ->
-        Output.Rows(env.users.listGroups(ListGroupsRequest.getDefaultInstance()).groupsList.map { linkedMapOf<String, Any?>("name" to it.name, "roles" to it.rolesList.map(::roleName)) }, "no groups")
+        Output.Rows(env.users.listGroups(ListGroupsRequest.getDefaultInstance()).groupsList.map { linkedMapOf<String, Any?>("name" to it.name, "roles" to it.rolesList.map(::roleName), "scopedRoles" to it.scopedRolesList.map(::scopedName)) }, "no groups")
+    },
+    Command(
+        listOf("user", "grant"), "<user-id> <role>", "Give a user a role for one object only (a machine, a project, a fabric or a framework function)",
+        listOf(opt("scope", "machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        val request = roleScope(a, group = false)
+        Output.Detail(userRow(env.users.grantRole(request).user))
+    },
+    Command(
+        listOf("user", "revoke"), "<user-id> <role>", "Take a scoped role of a user back",
+        listOf(opt("scope", "the scope the role was given for", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        Output.Detail(userRow(env.users.revokeRole(roleScope(a, group = false)).user))
+    },
+    Command(
+        listOf("group", "grant"), "<group> <role>", "Give a group a role for one object only; its members have it",
+        listOf(opt("scope", "machine:<id>, project:<name>, fabric:<id> or function:<trust|plugin-trust|users>", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        val g = env.users.grantRole(roleScope(a, group = true)).group
+        Output.Detail(linkedMapOf("name" to g.name, "roles" to g.rolesList.map(::roleName), "scopedRoles" to g.scopedRolesList.map(::scopedName)))
+    },
+    Command(
+        listOf("group", "revoke"), "<group> <role>", "Take a scoped role of a group back",
+        listOf(opt("scope", "the scope the role was given for", "SCOPE")), minArgs = 2, maxArgs = 2,
+    ) { env, a ->
+        val g = env.users.revokeRole(roleScope(a, group = true)).group
+        Output.Detail(linkedMapOf("name" to g.name, "roles" to g.rolesList.map(::roleName), "scopedRoles" to g.scopedRolesList.map(::scopedName)))
     },
     Command(
         listOf("token", "create"), "<user-id>", "Create a token for a user; the value is shown once",
