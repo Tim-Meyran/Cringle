@@ -935,10 +935,10 @@ internal val COMMANDS: List<Command> = listOf(
 
     // --- installation ---
     Command(
-        listOf("setup"), "[--bind <loopback|all|address>] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
+        listOf("setup"), "[--bind <loopback|all>] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
         "Change the address and the ports of the installed services (without options: ask for each, an empty answer keeps the value) and restart them",
         listOf(
-            opt("bind", "loopback (default), all (every network interface) or an address", "ADDRESS"),
+            opt("bind", "loopback (default) or all (every network interface)", "VALUE"),
             opt("port", "port of the management server (default 7500)", "PORT"),
             opt("web-port", "port of the web interface (default 8443)", "PORT"),
             opt("repository-port", "port of the repository (default 7600)", "PORT"),
@@ -965,7 +965,7 @@ internal val COMMANDS: List<Command> = listOf(
             // nothing to change
         } else if (given.values.all { it == null }) {
             val labels = mapOf(
-                ServiceSettings.BIND to "Listen on (loopback, all or an address)", ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
+                ServiceSettings.BIND to "Listen on (loopback or all)", ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
                 ServiceSettings.WEB_PORT to "Port of the web interface", ServiceSettings.REPOSITORY_PORT to "Port of the repository", ServiceSettings.DAEMON_PORT to "Port of the daemon",
             )
             for (key in given.keys) {

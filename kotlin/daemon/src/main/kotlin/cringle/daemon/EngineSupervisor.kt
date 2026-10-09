@@ -68,6 +68,8 @@ public class EngineSupervisor(
     private val onWarning: (String) -> Unit = { System.err.println("WARNING: $it") },
     /** Secure random number generator for enrollment secrets. */
     private val secureRandom: SecureRandom = SecureRandom(),
+    /** `all` makes the engines listen on every network interface (their `--bind`); `null` is the loopback interface. */
+    private val bindHost: String? = null,
     /**
      * Announces at the router that [engine] will register with the secret whose SHA-256 is the second argument
      * (`PrepareEngine`). Called before the engine process starts; if it throws, the engine is not started.
@@ -177,7 +179,7 @@ public class EngineSupervisor(
             val cmd = listOf(command.java) + command.jvmArgs + listOf(
                 "-cp", command.classPath, command.mainClass,
                 "--id", m.id, "--name", m.name, "--home", home.toString(),
-            )
+            ) + (bindHost?.let { listOf("--bind", it) } ?: emptyList())
             val builder = ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()

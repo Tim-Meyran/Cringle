@@ -288,3 +288,6 @@ details.popover.wide .popover-body { min-width: 520px; }
 .confirm { border-color: var(--accent); }
 .confirm h2 { margin-top: 0; }
 @media (max-width: 900px) { .table-wrap { overflow-x: auto; } details.popover.wide .popover-body { min-width: 0; width: 86vw; } .popover-body { right: auto; left: 0; } }
+
+.token-share p { margin: 0 0 var(--space-2); }
+.token-share svg.qr { display: block; width: 220px; max-width: 100%; height: auto; margin: var(--space-3) 0; border-radius: var(--radius-sm); }

@@ -143,6 +143,7 @@ eq "an option changes the value" "1" "$(grep -c '^CRINGLE_BIND=loopback$' "$P/et
 not "a bad port is refused" run --release 1.0.0 --web-port 70000
 not "a word instead of a port is refused" run --release 1.0.0 --port abc
 not "an option without a value is refused" run --release 1.0.0 --bind
+not "an address instead of loopback or all is refused" run --release 1.0.0 --bind 192.0.2.7
 not "ports cannot be combined with --uninstall" run --uninstall --bind all
 
 echo "== management server"

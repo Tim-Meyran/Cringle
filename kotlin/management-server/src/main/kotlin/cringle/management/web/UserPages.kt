@@ -15,12 +15,13 @@ import java.time.Duration
  * The pages for users, groups and tokens (#210): the functions of `cringle user|group|token ...`, all behind `MANAGE_USERS`. A token value is shown
  * once, in the answer to its creation; it is not kept. Only registered when the ManagementServer runs with `--auth`.
  */
-internal class UserPages(private val users: UserManager) {
+internal class UserPages(private val users: UserManager, private val web: WebServer) {
     fun register(web: WebServer) {
         val usersScope = listOf(Scope(ScopeKind.FUNCTION, "users"))
         web.navigation += listOf(NavItem("Users", "/users", Permission.MANAGE_USERS, "Administer", usersScope), NavItem("Groups", "/groups", Permission.MANAGE_USERS, "Administer", usersScope))
         // the user functions need MANAGE_USERS globally or for `function:users` (#271)
         web.router.scoped(usersScope) { registerRoutes(web, this) }
+        InvitePages(users, web).register()
     }
 
     private fun registerRoutes(web: WebServer, r: Router) {
@@ -41,7 +42,8 @@ internal class UserPages(private val users: UserManager) {
             val error = attempt {
                 val hours = req.form["hours"]?.trim()?.takeIf { it.isNotEmpty() }?.let { it.toLongOrNull() ?: throw UserException(UserException.Kind.INVALID, "lifetime must be a number of hours") }
                 val token = users.createToken(req.params.getValue("id"), req.form["label"].orEmpty().trim().ifEmpty { "web" }, hours?.let { Duration.ofHours(it) })
-                created = h("Token <code data-copy=\"{}\" title=\"Click to copy\">{}</code> (shown once, copy it now).", token.secret, token.secret)
+                val name = users.listUsers().firstOrNull { it.user.id == req.params.getValue("id") }?.user?.name ?: "user"
+                created = tokenShare(web.baseUrl(req) + "/login#token=" + token.secret, token.secret, name, token.info.expiresAt)
             }
             fragment(usersList(error, created))
         }
@@ -168,3 +170,14 @@ internal class UserPages(private val users: UserManager) {
         val NO_SESSION_CHECK = Session("", null, Permission.entries.toSet(), "", java.time.Instant.EPOCH)
     }
 }
+
+/** What a new token shows: the value, the login link and the QR code of the link; the fragment keeps the token out of every server and log. */
+internal fun tokenShare(link: String, secret: String, user: String, expiresAt: java.time.Instant?): Html = h(
+    "<div class=\"token-share\"><p>Token <code data-copy=\"{}\" title=\"Click to copy\">{}</code> (shown once, copy it now).{}</p>" +
+        "<p>Login link <code data-copy=\"{}\" title=\"Click to copy\">{}</code></p>{}<p class=\"hint\">Scan the code or open the link to sign in as {}. Treat this screen like a password.</p></div>",
+    secret, secret,
+    if (expiresAt != null) h(" It expires {}.", expiresAt.toString().take(16).replace("T", " ") + " UTC") else Html(""),
+    link, link.substringBefore('#') + "#token=…",
+    raw(cringle.common.qr.QrCode.encode(link).toSvg("Login link for $user")),
+    user,
+)

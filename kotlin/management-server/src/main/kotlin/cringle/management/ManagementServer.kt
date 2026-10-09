@@ -95,6 +95,8 @@ public class ManagementServer(
     webPort: Int? = null,
     /** Where the web interface listens; `null` follows [bindHost]. */
     webHost: String? = null,
+    /** The public address of the web interface for links and QR codes, see [cringle.management.web.WebServer]. */
+    webUrl: String? = null,
     /** Where the gRPC server listens (`loopback`, `all` or an address, see [cringle.common.BindAddress]); `null` is the loopback interface. */
     bindHost: String? = null,
 ) : AutoCloseable {
@@ -125,7 +127,7 @@ public class ManagementServer(
         .build()
 
     /** The web interface; `null` if no web port was given. Pages register their routes before [start]. */
-    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost) }
+    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost, webUrl = webUrl) }
 
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
     @Volatile

@@ -2,7 +2,7 @@
 #
 # Installer of Cringle for Windows (docs/daemon-service.md). Run it in an administrative PowerShell:
 #
-#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Bind <loopback|all|address>] [-Port <n>] [-WebPort <n>] [-Start]
+#   .\install.ps1 [-Version <version>] [-DaemonOnly] [-Bind <loopback|all>] [-Port <n>] [-WebPort <n>] [-Start]
 #   .\install.ps1 -FromBuild <dir> [-Version <version>] [-DaemonOnly] [-Start]
 #   .\install.ps1 -Uninstall [-Purge]
 #
@@ -14,7 +14,7 @@
 #                       `.\gradlew.bat cringleInstallLocal` builds and runs this.
 #   -DaemonOnly         run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
 #                       user logins) and the repository (port 7600) as programs it supervises
-#   -Bind <value>       where the servers listen: loopback (default), all (every network interface) or an address
+#   -Bind <value>       where the servers listen: loopback (default) or all (every network interface)
 #   -Port <n>           port of the management server (default 7500)
 #   -WebPort <n>        port of the web interface (default 8443)
 #   -RepositoryPort <n> port of the repository (default 7600)
@@ -284,7 +284,7 @@ function Assert-Settings {
         $value = $SettingGiven[$key]
         if (-not $value) { continue }
         if ($key -eq 'CRINGLE_BIND') {
-            if ($value -notmatch '^[A-Za-z0-9.:_-]+$') { throw "-Bind needs loopback, all or an address, not '$value'" }
+            if ($value -notin @('loopback', 'all')) { throw "-Bind needs loopback or all, not '$value'" }
         } elseif ($value -notmatch '^[0-9]{1,5}$' -or [int]$value -lt 1 -or [int]$value -gt 65535) {
             throw "a port needs a number from 1 to 65535, not '$value' ($key)"
         }

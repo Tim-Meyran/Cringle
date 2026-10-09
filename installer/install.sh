@@ -3,13 +3,13 @@
 #
 # Installer of Cringle for Linux with systemd (docs/daemon-service.md).
 #
-#   sudo ./install.sh [--release <version>] [--daemon-only] [--bind <loopback|all|address>] [--port <n>] [--web-port <n>] [--start]
+#   sudo ./install.sh [--release <version>] [--daemon-only] [--bind <loopback|all>] [--port <n>] [--web-port <n>] [--start]
 #   sudo ./install.sh --uninstall [--purge]
 #
 #   --release <version>  install this version (default: the latest release)
 #   --daemon-only        run only the daemon; by default it also runs the management server (port 7500, web interface 8443,
 #                        user logins) and the repository (port 7600) as programs it supervises
-#   --bind <value>       where the servers listen: loopback (default), all (every network interface) or an address
+#   --bind <value>       where the servers listen: loopback (default) or all (every network interface)
 #   --port <n>           port of the management server (default 7500)
 #   --web-port <n>       port of the web interface (default 8443)
 #   --repository-port <n>  port of the repository (default 7600)
@@ -131,7 +131,10 @@ for pair in "--port:$SET_MANAGEMENT_PORT" "--web-port:$SET_WEB_PORT" "--reposito
     fi
 done
 if [ -n "$SET_BIND" ]; then
-    printf '%s' "$SET_BIND" | grep -Eq '^[A-Za-z0-9.:_-]+$' || die "--bind needs loopback, all or an address, not '$SET_BIND'"
+    case "$SET_BIND" in
+        loopback | all) ;;
+        *) die "--bind needs loopback or all, not '$SET_BIND'" ;;
+    esac
 fi
 if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ]; }; then
     die "--uninstall cannot be combined with --release, --daemon-only or --start"

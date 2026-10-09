@@ -31,7 +31,7 @@ internal object ServiceSettings {
 
     /** Checks the value of a setting; returns the problem or `null`. */
     fun problem(key: String, value: String): String? = when (key) {
-        BIND -> if (value.isBlank() || value.any { it.isWhitespace() || it == '"' || it == '\'' }) "the address is empty or has a blank or a quote" else null
+        BIND -> if (value.lowercase() in setOf("loopback", "all")) null else "'$value' is not loopback or all (the services of one machine connect to each other through the loopback interface)"
         else -> if (value.toIntOrNull()?.let { it in 1..65535 } == true) null else "$value is not a port (1 to 65535)"
     }
 
