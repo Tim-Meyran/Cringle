@@ -34,6 +34,8 @@ import cringle.engine.v1.ConfigureRequest
 import cringle.engine.v1.ConfigureResponse
 import cringle.engine.v1.EngineManagementServiceGrpcKt
 import cringle.engine.v1.EngineState
+import cringle.engine.v1.AssertionState
+import cringle.engine.v1.AssertionStatus
 import cringle.engine.v1.BlockInfo
 import cringle.engine.v1.BlockRuntimeState
 import cringle.engine.v1.DeployFabricRequest
@@ -515,6 +517,23 @@ public class Engine private constructor(
             },
         )
         .setFailure(s.failure.orEmpty())
+        .addAllAssertions(
+            s.assertions.map { a ->
+                AssertionStatus.newBuilder()
+                    .setId(a.id)
+                    .setType(a.type)
+                    .setState(
+                        when (a.state) {
+                            cringle.engine.fabric.AssertionState.OK -> AssertionState.ASSERTION_STATE_OK
+                            cringle.engine.fabric.AssertionState.VIOLATED -> AssertionState.ASSERTION_STATE_VIOLATED
+                            cringle.engine.fabric.AssertionState.UNKNOWN -> AssertionState.ASSERTION_STATE_UNKNOWN
+                        },
+                    )
+                    .setSince(com.google.protobuf.Timestamp.newBuilder().setSeconds(a.since.epochSecond).setNanos(a.since.nano))
+                    .setDetail(a.detail)
+                    .build()
+            },
+        )
         .build()
 
     public companion object {

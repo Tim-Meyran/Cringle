@@ -75,6 +75,8 @@ public data class FabricStatus(
     val state: FabricState,
     val blocks: List<BlockStatus>,
     val failure: String? = null,
+    /** The results of the assertions of the blueprint (#233), empty if it has none. */
+    val assertions: List<AssertionResult> = emptyList(),
 )
 
 /**

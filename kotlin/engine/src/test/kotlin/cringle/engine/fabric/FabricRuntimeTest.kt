@@ -136,12 +136,14 @@ class FabricRuntimeTest {
         tetherConfig: TetherConfig? = null,
         paths: FabricPaths? = null,
         migrations: DataMigrations? = null,
+        assertions: List<cringle.packaging.Assertion> = emptyList(),
     ): FabricSpec {
         val defs = listOf(definition("one"), definition("two"))
         val provider = Provider(defs) { name -> RecordingBlock(name, rec, { failStart(name) }, onStart) }
         return FabricSpec(
             id = id,
-            blueprint = Blueprint("main", blocks, tethers),
+            blueprint = Blueprint("main", blocks, tethers, assertions = assertions),
+            assertionInterval = java.time.Duration.ofMillis(50),
             resolver = BlockResolver { ref -> defs.firstOrNull { "p/${it.name}" == ref }?.let { ResolvedBlock(provider, it, trust) } },
             drivers = DriverFactory { _, _ -> TestDriverSet() },
             paths = paths ?: FabricPaths(dir.resolve("engine"), id),
@@ -252,6 +254,23 @@ class FabricRuntimeTest {
             assertEquals(3, rec.events.count { it == "one.init" })
             fabric.stop()
             assertEquals(FabricState.STOPPED, fabric.status.value.state)
+        }
+    }
+
+    @Test
+    fun theAssertionsOfTheBlueprintAreEvaluatedAndPublishedWithTheStatus() = runBlocking {
+        val assertions = listOf(cringle.packaging.FabricRunning(), cringle.packaging.BlockRunning("a"), cringle.packaging.BlockRunning("b"))
+        FabricRuntime(spec("f1", Recorder(), assertions = assertions)).use { fabric ->
+            assertEquals(emptyList<AssertionResult>(), fabric.status.value.assertions)
+            fabric.start()
+            val ok = fabric.awaitStatus { s -> s.assertions.size == 3 && s.assertions.all { it.state == AssertionState.OK } }
+            assertEquals(listOf("fabric-running", "block-running:a", "block-running:b"), ok.assertions.map { it.id })
+            fabric.deliver("a", TetherEvent.Message(PortRef("in"), "boom"))
+            val violated = fabric.awaitStatus { s -> s.assertions.firstOrNull { it.id == "block-running:a" }?.state == AssertionState.VIOLATED }
+            assertEquals(AssertionState.OK, violated.assertions.first { it.id == "block-running:b" }.state)
+            fabric.awaitStatus { s -> s.assertions.first { it.id == "fabric-running" }.state == AssertionState.VIOLATED }
+            fabric.stop()
+            fabric.awaitStatus { s -> s.assertions.all { it.state == AssertionState.UNKNOWN } }
         }
     }
 

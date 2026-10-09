@@ -358,6 +358,28 @@ message FabricInfo {
   repeated BlockInfo blocks = 4;
   // Why the fabric failed, empty if it did not.
   string failure = 5;
+  // The results of the assertions of the blueprint (Architecture 16.3), in the order of the blueprint; empty if it has none.
+  repeated AssertionStatus assertions = 6;
+}
+
+message AssertionStatus {
+  // The name of the assertion, or its type with its block or tether (`block-running:c1`).
+  string id = 1;
+  // `fabric-running`, `block-running`, `tether-flow` or `no-errors`.
+  string type = 2;
+  AssertionState state = 3;
+  // When the state changed last.
+  google.protobuf.Timestamp since = 4;
+  // A short sentence about the current state.
+  string detail = 5;
+}
+
+enum AssertionState {
+  ASSERTION_STATE_UNSPECIFIED = 0;
+  ASSERTION_STATE_OK = 1;
+  ASSERTION_STATE_VIOLATED = 2;
+  // Cannot be judged yet: the fabric is not running, or the window of a tether-flow is not full.
+  ASSERTION_STATE_UNKNOWN = 3;
 }
 
 message RemoveFabricResponse {}
