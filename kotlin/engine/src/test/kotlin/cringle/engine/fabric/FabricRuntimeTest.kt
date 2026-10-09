@@ -9,6 +9,10 @@ import cringle.contract.BlockId
 import cringle.contract.BlockProvider
 import cringle.contract.DriverSet
 import cringle.contract.IsolationLevel
+import cringle.contract.MigrationException
+import cringle.contract.MigrationScope
+import cringle.contract.Processor
+import cringle.packaging.ProcessorSet
 import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.PortRef
@@ -131,6 +135,7 @@ class FabricRuntimeTest {
         tethers: List<TetherDef> = emptyList(),
         tetherConfig: TetherConfig? = null,
         paths: FabricPaths? = null,
+        migrations: DataMigrations? = null,
     ): FabricSpec {
         val defs = listOf(definition("one"), definition("two"))
         val provider = Provider(defs) { name -> RecordingBlock(name, rec, { failStart(name) }, onStart) }
@@ -146,11 +151,38 @@ class FabricRuntimeTest {
             watchdog = watchdog,
             wiring = wiring,
             tethers = tetherConfig,
+            migrations = migrations,
         )
     }
 
     private fun FabricRuntime.awaitStatus(timeout: kotlin.time.Duration = 10.seconds, predicate: (FabricStatus) -> Boolean): FabricStatus =
         runBlocking { withTimeout(timeout) { status.first(predicate) } }
+
+    @Test
+    fun failingMigrationStopsTheFabricInMigrationFailedAndAStartRetries() = runBlocking {
+        val folder = dir.resolve("data").resolve("a")
+        var broken = true
+        val unit = MigrationUnit(MigrationScope.PLUGIN, "a", "p", "2.0.0", folder, ProcessorSet(update = "Up"), { _ ->
+            Processor { if (broken) throw MigrationException("step 2.0.0: boom") }
+        })
+        FabricRuntime(spec("f1", Recorder(), migrations = DataMigrations(dir.resolve("data"), listOf(unit)))).use { fabric ->
+            // first run only records the version; a second version needs a processor
+            fabric.start()
+            fabric.stop()
+            val newer = MigrationUnit(MigrationScope.PLUGIN, "a", "p", "3.0.0", folder, ProcessorSet(update = "Up"), unit.create)
+            FabricRuntime(spec("f2", Recorder(), migrations = DataMigrations(dir.resolve("data"), listOf(newer)))).use { f2 ->
+                assertThrows<FabricException> { f2.start() }
+                val failed = f2.status.value
+                assertEquals(FabricState.MIGRATION_FAILED, failed.state)
+                assertTrue(failed.failure!!.contains("step 2.0.0: boom"), failed.failure)
+                assertTrue(failed.blocks.none { it.state == BlockState.RUNNING })
+                broken = false
+                f2.start()
+                assertEquals(FabricState.RUNNING, f2.status.value.state)
+                assertEquals(null, f2.status.value.failure)
+            }
+        }
+    }
 
     @Test
     fun sampleBlueprintRunsStopsAndRestartsCleanly() = runBlocking {

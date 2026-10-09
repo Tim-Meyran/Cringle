@@ -4,6 +4,7 @@ package cringle.engine.fabric
 
 import cringle.contract.BlockId
 import cringle.contract.DriverSet
+import cringle.contract.MigrationScope
 import cringle.contract.Driver
 import cringle.engine.drivers.BuiltinDrivers
 import cringle.engine.tether.TetherConfig
@@ -233,7 +234,23 @@ public class LocalFabricDeployer(
                     blocks["${p.manifest.name}/${definition.name}"] = ResolvedBlock(provider, definition, p.trust)
                 }
             }
-            val paths = FabricPaths(engineDir, request.fabricId, dataBaseOf(request))
+            val dataBase = dataBaseOf(request)
+            val paths = FabricPaths(engineDir, request.fabricId, dataBase)
+            val migrations = dataBase?.let { base ->
+                val providerIds = plugins.map { "${it.manifest.name}@${it.manifest.version}" }
+                val units = ArrayList<MigrationUnit>()
+                for (b in blueprint.blocks) {
+                    val plugin = plugins.firstOrNull { it.manifest.name == b.block.substringBefore('/') } ?: continue
+                    val id = "${plugin.manifest.name}@${plugin.manifest.version}"
+                    units += MigrationUnit(
+                        MigrationScope.PLUGIN, b.id, plugin.manifest.name, plugin.manifest.version, base.resolve(b.id), plugin.manifest.processors,
+                    ) { loaders.openProcessor(listOf(id), it) }
+                }
+                units += MigrationUnit(
+                    MigrationScope.PROJECT, null, projectManifest.name, projectManifest.version, base, projectManifest.processors,
+                ) { loaders.openProcessor(providerIds, it) }
+                DataMigrations(base, units)
+            }
             val recorder = builtin?.let { cringle.engine.dwh.TetherRecorder(it.dwh, request.fabricId) { message -> paths.fileLogger().log(FabricLogger.Level.WARN, message) } }
             return FabricRuntime(
                 FabricSpec(
@@ -258,6 +275,7 @@ public class LocalFabricDeployer(
                     watchdog = watchdog,
                     onClose = loaders,
                     recorder = recorder,
+                    migrations = migrations,
                 ),
             )
         } catch (e: Throwable) {

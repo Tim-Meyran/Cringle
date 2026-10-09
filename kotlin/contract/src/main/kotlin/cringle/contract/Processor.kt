@@ -44,7 +44,7 @@ public class MigrationException(message: String, cause: Throwable? = null) : Run
  * automatically: the fabric stays stopped until somebody has fixed it. Several versions at once (1 to 2 to 3) are the job of the processor; [SteppedProcessor]
  * does it for you.
  */
-public interface Processor {
+public fun interface Processor {
     /** Brings the data of [context] from [MigrationContext.from] to [MigrationContext.to]. */
     public fun migrate(context: MigrationContext)
 }

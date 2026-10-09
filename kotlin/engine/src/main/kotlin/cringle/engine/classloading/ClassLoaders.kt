@@ -3,6 +3,7 @@
 package cringle.engine.classloading
 
 import cringle.contract.BlockProvider
+import cringle.contract.Processor
 import cringle.packaging.PluginManifest
 import java.io.IOException
 import java.net.URL
@@ -135,6 +136,33 @@ public class FabricClassLoaders(private val contract: ContractClassLoader) : Aut
             throw ProviderLoadException(providerId, className, "needs a public no-argument constructor", e)
         } catch (e: ReflectiveOperationException) {
             throw ProviderLoadException(providerId, className, "cannot be instantiated: ${e.cause ?: e}", e)
+        }
+    }
+
+    /**
+     * Instantiates the [Processor] class [className] through the first loader of [providerIds] that finds it (a project names classes of the
+     * plugins it uses). Throws [ProviderLoadException] if none does or the class is no processor.
+     */
+    @Synchronized
+    public fun openProcessor(providerIds: List<String>, className: String): Processor {
+        val label = providerIds.joinToString()
+        val found = providerIds.firstNotNullOfOrNull { id ->
+            val loader = loaders[id] ?: return@firstNotNullOfOrNull null
+            try {
+                Class.forName(className, true, loader)
+            } catch (_: ClassNotFoundException) {
+                null
+            } catch (e: LinkageError) {
+                throw ProviderLoadException(id, className, "class cannot be linked: ${e.message}", e)
+            }
+        } ?: throw ProviderLoadException(label, className, "processor class not found in the plugins' JARs")
+        if (!Processor::class.java.isAssignableFrom(found)) throw ProviderLoadException(label, className, "does not implement cringle.contract.Processor")
+        return try {
+            found.getConstructor().newInstance() as Processor
+        } catch (e: NoSuchMethodException) {
+            throw ProviderLoadException(label, className, "needs a public no-argument constructor", e)
+        } catch (e: ReflectiveOperationException) {
+            throw ProviderLoadException(label, className, "cannot be instantiated: ${e.cause ?: e}", e)
         }
     }
 
