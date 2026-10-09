@@ -54,7 +54,11 @@ public class Daemon(
     trustLocal: Boolean = false,
     /** The programs the daemon starts and keeps running next to the engines; none by default. */
     private val companions: Companions = Companions(),
+    /** Where the daemon, its router and the engines listen: `null` or `loopback` (default) or `all` (every network interface), see [cringle.common.BindAddress]. */
+    bindHost: String? = null,
 ) : AutoCloseable {
+    private val bind: String? = cringle.common.BindAddress.interfaceChoice(bindHost)
+
     /** Whether the components of this home trust each other by their key files; always when the daemon runs the management server or the repository. */
     private val localTrust: Boolean = trustLocal || companions.any
     private val daemonDir = home.resolve("daemon")
@@ -93,6 +97,7 @@ public class Daemon(
         RouterServer(
             routerDir.resolve("registry.json"),
             tls = RouterTls(routerIdentity, routerTrustStore),
+            bindHost = bind,
         )
     } else null
 
@@ -107,6 +112,7 @@ public class Daemon(
         { router?.let { "127.0.0.1:${it.port}" } ?: routerAddress },
         startTimeout,
         stopTimeout,
+        bindHost = bind,
         // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
         onStopped = { id, _ -> router?.registry?.unregister(id) },
         // combined mode: the router of this process; a separate router is announced to by mTLS from the daemon (#114)
@@ -124,7 +130,7 @@ public class Daemon(
     )
 
     private val server: Server = NettyServerBuilder
-        .forAddress(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        .forAddress(cringle.common.BindAddress.socketAddress(bind, port))
         .sslContext(TlsHelper.serverCredentials(daemonIdentity, daemonTrustStore))
         .addService(DaemonGrpcService(this))
         .build()
@@ -163,18 +169,21 @@ public class Daemon(
         companions.repositoryPort?.let { repositoryPort ->
             companionProcesses += CompanionProcess(
                 "repository", companions.command, "cringle.repository.MainKt",
-                listOf("--home", home.toString(), "--port", repositoryPort.toString(), "--trust-local"),
+                listOf("--home", home.toString(), "--port", repositoryPort.toString(), "--trust-local") + bindArguments(),
                 environment, logs,
             ).also { it.start() }
         }
         companions.managementPort?.let { managementPort ->
             val arguments = arrayListOf("--home", home.toString(), "--port", managementPort.toString(), "--auth", "--trust-local", "--machine", "local=127.0.0.1:$port")
+            arguments += bindArguments()
             companions.webPort?.let { arguments += listOf("--web-port", it.toString()) }
             companions.repositoryPort?.let { arguments += listOf("--repository", "127.0.0.1:$it") }
             router?.let { arguments += listOf("--router", "127.0.0.1:${it.port}") }
             companionProcesses += CompanionProcess("management", companions.command, "cringle.management.MainKt", arguments, environment, logs).also { it.start() }
         }
     }
+
+    private fun bindArguments(): List<String> = bind?.let { listOf("--bind", it) }.orEmpty()
 
     /** Registers a new engine; allocates an id if [id] is `null`. Does not start it. */
     public fun createEngine(id: String?, name: String?): EngineSnapshot = synchronized(engines) {

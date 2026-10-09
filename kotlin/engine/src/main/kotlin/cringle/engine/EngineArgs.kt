@@ -16,6 +16,8 @@ public data class EngineArgs(
     val managementPort: Int,
     /** Port of the server for tethers between engines; 0 picks a free port. */
     val tetherPort: Int = 0,
+    /** Where the management API listens: `loopback` or `all`, see [cringle.common.BindAddress]; `null` falls back to `CRINGLE_BIND`, then loopback. */
+    val bind: String? = null,
 ) {
     public companion object {
         /** Engine ids become directory names, so they are restricted to a safe grammar. */
@@ -23,7 +25,7 @@ public data class EngineArgs(
 
         /** Usage text printed on argument errors. */
         public const val USAGE: String =
-            "usage: engine --id <id> [--name <name>] [--home <dir>] [--management-port <port>] [--tether-port <port>]"
+            "usage: engine --id <id> [--name <name>] [--home <dir>] [--management-port <port>] [--tether-port <port>] [--bind <loopback|all>]"
 
         /** Parses [args]; throws [EngineArgsException] for unknown, missing or malformed arguments. */
         public fun parse(args: List<String>): EngineArgs {
@@ -32,6 +34,7 @@ public data class EngineArgs(
             var home: Path? = null
             var port = 0
             var tetherPort = 0
+            var bind: String? = null
             var i = 0
             fun value(option: String): String {
                 if (i + 1 >= args.size) throw EngineArgsException("$option needs a value")
@@ -53,6 +56,14 @@ public data class EngineArgs(
                         tetherPort = text.toIntOrNull()?.takeIf { it in 0..65535 }
                             ?: throw EngineArgsException("--tether-port must be 0..65535, got '$text'")
                     }
+                    "--bind" -> {
+                        val text = value(option)
+                        bind = try {
+                            cringle.common.BindAddress.interfaceChoice(text) ?: cringle.common.BindAddress.LOOPBACK
+                        } catch (e: IllegalArgumentException) {
+                            throw EngineArgsException("--bind: ${e.message}")
+                        }
+                    }
                     else -> throw EngineArgsException("unknown argument '$option'")
                 }
                 i += 1
@@ -62,7 +73,7 @@ public data class EngineArgs(
                 throw EngineArgsException("--id '$engineId' must match ${idPattern.pattern}")
             }
             if (name != null && name.isBlank()) throw EngineArgsException("--name must not be blank")
-            return EngineArgs(engineId, name, home, port, tetherPort)
+            return EngineArgs(engineId, name, home, port, tetherPort, bind)
         }
     }
 }

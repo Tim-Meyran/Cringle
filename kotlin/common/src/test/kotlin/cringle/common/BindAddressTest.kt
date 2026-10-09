@@ -39,6 +39,14 @@ class BindAddressTest {
     }
 
     @Test
+    fun theComponentsOfAMachineTakeLoopbackOrAllOnly() {
+        assertNull(BindAddress.interfaceChoice(null))
+        assertNull(BindAddress.interfaceChoice(" loopback "))
+        assertEquals("all", BindAddress.interfaceChoice("All"))
+        assertThrows<IllegalArgumentException> { BindAddress.interfaceChoice("192.0.2.7") }
+    }
+
+    @Test
     fun aNameThatDoesNotResolveIsRefusedWithAMessage() {
         val e = assertThrows<IllegalArgumentException> { BindAddress.socketAddress("no-such-host.invalid", 1) }
         assertTrue(e.message!!.contains("no-such-host.invalid") && e.message!!.contains("loopback, all"), e.message)

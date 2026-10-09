@@ -19,6 +19,15 @@ class EngineArgsTest {
     }
 
     @Test
+    fun bindTakesLoopbackOrAllAndNothingElse() {
+        assertEquals("all", EngineArgs.parse(listOf("--id", "e1", "--bind", "ALL")).bind)
+        assertEquals("loopback", EngineArgs.parse(listOf("--id", "e1", "--bind", "loopback")).bind)
+        assertNull(EngineArgs.parse(listOf("--id", "e1")).bind)
+        bad("--id", "e1", "--bind", "192.0.2.7")
+        bad("--id", "e1", "--bind")
+    }
+
+    @Test
     fun defaults() {
         val a = EngineArgs.parse(listOf("--id", "e1"))
         assertNull(a.name)
