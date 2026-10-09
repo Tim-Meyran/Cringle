@@ -1,22 +1,32 @@
 name: CI
 
+# What runs when (docs/ci.md):
+#   pull request            fast suite (`build`) on Linux and Windows; the label `full-ci` adds the integration tests on Linux
+#   push to master          fast suite on both, integration tests on Linux
+#   nightly, by hand        everything on both systems
+# A push to another branch runs nothing (its pull request does); changes of documents only run nothing.
 on:
   push:
-    branches: ["**"]
+    branches: [master]
+    paths-ignore: ["docs/**", "**/*.md", "LICENSE", "NOTICE"]
   pull_request:
-    branches: ["**"]
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore: ["docs/**", "**/*.md", "LICENSE", "NOTICE"]
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# one runner runs one job at a time: a newer push to the same branch replaces the run that is still going
+# one runner runs one job at a time: a newer push to the same ref replaces the run that is still going
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build & Test (${{ matrix.name }})
+  fast:
+    name: Build & fast tests (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -41,30 +51,46 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build with Gradle
-        run: ./gradlew build integrationTest --no-daemon
+        run: ./gradlew build --no-daemon --build-cache
 
-  installer-linux:
-    name: Installer (${{ matrix.image }})
+  integration-linux:
+    name: Integration tests (linux)
+    # not on a pull request without the label `full-ci`
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: [self-hosted, Linux, X64, rocky]
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [ubuntu:24.04, debian:stable]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Test install.sh in a container
-        run: installer/tests/test-install-container.sh ${{ matrix.image }}
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
 
-  installer-windows:
-    name: Installer (windows)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Integration tests
+        run: ./gradlew integrationTest --no-daemon --build-cache
+
+  integration-windows:
+    name: Integration tests (windows)
+    # only the nightly run and a run by hand: the Windows runner is the slowest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, Windows, X64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # the runner is administrative: this includes the tests of the service and of PATH
-      - name: Test install.ps1
-        shell: powershell
-        run: .\installer\tests\InstallerTest.ps1
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Integration tests
+        run: ./gradlew integrationTest --no-daemon --build-cache
