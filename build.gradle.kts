@@ -63,9 +63,23 @@ subprojects {
     // Test classes run in several JVMs at once; `-PtestForks=1` turns it off. Tests use ports and directories of their own (port 0, temp dirs), so forks do not meet.
     val testForks = providers.gradleProperty("testForks").map { it.toInt() }.orElse((Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4))
 
+    // The tests and the processes they start write to a temporary folder of their own, emptied before every run: on Windows netty leaves a
+    // 3 MB DLL (netty_tcnative) per JVM in the temp folder that nobody deletes (4000 of them were 11 GB), and the tests leave folders.
+    // The folder is below the system temp folder, not in build/, to keep the paths short (nested Gradle builds run in it).
+    fun Test.ownTempDir() {
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "cringle-tests/${project.name}-$name")
+        doFirst {
+            delete(tempDir)
+            tempDir.mkdirs()
+        }
+        systemProperty("java.io.tmpdir", tempDir.absolutePath)
+        for (variable in listOf("TMP", "TEMP", "TMPDIR")) environment(variable, tempDir.absolutePath)
+    }
+
     tasks.named<Test>("test") {
         useJUnitPlatform { excludeTags("integration") }
         maxParallelForks = testForks.get()
+        ownTempDir()
     }
 
     tasks.register<Test>("integrationTest") {
@@ -77,6 +91,10 @@ subprojects {
         useJUnitPlatform { includeTags("integration") }
         maxParallelForks = testForks.get()
         usesService(integrationTestLock)
+        ownTempDir()
+        // the processes that these tests start (engines, daemons) live for seconds: a quick start matters more than peak speed.
+        // Not for cli and gradle-plugin: their tests compare the output of a JVM ("Picked up JAVA_TOOL_OPTIONS") and run nested Gradle builds.
+        if (project.name in setOf("management-server", "daemon", "engine")) environment("JAVA_TOOL_OPTIONS", "-XX:TieredStopAtLevel=1 -XX:+UseSerialGC")
         shouldRunAfter(tasks.named("test"))
     }
 }
