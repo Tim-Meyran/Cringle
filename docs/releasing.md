@@ -62,7 +62,20 @@ If there is no Java, or it is older than 21, or its version cannot be read, the 
 
 The version of a release is the Git tag without the leading `v`: the tag `v1.2.3` is version `1.2.3`, `v1.2.3-rc.1` is the pre-release `1.2.3-rc.1`. The build takes it from the property `releaseVersion` (`./gradlew cringleDist -PreleaseVersion=1.2.3`); a build without it is `0.0.0-SNAPSHOT`, so a local `./gradlew cringleDist` writes `cringle-0.0.0-SNAPSHOT-linux.tar.gz` and so on. A version that is not `MAJOR.MINOR.PATCH` with an optional `-pre-release` fails the build.
 
-## Making a release
+## The version
+
+There is no version in a file. A release gets its version from the build property `releaseVersion` (`-PreleaseVersion=1.2.3`), which is the Git tag without the leading `v`; a build without it is `0.0.0-SNAPSHOT`. The Gradle plugin and the test builds use their own local version (`localPublishVersion` in `build.gradle.kts`) and are not part of a release.
+
+## Making a release with one command (#276)
+
+```bash
+./gradlew build integrationTest -PreleaseVersion=0.6.0            # the tests run against the version of the release
+./gradlew cringleRelease -PreleaseVersion=0.6.0 [-PreleaseTag]    # prepares build/dist
+```
+
+`cringleRelease` fails at once without a real version (not `0.0.0-SNAPSHOT`); it builds `cringleDist`, downloads WinSW (pinned URL and SHA-256 in `build.gradle.kts`, cached in `build/downloads`; `-PwinswUrl` and `-PwinswSha256` replace them for one run, a `file:` URL works), copies `winsw.exe`, `install.sh` and `install.ps1` to `build/dist/`, rewrites `SHA256SUMS` with the archives and `winsw.exe`, checks every line against its file and prints the files and the commands that publish the release (`git tag`, `git push origin v0.6.0`, `gh release create ... [--prerelease]`). With `-PreleaseTag` it also creates the local tag `v0.6.0` (it refuses on a dirty work tree or an existing tag). It runs no tests, and it never pushes and never creates the release: those two commands are yours.
+
+## Making a release step by step
 
 > **Note:** GitHub does not start Actions for this repository at the moment (billing), so `.github/workflows/release.yml` has never run and is **not verified**. Make releases by hand as described below. Do not push test tags.
 
