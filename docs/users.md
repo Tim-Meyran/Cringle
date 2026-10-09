@@ -21,6 +21,7 @@ A role is **global** (the `roles` of a user or group, as before) or **scoped**: 
   | remote routers, `ListTrust`, `AddTrustedComponent`, `RemoveTrust` | `function:trust` |
   | `SetPluginTrust` | `function:plugin-trust` |
   | user service (`UserService`) | `function:users` |
+  | settings of a machine (`ListConfig`, `GetConfig` need `READ`; `SetConfig`, `UnsetConfig` need `ADMINISTER`; #316) | `machine:<id>` or `function:config` |
   | `AddMachine`, `RemoveMachine`, `Recover`, a list or query without a filter that is not scoped | the role globally |
   | packages of the repository (`PublishPackage`, `ListPackages`, `ListVersions`, `GetPackage`, `DownloadPackage`) | the role globally or for any scope (the repository is not scoped yet) |
 

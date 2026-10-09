@@ -71,9 +71,15 @@ internal class CompanionProcess(
             val started = launch()
             if (started != null) {
                 process = started
+                if (stopped) {
+                    // close() ran while the program was being started: it did not see the new process, so it is ended here
+                    started.destroyForcibly()
+                    break
+                }
                 val code = try {
                     started.waitFor()
                 } catch (e: InterruptedException) {
+                    started.destroyForcibly()
                     break
                 }
                 if (!stopped) log.warn("{} ended with exit code {}", name, code)
@@ -149,6 +155,8 @@ public data class Companions(
     val webPort: Int? = null,
     val repositoryPort: Int? = null,
     val command: EngineCommand = EngineCommand(),
+    /** The public address of the web interface (`--web-url`), `null` for the `Host` header (#314). */
+    val webUrl: String? = null,
 ) {
     /** Whether the daemon runs at least one program. */
     val any: Boolean get() = managementPort != null || repositoryPort != null
