@@ -84,13 +84,13 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
                 "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td class=\"num\">{}</td>{}</tr>",
                 badge(if (d.kind == "schema") "schema" else "blueprint", if (d.kind == "schema") Tone.INFO else Tone.NEUTRAL), d.name, d.version, d.revision,
                 actionsCell(
-                    h("<a class=\"btn small\" href=\"/{}/{}\">{}</a>", if (d.kind == "schema") "schemas" else "blueprints", d.name, if (session.can(Permission.OPERATE)) "Edit" else "Open"),
+                    h("<a class=\"btn small\" href=\"/{}/{}\">{}</a>", if (d.kind == "schema") "schemas" else "blueprints", d.name, if (session.canAnywhere(Permission.OPERATE)) "Edit" else "Open"),
                     button(session, Permission.OPERATE, "Publish", "$base/publish", "Publish ${d.kind} ${d.name} ${d.version} to the repository?"),
                     button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete the draft ${d.name}?"),
                 ),
             )
         }
-        val form = if (!session.can(Permission.OPERATE)) {
+        val form = if (!session.canAnywhere(Permission.OPERATE)) {
             Html("")
         } else {
             h(
@@ -131,7 +131,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val model = SchemaForm.toModel(draft.content)
         val data = Json.encodeToString(JsonObject.serializer(), JsonObject(model + ("version" to kotlinx.serialization.json.JsonPrimitive(draft.version))))
         val base = "/schemas/${draft.name}"
-        val canSave = session.can(Permission.OPERATE)
+        val canSave = session.canAnywhere(Permission.OPERATE)
         return html(
             pageHeader("Schema ${draft.name}", "Types for the data that blocks exchange. The document below is checked while you type.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")),
             raw("<datalist id=\"standard-types\"><option>cringle.std/String</option><option>cringle.std/Boolean</option><option>cringle.std/Int</option><option>cringle.std/Double</option><option>cringle.std/Bytes</option><option>cringle.std/Timestamp</option><option>cringle.std/Empty</option><option>cringle.std/Error</option></datalist>"),

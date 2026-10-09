@@ -30,6 +30,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             val address = req.form["address"].orEmpty().trim()
             var confirm: Html? = null
             val error = attempt {
+                req.session!!.require(Permission.ADMINISTER, core.access.function("trust"))
                 val (host, port) = hostPort(address)
                 val actual = TlsHelper.probeServerFingerprint(host, port)
                 confirm = h(
@@ -42,6 +43,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         // step two: trust exactly the fingerprint that was confirmed; the router refuses if its key is another one
         r.post("/trust/routers", Permission.ADMINISTER) { req ->
             val error = attempt {
+                req.session!!.require(Permission.ADMINISTER, core.access.function("trust"))
                 val fingerprint = req.form["fingerprint"].orEmpty().trim().lowercase()
                 if (!PublicKeyFingerprint.pattern.matches(fingerprint)) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "'$fingerprint' is not a SHA-256 fingerprint (64 hexadecimal characters)")
                 core.router().addRemoteRouter(AddRemoteRouterRequest.newBuilder().setAddress(req.form["address"].orEmpty().trim()).setExpectedFingerprint(fingerprint).build())
@@ -49,15 +51,15 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             fragment(trust(req.session!!, error, null))
         }
         r.post("/trust/routers/remove", Permission.ADMINISTER) { req ->
-            fragment(trust(req.session!!, attempt { core.router().removeRemoteRouter(RemoveRemoteRouterRequest.newBuilder().setAddress(req.form["address"].orEmpty()).build()) }, null))
+            fragment(trust(req.session!!, attempt { req.session!!.require(Permission.ADMINISTER, core.access.function("trust")); core.router().removeRemoteRouter(RemoveRemoteRouterRequest.newBuilder().setAddress(req.form["address"].orEmpty()).build()) }, null))
         }
         r.post("/trust/components", Permission.ADMINISTER) { req ->
-            val error = attempt { core.addTrustedComponent(req.form["fingerprint"].orEmpty(), req.form["name"].orEmpty(), req.form["kind"].orEmpty(), req.form["address"].orEmpty().trim()) }
+            val error = attempt { req.session!!.require(Permission.ADMINISTER, core.access.function("trust")); core.addTrustedComponent(req.form["fingerprint"].orEmpty(), req.form["name"].orEmpty(), req.form["kind"].orEmpty(), req.form["address"].orEmpty().trim()) }
             fragment(trust(req.session!!, error, null))
         }
         r.post("/trust/revoke", Permission.ADMINISTER) { req ->
             var done: Html? = null
-            val error = attempt { done = h("Revoked ({} entries removed).", core.removeTrust(req.form["fingerprint"].orEmpty())) }
+            val error = attempt { req.session!!.require(Permission.ADMINISTER, core.access.function("trust")); done = h("Revoked ({} entries removed).", core.removeTrust(req.form["fingerprint"].orEmpty())) }
             fragment(trust(req.session!!, error, done))
         }
 
@@ -66,6 +68,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         r.post("/packages/upload", Permission.OPERATE, UPLOAD_LIMIT) { req ->
             var done: String? = null
             val error = attempt {
+                if (!req.session!!.canAnywhere(Permission.OPERATE)) req.session!!.require(Permission.OPERATE, emptyList())
                 val file = Multipart.parse(req.headers["content-type"], req.body).firstOrNull { it.name == "file" && !it.filename.isNullOrEmpty() }
                     ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "choose a package file")
                 val m = publishPackage(core, file.data)
@@ -80,6 +83,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 else -> null
             }
             val error = attempt {
+                req.session!!.require(Permission.ADMINISTER, core.access.function("plugin-trust"))
                 if (trust == null) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "trust must be trusted or untrusted")
                 core.repository().setPluginTrust(SetPluginTrustRequest.newBuilder().setName(req.params.getValue("name")).setTrust(trust).build())
             }
@@ -94,7 +98,9 @@ internal class TrustPackagePages(private val core: ManagementCore) {
     }
 
     private suspend fun trust(session: Session, error: String?, extra: Any?): Html {
-        val admin = session.can(Permission.ADMINISTER)
+        val trustScope = core.access.function("trust")
+        if (!session.canFor(Permission.READ, trustScope)) return notice("PERMISSION_DENIED: insufficient rights for ${trustScope.joinToString()}")
+        val admin = session.canFor(Permission.ADMINISTER, trustScope)
         val entries = core.listTrust().map {
             h(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
@@ -157,7 +163,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             h(
                 "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td class=\"num\">{}</td><td>{}</td>{}</tr>",
                 badge(if (plugin) "plugin" else "project", if (plugin) Tone.INFO else Tone.NEUTRAL), p.name, p.version, p.sizeBytes, if (plugin) stateBadge(trust) else Html(""),
-                if (plugin && session.can(Permission.ADMINISTER)) {
+                if (plugin && session.canFor(Permission.ADMINISTER, core.access.function("plugin-trust"))) {
                     actionsCell(
                         h(
                             "<form hx-post=\"/packages/{}/trust\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"trust\" value=\"{}\"><button title=\"All versions of the plugin\">{}</button></form>",
@@ -169,7 +175,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 },
             )
         }
-        val upload = if (!session.can(Permission.OPERATE)) {
+        val upload = if (!session.canAnywhere(Permission.OPERATE)) {
             Html("")
         } else {
             h(
