@@ -285,6 +285,100 @@ tasks.register("cringleDist") {
     dependsOn(distManifest)
 }
 
+// --- A release in one command (#276, docs/releasing.md) ---
+//
+// `./gradlew cringleRelease -PreleaseVersion=1.2.3` builds the distribution, adds WinSW and the installers, writes SHA256SUMS
+// for everything and prints the commands that publish the release. It tags (`-PreleaseTag`, local only) but never pushes and
+// never creates the release. The four constants are the one place to change for a new WinSW version; -PwinswUrl and
+// -PwinswSha256 replace the URL and the checksum for one run (a file: URL works).
+val winswVersion = "2.12.0"
+val winswUrl = "https://github.com/winsw/winsw/releases/download/v$winswVersion/WinSW.NET461.exe"
+val winswSha256 = "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f"
+
+// fails before anything is built if the version is missing
+val releaseGuard = tasks.register("cringleReleaseCheck") {
+    group = "distribution"
+    description = "Fails unless -PreleaseVersion names a real version."
+    doLast {
+        if (!providers.gradleProperty("releaseVersion").isPresent || releaseVersion == "0.0.0-SNAPSHOT") {
+            throw GradleException("cringleRelease needs the version of the release: -PreleaseVersion=1.2.3 (or 1.2.3-rc.1); it is the Git tag without the leading v")
+        }
+    }
+}
+tasks.named("cringleDist") { mustRunAfter(releaseGuard) }
+
+tasks.register("cringleRelease") {
+    group = "distribution"
+    description = "Prepares build/dist for a GitHub release (needs -PreleaseVersion): archives, WinSW, installers, SHA256SUMS; -PreleaseTag tags locally."
+    dependsOn(releaseGuard, "cringleDist")
+    val url = providers.gradleProperty("winswUrl").orElse(winswUrl)
+    val sha256 = providers.gradleProperty("winswSha256").orElse(winswSha256)
+    val downloads = layout.buildDirectory.dir("downloads")
+    doLast {
+        val dist = distDir.get().asFile
+        // WinSW: download once, check, keep in build/downloads
+        val expected = sha256.get().lowercase()
+        val cached = Files.createDirectories(downloads.get().asFile.toPath()).resolve("WinSW-$winswVersion.exe").toFile()
+        if (cached.exists() && fileSha256(cached) != expected) cached.delete()
+        if (!cached.exists()) {
+            logger.lifecycle("downloading ${url.get()}")
+            val connection = URI(url.get()).toURL().openConnection().apply { connectTimeout = 30_000; readTimeout = 120_000 }
+            val partial = File(cached.path + ".part")
+            connection.getInputStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+            val actual = fileSha256(partial)
+            if (actual != expected) {
+                partial.delete()
+                throw GradleException("the WinSW download ${url.get()} has the wrong SHA-256: expected $expected, found $actual; the file was deleted")
+            }
+            check(partial.renameTo(cached)) { "cannot move $partial to $cached" }
+        }
+        Files.copy(cached.toPath(), dist.toPath().resolve("winsw.exe"), StandardCopyOption.REPLACE_EXISTING)
+        for (installer in listOf("install.sh", "install.ps1")) {
+            Files.copy(projectDir.toPath().resolve("installer/$installer"), dist.toPath().resolve(installer), StandardCopyOption.REPLACE_EXISTING)
+        }
+        // SHA256SUMS: the archives (as cringleDist wrote them) and winsw.exe
+        val sums = dist.resolve("SHA256SUMS")
+        val lines = sums.readLines().filter { it.isNotBlank() && !it.endsWith("  winsw.exe") } + "${fileSha256(dist.resolve("winsw.exe"))}  winsw.exe"
+        sums.writeText(lines.joinToString("\n", postfix = "\n"))
+        // every line has to match its file, and both archives of this version have to be there
+        for (line in lines) {
+            val (hash, name) = line.split("  ", limit = 2)
+            val file = dist.resolve(name)
+            check(file.isFile) { "SHA256SUMS names $name, which is not in $dist" }
+            check(fileSha256(file) == hash) { "SHA256SUMS has the wrong checksum for $name" }
+        }
+        val archives = listOf("cringle-$releaseVersion-linux.tar.gz", "cringle-$releaseVersion-windows.zip")
+        archives.forEach { check(lines.any { l -> l.endsWith("  $it") }) { "SHA256SUMS does not list $it" } }
+        val tag = "v$releaseVersion"
+        if (providers.gradleProperty("releaseTag").isPresent) {
+            fun git(vararg args: String): Pair<Int, String> {
+                val process = ProcessBuilder(listOf("git") + args).directory(projectDir).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                return process.waitFor() to output
+            }
+            val (_, dirty) = git("status", "--porcelain")
+            if (dirty.isNotEmpty()) throw GradleException("the work tree is not clean, so no tag is made:\n$dirty")
+            if (git("rev-parse", "-q", "--verify", "refs/tags/$tag").first == 0) throw GradleException("the tag $tag exists already")
+            val (code, output) = git("tag", tag)
+            if (code != 0) throw GradleException("git tag $tag failed: $output")
+            logger.lifecycle("created the local tag $tag")
+        }
+        val files = archives + listOf("SHA256SUMS", "manifest.json", "winsw.exe", "install.sh", "install.ps1")
+        val prerelease = if ('-' in releaseVersion) " --prerelease" else ""
+        logger.lifecycle(
+            buildString {
+                appendLine("Release $releaseVersion is ready in $dist:")
+                files.forEach { appendLine("  $it") }
+                appendLine()
+                appendLine("Next (tests: ./gradlew build integrationTest -PreleaseVersion=$releaseVersion must have passed):")
+                if (!providers.gradleProperty("releaseTag").isPresent) appendLine("  git tag $tag")
+                appendLine("  git push origin $tag")
+                appendLine("  (cd build/dist && gh release create $tag ${files.joinToString(" ")} --title \"Cringle $releaseVersion\" --generate-notes$prerelease)")
+            },
+        )
+    }
+}
+
 // --- The Windows distribution with an embedded JRE (#155, docs/releasing.md) ---
 //
 // `./gradlew cringleWindowsRuntime -PreleaseVersion=1.2.3` writes build/dist-stage/windows-jre/cringle-<version>/: the
