@@ -1,0 +1,24 @@
+{
+  "namespace": "cringle.stdblocks",
+  "types": {
+    "TimerTriggerConfig": {
+      "record": {
+        "intervalMs": "cringle.std/Int",
+        "initialDelayMs": { "optional": "cringle.std/Int" },
+        "count": { "optional": "cringle.std/Int" }
+      }
+    },
+    "ConstantConfig": {
+      "record": {
+        "value": "cringle.std/String"
+      }
+    },
+    "LogConfig": {
+      "record": {
+        "level": { "optional": "LogLevel" },
+        "prefix": { "optional": "cringle.std/String" }
+      }
+    },
+    "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
+  }
+}

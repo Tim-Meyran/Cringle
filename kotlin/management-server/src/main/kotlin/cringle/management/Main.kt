@@ -117,6 +117,8 @@ private fun runManagementServer(args: Array<String>) {
     Runtime.getRuntime().addShutdownHook(Thread({ certificateWatcher.close(); server.close() }, "management-shutdown"))
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
+    // a new installation has blocks in the palette of the editor: the plugin cringle-std goes into the repository once
+    StdBlocksInstaller(core).startInBackground()
     println("management-port=${server.port}")
     if (cringle.common.BindAddress.isOpen(bind)) {
         LoggerFactory.getLogger("cringle.management").warn("listening on {}, not only on the loopback interface: the server is reachable from the network", bind)

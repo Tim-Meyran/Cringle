@@ -29,6 +29,7 @@ val modules = listOf(
     "common",
     "testkit",
     "gradle-plugin",
+    "stdblocks",
 )
 
 for (m in modules) {
