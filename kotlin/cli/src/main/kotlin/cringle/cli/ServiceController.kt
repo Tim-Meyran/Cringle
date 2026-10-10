@@ -29,23 +29,38 @@ internal class SystemdServiceController : ServiceController {
     override fun isActive(name: String): Boolean = exec("systemctl", "is-active", "--quiet", name).first == 0
 }
 
-/** The Windows services of install.ps1. */
-internal class WindowsServiceController : ServiceController {
+/**
+ * The Windows services of install.ps1. [command] runs `sc.exe` (replaceable in tests), [stopTimeout] bounds the wait for a stop: WinSW takes up to its
+ * `stoptimeout` of 60 s to end the daemon, and until the service is `STOPPED` it refuses a start.
+ */
+internal class WindowsServiceController(
+    private val command: (Array<String>) -> Pair<Int, String> = { exec(*it) },
+    private val stopTimeout: Duration = Duration.ofSeconds(120),
+    private val pollInterval: Duration = Duration.ofMillis(500),
+) : ServiceController {
     override fun activeServices(): List<String> = listOf("cringle-daemon", "cringle-management").filter { isActive(it) }
 
     override fun stop(name: String) {
-        exec("sc.exe", "stop", name)
-        val deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos()
-        while (System.nanoTime() < deadline) {
-            if (!isActive(name)) return
-            Thread.sleep(500)
+        command(arrayOf("sc.exe", "stop", name))
+        val deadline = System.nanoTime() + stopTimeout.toNanos()
+        while (true) {
+            // `sc query` of a service that does not exist fails: nothing to wait for
+            val (exit, output) = command(arrayOf("sc.exe", "query", name))
+            if (exit != 0 || output.contains("STOPPED")) return
+            if (System.nanoTime() >= deadline) break
+            Thread.sleep(pollInterval.toMillis())
         }
-        throw IllegalStateException("$name did not stop within 90 seconds")
+        throw IllegalStateException("$name did not stop within ${stopTimeout.seconds} seconds")
     }
 
-    override fun start(name: String) { exec("sc.exe", "start", name) }
+    override fun start(name: String) {
+        val (exit, output) = command(arrayOf("sc.exe", "start", name))
+        // 1056: the service is already running
+        if (exit != 0 && exit != 1056) throw IllegalStateException("sc start $name failed (exit code $exit): ${output.trim()}")
+    }
+
     override fun restart(name: String) { stop(name); start(name) }
-    override fun isActive(name: String): Boolean = exec("sc.exe", "query", name).second.contains("RUNNING")
+    override fun isActive(name: String): Boolean = command(arrayOf("sc.exe", "query", name)).second.contains("RUNNING")
 }
 
 /** Runs a command and returns its exit code and output; throws if it does not end within 120 seconds. */
