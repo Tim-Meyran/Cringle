@@ -434,6 +434,8 @@ After=$3
 [Service]
 User=$SERVICE_USER
 Group=$SERVICE_USER
+# the service user may open ports below 1024 (a web interface on 443, say); the programs the daemon starts inherit it
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=CRINGLE_HOME=$RUN_DATA
 EnvironmentFile=-$RUN_ENV
 ExecStart=$4

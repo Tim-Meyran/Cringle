@@ -71,6 +71,10 @@ cringle config unset [machine] management.web.url   # the default is in effect a
 sudo cringle setup --bind all --web-port 9443       # this machine, without a management server; asks without options
 ```
 
+**Ports below 1024** (a web interface on 443 or 80): the unit of the installer gives the service user `AmbientCapabilities=CAP_NET_BIND_SERVICE`, which the programs the daemon starts inherit, so `cringle setup --web-port 443` works without root. An installation from before has to run the installer again (or add that line in a drop-in, `systemctl edit cringle-daemon`). The web interface speaks HTTPS only: for a certificate of a known authority put a reverse proxy in front of it (`reverse_proxy https://127.0.0.1:8443` with `tls_insecure_skip_verify` in Caddy) and set `management.web.url` to the address of the proxy. A port that another program holds (`ss -ltnp`) fails the same way; the management server then ends with a line that says so, not a stack trace.
+
+**When a program does not stay up.** The daemon logs `management ended with exit code 1` and starts it again (after 1, 2, 4 ... up to 30 seconds). The reason is the last lines the program wrote to its error output: the daemon repeats them in its own log (`journalctl -u cringle-daemon`, `<home>/logs/daemon-main.log`: `management said: ...`); the whole output is in `<home>/daemon/logs/management.err.log` and `management.out.log` (also `repository.*`).
+
 The installer options (`--bind`, `--components`, `--port`, `--web-port`, `--web-url`, `--repository-port`, `--daemon-port`; Windows: `-Bind` ...) and its questions write the same keys. Rights: reading needs `READ`, changing `ADMINISTER`, for the machine or for the function `config` (`users.md`). `bind` and the other settings of one machine do not reach other machines: every daemon has its own store.
 
 After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
