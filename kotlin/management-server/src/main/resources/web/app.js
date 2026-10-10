@@ -389,18 +389,26 @@ document.addEventListener('htmx:responseError', function (event) {
   var save = document.getElementById('save-blueprint');
   var saving = false;
   var autosaveTimer = null;
-  var lastSaved = JSON.stringify(editor.export()) + JSON.stringify(options);
+  // everything that is saved: the graph, the options of the tethers and the fields below the editor (not the revision)
+  function stateKey() {
+    var v = values();
+    delete v.revision;
+    return JSON.stringify(v);
+  }
+  var lastSaved = null;
   function values() {
     return {
       graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
-      provides: document.getElementById('provides').value, roles: document.getElementById('roles').value,
+      provides: document.getElementById('provides').value, fabrics: document.getElementById('fabrics').value,
+      schemas: Array.prototype.filter.call(document.querySelectorAll('.schema-pick'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(','),
       version: document.getElementById('version').value, revision: document.getElementById('revision').value,
     };
   }
+  lastSaved = stateKey();
   function saveNow() {
     if (!save || saving) return Promise.resolve();
     saving = true;
-    var state = JSON.stringify(editor.export()) + JSON.stringify(options);
+    var state = stateKey();
     return htmx.ajax('POST', host.dataset.saveUrl, { source: host, target: '#result', swap: 'morph:innerHTML', values: values() })
       .then(function () { lastSaved = state; })
       .finally(function () { saving = false; });
@@ -413,10 +421,11 @@ document.addEventListener('htmx:responseError', function (event) {
     if (!autosave || !autosave.checked) return;
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(function () {
-      if (JSON.stringify(editor.export()) + JSON.stringify(options) !== lastSaved) saveNow();
+      if (stateKey() !== lastSaved) saveNow();
     }, 2000);
   }
-  ['version', 'roles', 'provides'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  ['version', 'fabrics', 'provides'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  document.querySelectorAll('.schema-pick').forEach(function (c) { c.addEventListener('change', changed); });
   editor.on('nodeDataChanged', function () { changed(); });
 
   // publishing: save first, then publish the saved draft

@@ -175,6 +175,70 @@ class WebBlueprintTest {
         assertTrue(reloaded.contains("cringle-external"), reloaded)
     }
 
+    private fun connectedGraph() = graph(
+        node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))),
+        node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))),
+    )
+
+    private fun publishedProject(name: String, version: String): cringle.packaging.ProjectPackage {
+        val f = Files.createTempFile(name, ".zip")
+        Files.copy(PackageRepository(dir.resolve("repo")).file(name, version), f, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        return cringle.packaging.PackageReader.readProject(f)
+    }
+
+    @Test
+    fun severalFabricsAreSavedAndPublished() {
+        val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.0.0", "fabrics" to "2 | a, b | zone=x, tier=1\n1", "revision" to "1")).body()
+        assertTrue(saved.contains("Saved as revision 2"), saved)
+        assertTrue(admin.get("/blueprints/flow-app").body().contains("2 | a, b | zone=x, tier=1"))
+        assertTrue(admin.post("/drafts/project/flow-app/publish").body().contains("Published flow-app 1.0.0"))
+        val fabrics = publishedProject("flow-app", "1.0.0").manifest.fabrics
+        assertEquals(listOf(2, 1), fabrics.map { it.instances })
+        assertEquals(listOf("a", "b"), fabrics[0].roles)
+        assertEquals(mapOf("zone" to "x", "tier" to "1"), fabrics[0].labels)
+        assertEquals(emptyList<String>(), fabrics[1].roles)
+    }
+
+    @Test
+    fun aBadFabricLineIsRefusedWithItsNumber() {
+        fun save(text: String) = admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.0.0", "fabrics" to text, "revision" to "1")).body()
+        assertTrue(save("1\nmany | a").contains("fabric line 2"))
+        assertTrue(save("1 | a | zone").contains("key=value"))
+        assertTrue(save("1 | a | b | c").contains("three parts"))
+        assertTrue(save("  ").contains("at least one fabric"))
+        assertTrue(admin.get("/blueprints/flow-app").body().contains("revision") )
+    }
+
+    @Test
+    fun anOldDraftWithRolesIsReadAsOneFabric() {
+        // saved the old way: a form with `roles` only
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.0.0", "roles" to "edge", "revision" to "1")).body().contains("Saved as revision 2"))
+        assertTrue(admin.get("/blueprints/flow-app").body().contains(">1 | edge</textarea>"))
+        assertTrue(admin.post("/drafts/project/flow-app/publish").body().contains("Published flow-app 1.0.0"))
+        val fabrics = publishedProject("flow-app", "1.0.0").manifest.fabrics
+        assertEquals(1, fabrics.size)
+        assertEquals(listOf("edge"), fabrics.single().roles)
+    }
+
+    @Test
+    fun schemaDraftsAreBundledIntoTheProjectPackage() {
+        assertTrue(admin.post("/drafts", mapOf("kind" to "schema", "name" to "flow-types")).body().contains("flow-types"))
+        val model = """{"namespace": "acme.flowtypes", "types": [{"name": "Tick", "kind": "record", "values": "", "fields": [{"name": "n", "type": "cringle.std/Int", "wrap": ""}]}]}"""
+        assertTrue(admin.post("/schemas/flow-types/save", mapOf("model" to model, "version" to "1.0.0", "revision" to "1")).body().contains("The document is valid"))
+        assertTrue(admin.get("/blueprints/flow-app").body().contains("class=\"schema-pick\" value=\"flow-types\""))
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.0.0", "schemas" to "flow-types", "revision" to "1")).body().contains("Saved as revision 2"))
+        assertTrue(admin.get("/blueprints/flow-app").body().contains("schema-pick\" value=\"flow-types\" checked"))
+        assertTrue(admin.post("/drafts/project/flow-app/publish").body().contains("Published flow-app 1.0.0"))
+        val read = publishedProject("flow-app", "1.0.0")
+        assertEquals(listOf("schemas/acme.flowtypes.json"), read.manifest.schemas)
+        assertTrue(read.schemas.getValue("schemas/acme.flowtypes.json").contains("Tick"))
+
+        // a schema draft that was deleted fails the publish with its name
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.1.0", "schemas" to "flow-types,gone", "revision" to "2")).body().contains("Saved as revision 3"))
+        val refused = admin.post("/drafts/project/flow-app/publish").body()
+        assertTrue(refused.contains("gone") && refused.contains("of this project does not exist"), refused)
+    }
+
     @Test
     fun theServerDecidesWhetherTwoPortsMayBeConnected() {
         assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("acme-flow/src", 1, "acme-flow/sink", 1))

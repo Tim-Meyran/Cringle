@@ -232,6 +232,9 @@ textarea.invalid { border-color: var(--danger); }
 #editor-bar .check { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
 #editor-bar #result { flex: 1 1 16rem; min-width: 0; }
 #editor-bar #result p { margin: 0; }
+#fabrics-box summary, #schemas-box summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2) 0; }
+#fabrics-box[open], #schemas-box[open] { flex-basis: 100%; }
+#schemas-box .check { display: flex; gap: var(--space-2); }
 #services-box summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2) 0; }
 #services-box[open] { flex-basis: 100%; }
 #palette h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
