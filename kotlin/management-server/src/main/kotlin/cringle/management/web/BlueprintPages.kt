@@ -57,6 +57,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         r.post("/blueprints/{name}/save", Permission.OPERATE) { req ->
             var saved: Draft? = null
             var problems: List<PackageProblem> = emptyList()
+            var blocks = 0
             val error = attempt {
                 val name = req.params.getValue("name")
                 val snapshot = catalog.snapshot()
@@ -68,10 +69,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 } catch (e: GraphException) {
                     throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, e.message ?: "invalid graph")
                 }
+                blocks = blueprint.blocks.size
                 problems = PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/$name.json")
                 saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), roles(req.form["roles"].orEmpty())), req.form["revision"]?.toLongOrNull())
             }
-            fragment(result(error, saved, problems))
+            fragment(result(error, saved, problems, blocks))
         }
     }
 
@@ -191,30 +193,44 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val provides = blueprint.provides.joinToString("\n") { "${it.service}=${it.block}.${it.port}" + (it.type?.let { t -> ":$t" } ?: "") }
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)
         val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) }
+        val paletteGroups = snapshot.plugins.filter { it.manifest.blocks.isNotEmpty() }.map { p ->
+            html(
+                h("<h3>{}</h3>", p.manifest.name),
+                p.manifest.blocks.map { b -> h("<button type=\"button\" data-block=\"{}/{}\" title=\"{}/{}\">{}</button>", p.manifest.name, b.name, p.manifest.name, b.name, b.name) },
+            )
+        }
+        val paletteBody = if (paletteGroups.isEmpty()) {
+            raw("<p class=\"empty\">No plugin with blocks is in the repository yet. Publish a plugin with <code>cringlePublish</code>; it is then listed on <a href=\"/packages\">Packages</a>.</p>")
+        } else {
+            html(raw("<input type=\"search\" id=\"palette-search\" placeholder=\"Search blocks\" aria-label=\"Search blocks\">"), paletteGroups)
+        }
         return html(
             pageHeader("Blueprint ${draft.name}", "Add blocks from the left, connect an output to an input; the server checks every connection.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a><a class=\"btn\" href=\"/deployments\">Deployments</a>")),
             if (kept > 0) h("<p class=\"info\">{} tethers (to other engines or services) are not drawn; they are kept as they are when you save.</p>", kept) else Html(""),
+            raw("<div id=\"editor-bar\">"),
+            field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
+            field("Roles of the fabric", h("<input id=\"roles\" value=\"{}\" placeholder=\"role, role\" title=\"engines with all these roles run it\">", roles)),
+            raw("<details id=\"services-box\"><summary>Provided services</summary>"),
+            h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
+            raw("<small>service=block.port, one per line</small></details>"),
+            h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
+            if (canSave) raw("<button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button>") else Html(""),
+            raw("<div id=\"result\" role=\"status\"></div></div>"),
             h(
                 "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\">",
                 palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base,
             ),
             raw("<aside id=\"palette\"><h2>Blocks</h2>"),
-            snapshot.plugins.flatMap { p -> p.manifest.blocks.map { b -> h("<button type=\"button\" data-block=\"{}/{}\" title=\"{}\">{}</button>", p.manifest.name, b.name, p.manifest.name, b.name) } },
-            raw("</aside><div id=\"drawflow\"></div><aside id=\"properties\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside></div>"),
-            raw("<div id=\"blueprint-meta\">"),
-            field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
-            field("Roles of the fabric", h("<input id=\"roles\" value=\"{}\" placeholder=\"role, role\">", roles), "engines with all these roles run it"),
-            field("Provided services", h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides), "service=block.port, one per line"),
-            h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
-            if (canSave) raw("<button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button>") else Html(""),
-            raw("</div><div id=\"result\"></div>"),
+            paletteBody,
+            raw("</aside><div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
+            raw("<aside id=\"properties\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside></div>"),
         )
     }
 
-    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>): Html = html(
+    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>, blocks: Int): Html = html(
         notice(error),
         if (saved != null) html(info("Saved as revision ${saved.revision}."), h("<input type=\"hidden\" id=\"revision\" value=\"{}\" hx-swap-oob=\"true\">", saved.revision)) else Html(""),
-        if (error == null && problems.isEmpty()) info("The blueprint is valid.") else Html(""),
+        if (error == null && problems.isEmpty()) info(if (blocks == 0) "The blueprint has no block yet; add one to be able to publish it." else "The blueprint is valid.") else Html(""),
         if (problems.isNotEmpty()) html(raw("<p class=\"error\">The blueprint has problems:</p><ul>"), problems.map { h("<li><code>{}</code> {}</li>", it.path, it.message) }, raw("</ul>")) else Html(""),
     )
 }

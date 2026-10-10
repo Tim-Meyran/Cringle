@@ -84,6 +84,37 @@ class WebBlueprintTest {
         admin.post("/blueprints/flow-app/check", mapOf("fromBlock" to from, "fromOutput" to "$out", "toBlock" to to, "toInput" to "$input")).body()
 
     @Test
+    fun anEmptyBlueprintIsNotReportedAsValid() {
+        val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to graph(), "options" to "{}", "version" to "1.0.0", "roles" to "", "revision" to "1")).body()
+        assertTrue(saved.contains("Saved as revision 2") && saved.contains("has no block yet"), saved)
+        assertFalse(saved.contains("The blueprint is valid"), saved)
+    }
+
+    @Test
+    fun thePaletteIsGroupedByPlugin() {
+        val page = admin.get("/blueprints/flow-app").body()
+        assertTrue(page.contains("<h3>acme-flow</h3>") && page.contains("id=\"palette-search\"") && page.contains("id=\"canvas-hint\"") && page.contains("id=\"editor-bar\""), page)
+    }
+
+    @Test
+    fun thePaletteSaysSoWhenThereIsNoPlugin() {
+        val repo = PackageRepository(dir.resolve("empty-repo"))
+        val users = UserManager(FileUserStore(dir.resolve("empty-users.json")))
+        val token = users.bootstrap()!!
+        val tls = ManagementTls(dir.resolve("empty-tls"))
+        val repository = tls.startRepository(repo)
+        closeables += AutoCloseable { repository.stop() }
+        val empty = tls.core(ManagementStore(dir.resolve("empty-state.json")), "127.0.0.1:${repository.port}")
+        closeables += empty
+        val server = WebServer(empty, users, 0, failedLoginDelay = java.time.Duration.ZERO).start()
+        closeables += server
+        val client = WebTestClient(server.port, tls.identity.publicKeyFingerprint).login(token)
+        client.post("/drafts", mapOf("kind" to "project", "name" to "none"))
+        val page = client.get("/blueprints/none").body()
+        assertTrue(page.contains("No plugin with blocks is in the repository yet") && page.contains("href=\"/packages\"") && !page.contains("palette-search"), page)
+    }
+
+    @Test
     fun theServerDecidesWhetherTwoPortsMayBeConnected() {
         assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("acme-flow/src", 1, "acme-flow/sink", 1))
         val schema = check("acme-flow/src", 1, "acme-flow/numbers", 1)
