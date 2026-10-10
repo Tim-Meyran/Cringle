@@ -154,6 +154,9 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle dwh list` | `GET /dwh/list` |
 | `cringle dwh query` | `GET /dwh/records` |
 | `cringle dwh record` | `POST /dwh/recording` |
+| `cringle debug break` | `POST /debug/break` |
+| `cringle debug state` | `GET /debug/list` |
+| `cringle debug resume` | `POST /debug/resume` |
 | `cringle dwh retention` | `POST /dwh/retention` |
 | `cringle router add` | `POST /trust/routers` |
 | `cringle router remove` | `POST /trust/routers/remove` |
@@ -247,4 +250,8 @@ A new token (Users page) is shown, once and sticky in `#flash`, as the value, as
 ### Invite links (#303)
 
 *Invites* (Administer) creates the link and its QR code as a sticky `flash`, like a new token; the list holds only the state (open, used by, expired, revoked) and *Revoke*. The public pages `GET|POST /invite/{secret}` need no session (and no CSRF token, which only applies to routes with a permission). Checked in headless Chromium with Playwright: the link opens the form, redeeming shows the token, login link and QR code, the login link signs in a fresh context, and the invite link in `#flash` is still there after the 5 s refresh. See `docs/users.md`.
+
+## Page: remote debugger (#323)
+
+`GET /debug` and `GET /debug/list` show the fabrics that have a breakpoint or hold values: the breakpoints (with *Remove*), the held values (tether, sender output, receiver input, since when, the value as JSON, shortened to 4096 characters) and *Step* (release the oldest, the breakpoint stays so the next value is held) and *Resume all*. `POST /debug/break` (fabric, tether, mode `on|off`) sets or removes a breakpoint, `POST /debug/resume` (fabric, tether optional, `one`) releases values. Every route needs `OPERATE` for the fabric. The list holds only state; messages go into `#flash`. See `debugging.md`.
 

@@ -595,6 +595,32 @@ internal val COMMANDS: List<Command> = listOf(
         env.m.setRecording(cringle.management.v1.SetRecordingRequest.newBuilder().setFabric(a.positional[0]).setAll(on).setDefaultRetention(retentionOf(a)).build())
         Output.Message("recording of ${a.positional[0]} is ${if (on) "on" else "off"}")
     },
+    // --- remote debugging (#323) ---
+    Command(
+        listOf("debug", "break"), "<fabric> <tether> on|off",
+        "Set or remove a breakpoint on a tether (as 'dwh list' names it, for example 'c.out -> s.in'): values on it are held back before the receiving block gets them; off releases them",
+        minArgs = 3, maxArgs = 3,
+    ) { env, a ->
+        val on = when (a.positional[2].lowercase()) { "on" -> true; "off" -> false; else -> throw UsageException("give on or off") }
+        env.m.setBreakpoint(cringle.management.v1.SetBreakpointRequest.newBuilder().setFabric(a.positional[0]).setTether(a.positional[1]).setEnabled(on).build())
+        Output.Message("breakpoint on ${a.positional[1]} of ${a.positional[0]} is ${if (on) "set" else "removed"}")
+    },
+    Command(listOf("debug", "state"), "<fabric>", "Show the breakpoints of a fabric and the values held at them (the output of the sender, the input of the receiver)", minArgs = 1, maxArgs = 1) { env, a ->
+        val s = env.m.getDebugState(cringle.management.v1.GetDebugStateRequest.newBuilder().setFabric(a.positional[0]).build())
+        Output.Rows(
+            s.heldList.map {
+                linkedMapOf<String, Any?>("id" to it.id, "tether" to it.tether, "from" to it.from, "to" to it.to, "kind" to it.kind, "since" to java.time.Instant.ofEpochMilli(it.sinceEpochMillis).toString(), "payload" to it.payload)
+            },
+            "no value is held; breakpoints: " + s.breakpointsList.ifEmpty { listOf("none") }.joinToString(", "),
+        )
+    },
+    Command(
+        listOf("debug", "resume"), "<fabric> [<tether>]", "Release the held values of a fabric (of one tether, or of all); --one releases only the oldest and keeps the breakpoints, so the next value is held again",
+        listOf(flag("one", "release only the oldest value (step)")), 1, 2,
+    ) { env, a ->
+        val r = env.m.resumeFabric(cringle.management.v1.ResumeFabricRequest.newBuilder().setFabric(a.positional[0]).setTether(a.positional.getOrElse(1) { "" }).setOne(a.flag("one")).build())
+        Output.Message("released ${r.released} value(s)", mapOf("released" to r.released))
+    },
     Command(
         listOf("dwh", "retention"), "<fabric> <block|tether> <name>", "Set the retention of a partition (no option: no limit)", retentionOptions, 3,
     ) { env, a ->

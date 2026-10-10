@@ -34,6 +34,15 @@ service EngineManagementService {
   // Sets the retention of a partition of the data warehouse (a block or a tether of a fabric).
   rpc SetDwhRetention(SetDwhRetentionRequest) returns (SetDwhRetentionResponse);
 
+  // Remote debugging (Architecture 16.4): a breakpoint on a tether holds back every value before the receiving block gets it, until it is resumed.
+  rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
+
+  // The breakpoints of a fabric and the values held at them (the output of the sender, the input of the receiver).
+  rpc GetDebugState(GetDebugStateRequest) returns (GetDebugStateResponse);
+
+  // Releases held values: the oldest one or all, of one tether or of all.
+  rpc ResumeFabric(ResumeFabricRequest) returns (ResumeFabricResponse);
+
   // The records of a partition of the data warehouse (a block or a tether of a fabric): the newest `limit`, oldest first.
   rpc QueryDwh(QueryDwhRequest) returns (QueryDwhResponse);
 
@@ -108,6 +117,51 @@ message SetRecordingRequest {
 }
 
 message SetRecordingResponse {}
+
+message SetBreakpointRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  // The tether as the data warehouse names it, for example `c.out -> s.in`.
+  string tether = 2;
+  // false removes the breakpoint and releases what it held.
+  bool enabled = 3;
+}
+
+message SetBreakpointResponse {}
+
+message GetDebugStateRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+}
+
+// A value held at a breakpoint.
+message HeldValue {
+  int64 id = 1;
+  string tether = 2;
+  // The sending end and the receiving end as `block.port`.
+  string from = 3;
+  string to = 4;
+  // message, request, response, stream-opened, stream-item or bytes.
+  string kind = 5;
+  // The value as JSON text (bytes as a hex dump), shortened to 4096 characters.
+  string payload = 6;
+  int64 since_epoch_millis = 7;
+}
+
+message GetDebugStateResponse {
+  repeated string breakpoints = 1;
+  repeated HeldValue held = 2;
+}
+
+message ResumeFabricRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  // Only the values of this tether; empty for all.
+  string tether = 2;
+  // Release only the oldest value (the breakpoints stay, so the next one is held again: stepping).
+  bool one = 3;
+}
+
+message ResumeFabricResponse {
+  int32 released = 1;
+}
 
 enum DwhKind {
   DWH_KIND_UNSPECIFIED = 0;

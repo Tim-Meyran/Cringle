@@ -45,7 +45,7 @@ class WebShellTest : ServiceTestBase() {
         val page = admin.get("/machines").body()
         assertEquals(listOf("Overview", "Operate", "Observe", "Build", "Administer"), groupsOf(page))
         assertEquals(listOf("Dashboard"), entriesOf(page, "Overview"))
-        assertEquals(listOf("Machines", "Engines", "Fabrics", "Deployments"), entriesOf(page, "Operate"))
+        assertEquals(listOf("Machines", "Engines", "Fabrics", "Deployments", "Debugger"), entriesOf(page, "Operate"))
         assertEquals(listOf("Logs", "Metrics", "Data warehouse"), entriesOf(page, "Observe"))
         assertEquals(listOf("Drafts"), entriesOf(page, "Build"))
         assertEquals(setOf("Users", "Groups", "Invites", "Registries", "Trust", "Packages"), entriesOf(page, "Administer").toSet())

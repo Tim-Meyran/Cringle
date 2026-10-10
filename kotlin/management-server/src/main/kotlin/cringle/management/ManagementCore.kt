@@ -571,6 +571,28 @@ public class ManagementCore(
         }
     }
 
+    /** Sets or removes a breakpoint on a tether of [fabric] (remote debugging, #323). */
+    public suspend fun setBreakpoint(fabric: String, tether: String, enabled: Boolean) {
+        val record = fabricRecord(fabric)
+        runningEngine(record.machine, record.engineId).setBreakpoint(
+            cringle.engine.v1.SetBreakpointRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).setTether(tether).setEnabled(enabled).build(),
+        )
+    }
+
+    /** The breakpoints of [fabric] and the values held at them. */
+    public suspend fun debugState(fabric: String): cringle.engine.v1.GetDebugStateResponse {
+        val record = fabricRecord(fabric)
+        return runningEngine(record.machine, record.engineId).getDebugState(cringle.engine.v1.GetDebugStateRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).build())
+    }
+
+    /** Releases held values of [fabric] (of [tether], or of all if empty; only the oldest if [one]); returns how many. */
+    public suspend fun resumeFabric(fabric: String, tether: String, one: Boolean): Int {
+        val record = fabricRecord(fabric)
+        return runningEngine(record.machine, record.engineId).resumeFabric(
+            cringle.engine.v1.ResumeFabricRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).setTether(tether).setOne(one).build(),
+        ).released
+    }
+
     /** Sets the retention of a partition of [fabric] on its Engine. */
     public suspend fun setDwhRetention(request: cringle.management.v1.SetDwhRetentionRequest) {
         val record = fabricRecord(request.fabric)

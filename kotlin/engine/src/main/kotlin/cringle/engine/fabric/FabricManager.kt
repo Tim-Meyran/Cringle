@@ -8,6 +8,7 @@ import cringle.contract.MigrationScope
 import cringle.contract.Driver
 import cringle.engine.drivers.BuiltinDrivers
 import cringle.engine.tether.TetherConfig
+import cringle.engine.tether.TetherInterceptor
 import cringle.engine.tether.TetherObserver
 import cringle.engine.EngineArgs
 import cringle.engine.classloading.ContractClassLoader
@@ -92,6 +93,15 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
     public fun setRecording(id: String, all: Boolean, default: cringle.packaging.RecordConfig?) {
         find(id).setRecording(all, default)
     }
+
+    /** Sets or removes a breakpoint on a tether of the fabric [id] (#323). */
+    public fun setBreakpoint(id: String, tether: String, enabled: Boolean): Unit = find(id).setBreakpoint(tether, enabled)
+
+    /** The breakpoints of the fabric [id] and the values held at them. */
+    public fun debugState(id: String): FabricDebugger.State = find(id).debugState()
+
+    /** Releases the values held at the breakpoints of the fabric [id]; returns how many. */
+    public fun resume(id: String, tether: String?, one: Boolean): Int = find(id).resume(tether, one)
 
     /** Replaces the instances of services that the fabric [id] calls, without a redeploy (see [FabricRuntime.updateServiceBindings]). */
     public fun updateServiceBindings(id: String, bindings: List<ServiceBinding>) {
@@ -252,6 +262,7 @@ public class LocalFabricDeployer(
                 DataMigrations(base, units)
             }
             val recorder = builtin?.let { cringle.engine.dwh.TetherRecorder(it.dwh, request.fabricId) { message -> paths.fileLogger().log(FabricLogger.Level.WARN, message) } }
+            val debugger = tethers?.let { FabricDebugger() }
             return FabricRuntime(
                 FabricSpec(
                     id = request.fabricId,
@@ -262,7 +273,8 @@ public class LocalFabricDeployer(
                     wiring = wiring,
                     tethers = tethers?.let {
                         TetherConfig(
-                            registry, it.bufferCapacity, it.requestTimeout, listOfNotNull(it.observer, recorder).let { o -> if (o.size < 2) o.firstOrNull() else TetherObserver { t, k, p -> o.forEach { x -> x.observe(t, k, p) } } }, it.interceptor,
+                            registry, it.bufferCapacity, it.requestTimeout, listOfNotNull(it.observer, recorder).let { o -> if (o.size < 2) o.firstOrNull() else TetherObserver { t, k, p -> o.forEach { x -> x.observe(t, k, p) } } },
+                            listOfNotNull(it.interceptor, debugger).let { i -> if (i.size < 2) i.firstOrNull() else TetherInterceptor { t, k, p -> i.forEach { x -> x.beforeDelivery(t, k, p) } } },
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
                             it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
                             remote = remoteTethers?.portsFor(request.fabricId),
@@ -275,6 +287,7 @@ public class LocalFabricDeployer(
                     watchdog = watchdog,
                     onClose = loaders,
                     recorder = recorder,
+                    debugger = debugger,
                     migrations = migrations,
                 ),
             )

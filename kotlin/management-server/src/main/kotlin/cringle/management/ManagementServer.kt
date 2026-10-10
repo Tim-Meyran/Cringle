@@ -313,6 +313,20 @@ public class ManagementServer(
                 .build()
         }
 
+        override suspend fun setBreakpoint(request: cringle.management.v1.SetBreakpointRequest): cringle.management.v1.SetBreakpointResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
+            core.setBreakpoint(request.fabric, request.tether, request.enabled)
+            cringle.management.v1.SetBreakpointResponse.getDefaultInstance()
+        }
+
+        override suspend fun getDebugState(request: cringle.management.v1.GetDebugStateRequest): cringle.management.v1.GetDebugStateResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
+            val state = core.debugState(request.fabric)
+            cringle.management.v1.GetDebugStateResponse.newBuilder().addAllBreakpoints(state.breakpointsList).addAllHeld(state.heldList).build()
+        }
+
+        override suspend fun resumeFabric(request: cringle.management.v1.ResumeFabricRequest): cringle.management.v1.ResumeFabricResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
+            cringle.management.v1.ResumeFabricResponse.newBuilder().setReleased(core.resumeFabric(request.fabric, request.tether, request.one)).build()
+        }
+
         override suspend fun setRecording(request: cringle.management.v1.SetRecordingRequest): cringle.management.v1.SetRecordingResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
             core.setRecording(request.fabric, request.all, if (request.hasDefaultRetention()) request.defaultRetention else null)
             cringle.management.v1.SetRecordingResponse.getDefaultInstance()
@@ -432,6 +446,9 @@ public class ManagementServer(
             "QueryDwh" to Permission.READ,
             "ListDwhPartitions" to Permission.READ,
             "SetRecording" to Permission.OPERATE,
+            "SetBreakpoint" to Permission.OPERATE,
+            "GetDebugState" to Permission.OPERATE,
+            "ResumeFabric" to Permission.OPERATE,
             "SetDwhRetention" to Permission.OPERATE,
             "AddRemoteRouter" to Permission.ADMINISTER,
             "RemoveRemoteRouter" to Permission.ADMINISTER,
