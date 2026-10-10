@@ -7,6 +7,10 @@
 #   sudo ./install.sh --uninstall [--purge]
 #
 #   --release <version>  install this version (default: the latest release)
+#   --from-build <dir>   install a Cringle that was built locally instead of a release: <dir> is the output of `./gradlew cringleDist`
+#                        (build/dist). It holds cringle-<version>-linux.tar.gz and SHA256SUMS; the version is the one of the archive (give
+#                        --release if there are several). Nothing is downloaded, the checksum is checked as for a release.
+#                        `sudo ./gradlew cringleInstallLocal` builds and runs this.
 #   --components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
 #                        user logins), repository (the package repository), both separated by a comma, or none. Default: both.
 #   --daemon-only        the same as --components none
@@ -82,6 +86,7 @@ usage() {
 }
 
 RELEASE=""
+FROM_BUILD=""
 WITH_MANAGEMENT=0
 DAEMON_ONLY=0
 START=0
@@ -219,6 +224,11 @@ while [ $# -gt 0 ]; do
             RELEASE="${2#v}"
             shift 2
             ;;
+        --from-build)
+            [ $# -ge 2 ] || die "--from-build needs the folder of the build (build/dist)"
+            FROM_BUILD="$2"
+            shift 2
+            ;;
         --release=*)
             RELEASE="${1#--release=}"
             RELEASE="${RELEASE#v}"
@@ -267,7 +277,7 @@ if [ -n "$SET_BIND" ]; then
         *) die "--bind needs loopback or all, not '$SET_BIND'" ;;
     esac
 fi
-if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT$SET_COMPONENTS$SET_WEB_URL" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ] || [ "$NO_ASK" -eq 1 ]; }; then
+if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT$SET_COMPONENTS$SET_WEB_URL" ] || [ -n "$RELEASE" ] || [ -n "$FROM_BUILD" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ] || [ "$NO_ASK" -eq 1 ]; }; then
     die "--uninstall cannot be combined with --release, --components, --daemon-only, --bind, a port or --start"
 fi
 if [ -n "$RELEASE" ]; then
@@ -485,9 +495,14 @@ install_release() {
     version="$1"
     archive="cringle-$version-linux.tar.gz"
 
-    info "downloading Cringle $version"
-    download "$BASE_URL/v$version/$archive" "$TMP_DIR/$archive"
-    download "$BASE_URL/v$version/SHA256SUMS" "$TMP_DIR/SHA256SUMS"
+    if [ -n "$FROM_BUILD" ]; then
+        cp "$FROM_BUILD/$archive" "$TMP_DIR/$archive" || die "$FROM_BUILD/$archive is missing: run ./gradlew cringleDist"
+        cp "$FROM_BUILD/SHA256SUMS" "$TMP_DIR/SHA256SUMS" || die "$FROM_BUILD/SHA256SUMS is missing: run ./gradlew cringleDist"
+    else
+        info "downloading Cringle $version"
+        download "$BASE_URL/v$version/$archive" "$TMP_DIR/$archive"
+        download "$BASE_URL/v$version/SHA256SUMS" "$TMP_DIR/SHA256SUMS"
+    fi
     verify_checksum "$archive"
 
     check_java
@@ -560,7 +575,18 @@ fi
 
 ask_settings
 TMP_DIR=$(mktemp -d)
-if [ -z "$RELEASE" ]; then
+if [ -n "$FROM_BUILD" ]; then
+    [ -d "$FROM_BUILD" ] || die "--from-build: $FROM_BUILD is not a folder (the output of ./gradlew cringleDist is build/dist)"
+    if [ -z "$RELEASE" ]; then
+        # the version of the archive that is there
+        set -- "$FROM_BUILD"/cringle-*-linux.tar.gz
+        [ -f "$1" ] || die "--from-build: $FROM_BUILD has no cringle-<version>-linux.tar.gz (run ./gradlew cringleDist)"
+        [ $# -eq 1 ] || die "--from-build: $FROM_BUILD has several archives, give the version with --release"
+        RELEASE=$(basename "$1" -linux.tar.gz)
+        RELEASE=${RELEASE#cringle-}
+    fi
+    info "installing the local build $RELEASE from $FROM_BUILD"
+elif [ -z "$RELEASE" ]; then
     [ "$BASE_URL" = "$REPO_RELEASES/download" ] || die "give the version with --release <version> when CRINGLE_RELEASE_BASE_URL is set"
     RELEASE=$(latest_release)
     info "the latest release is $RELEASE"

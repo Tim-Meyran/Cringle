@@ -137,6 +137,18 @@ To run what you built yourself instead of a release, use Gradle in a PowerShell 
 
 Without Gradle: `.\gradlew.bat cringleDist`, then `.\installer\install.ps1 -FromBuild build\dist` (`-Version` is needed only if `build\dist` holds several versions). WinSW is taken from `build\dist\winsw.exe` if it is there and otherwise downloaded (pinned version, checksum checked, as in a release). On Linux run `sudo installer/install.sh` with `CRINGLE_RELEASE_BASE_URL=file://<dir>` (a folder `v<version>` with the archive and `SHA256SUMS`); Gradle tasks for Linux do not exist yet.
 
+### A locally built Cringle (Linux)
+
+The same three Gradle tasks work on Linux. They install below `/opt`, `/etc` and `/var`, so they need root: start Gradle with `sudo` (root needs a JDK 21: `sudo env JAVA_HOME=$JAVA_HOME ./gradlew ...`), or leave the `sudo` out if your user may run `sudo` without a password (the task then calls `sudo -n` itself):
+
+```
+sudo ./gradlew cringleInstallLocal --console=plain --no-daemon     # build cringleDist and install it
+sudo ./gradlew cringleUpdateLocal --console=plain --no-daemon      # build again and install over the existing installation, restart the services
+sudo ./gradlew cringleUninstallLocal --console=plain --no-daemon   # remove it (the data stays; -Ppurge removes it too)
+```
+
+The tasks build `cringleDist` and run `installer/install.sh --from-build build/dist --release <version> --no-ask --start`: nothing is downloaded, the checksum of the archive is checked like for a release, and the settings are the ones the installation has (or the defaults; use `cringle config` or `cringle setup` afterwards). Options: `-PreleaseVersion=1.2.3`, `-PdaemonOnly`, `-PnoStart` (enabled, not started), `-Ppurge` (with the uninstall task). `-PinstallRoot=<folder>` makes it a trial installation below that folder, without root and without systemd (what the tests of the installer do). Without Gradle: `./gradlew cringleDist`, then `sudo installer/install.sh --from-build build/dist`.
+
 ## Manual setup
 
 The installers do what is described here; you only need it for a setup of your own.
