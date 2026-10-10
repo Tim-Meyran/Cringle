@@ -19,6 +19,8 @@ import cringle.packaging.ProvidedService
 import cringle.packaging.TetherDef
 import cringle.contract.TetherType
 import cringle.router.users.Permission
+import cringle.schema.SchemaParseException
+import cringle.schema.SchemaParser
 import java.io.ByteArrayOutputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -77,18 +79,35 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 }
                 blocks = blueprint.blocks.size
                 problems = PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/$name.json")
-                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), roles(req.form["roles"].orEmpty())), req.form["revision"]?.toLongOrNull())
+                val fabrics = req.form["fabrics"]?.let { parseFabrics(it) } ?: req.form["roles"]?.let { listOf(FabricLine(1, roles(it), emptyMap())) } ?: previous?.let { fabricsOf(it) } ?: listOf(FabricLine(1, emptyList(), emptyMap()))
+                val schemas = req.form["schemas"]?.let { names(it) } ?: previous?.let { schemasOf(it) }.orEmpty()
+                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas), req.form["revision"]?.toLongOrNull())
             }
             fragment(result(error, saved, problems, blocks))
         }
     }
 
     /** What a new project draft contains. */
-    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), emptyList())
+    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), listOf(FabricLine(1, emptyList(), emptyMap())), emptyList())
 
-    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, roles: List<String>): JsonElement = buildJsonObject {
+    /** One fabric of the project: [instances] copies of the blueprint on the engines that have all [roles] and [labels]. */
+    private data class FabricLine(val instances: Int, val roles: List<String>, val labels: Map<String, String>)
+
+    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, fabrics: List<FabricLine>, schemas: List<String>): JsonElement = buildJsonObject {
         put("blueprint", Json.parseToJsonElement(ManifestJson.encode(blueprint)))
-        put("roles", JsonArray(roles.map { JsonPrimitive(it) }))
+        put(
+            "fabrics",
+            JsonArray(
+                fabrics.map { f ->
+                    buildJsonObject {
+                        put("instances", f.instances)
+                        put("roles", JsonArray(f.roles.map { JsonPrimitive(it) }))
+                        put("labels", JsonObject(f.labels.mapValues { JsonPrimitive(it.value) }))
+                    }
+                },
+            ),
+        )
+        put("schemas", JsonArray(schemas.map { JsonPrimitive(it) }))
         put("ui", buildJsonObject { put("positions", JsonObject(positions.mapValues { (_, p) -> JsonArray(listOf(JsonPrimitive(p.first), JsonPrimitive(p.second))) })) })
     }
 
@@ -96,6 +115,51 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         ManifestJson.parseBlueprint(draft.content.jsonObject.getValue("blueprint").toString(), "draft ${draft.name}")
     } catch (e: Exception) {
         null
+    }
+
+    /** The fabrics of a draft; a draft from before the fabrics has the list `roles` and so one fabric. */
+    private fun fabricsOf(draft: Draft): List<FabricLine> {
+        val o = draft.content.jsonObject
+        o["fabrics"]?.jsonArray?.let { list ->
+            return list.map { e ->
+                val f = e.jsonObject
+                FabricLine(
+                    f["instances"]?.jsonPrimitive?.content?.toIntOrNull() ?: 1,
+                    f["roles"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(),
+                    f["labels"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content }.orEmpty(),
+                )
+            }
+        }
+        return listOf(FabricLine(1, o["roles"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(), emptyMap()))
+    }
+
+    private fun schemasOf(draft: Draft): List<String> = draft.content.jsonObject["schemas"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+
+    private fun names(text: String): List<String> = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    /** One fabric per line: `instances | roles | labels` (`2 | edge, gpu | zone=a, tier=1`); roles and labels are optional. */
+    private fun parseFabrics(text: String): List<FabricLine> {
+        fun bad(line: Int, message: String): Nothing = throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "fabric line $line: $message")
+        val lines = text.lines().withIndex().filter { it.value.isNotBlank() }.map { (i, l) ->
+            val parts = l.split('|').map { it.trim() }
+            if (parts.size > 3) bad(i + 1, "write instances | roles | labels, not more than three parts")
+            val instances = parts[0].toIntOrNull()?.takeIf { it >= 1 } ?: bad(i + 1, "the number of instances is a whole number of at least 1, not '${parts[0]}'")
+            val labels = names(parts.getOrNull(2).orEmpty()).associate { pair ->
+                if ('=' !in pair || pair.startsWith("=")) bad(i + 1, "a label is written key=value, not '$pair'")
+                pair.substringBefore('=').trim() to pair.substringAfter('=').trim()
+            }
+            FabricLine(instances, names(parts.getOrNull(1).orEmpty()), labels)
+        }
+        if (lines.isEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "a project needs at least one fabric: write at least 1 (one instance)")
+        return lines
+    }
+
+    private fun fabricsText(fabrics: List<FabricLine>): String = fabrics.joinToString("\n") { f ->
+        buildString {
+            append(f.instances)
+            if (f.roles.isNotEmpty() || f.labels.isNotEmpty()) append(" | ").append(f.roles.joinToString(", "))
+            if (f.labels.isNotEmpty()) append(" | ").append(f.labels.entries.joinToString(", ") { "${it.key}=${it.value}" })
+        }
     }
 
     private fun roles(text: String): List<String> = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }
@@ -189,15 +253,26 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val snapshot = catalog.snapshot()
         val used = blueprint.blocks.map { it.block.substringBefore('/') }.distinct()
         val plugins = used.map { name -> snapshot.plugins.firstOrNull { it.manifest.name == name } ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the plugin '$name' is not in the repository") }
-        val roles = draft.content.jsonObject["roles"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+        val schemas = LinkedHashMap<String, String>()
+        for (schemaName in schemasOf(draft)) {
+            val schemaDraft = drafts.load("schema", schemaName) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the schema draft '$schemaName' of this project does not exist")
+            val text = pretty.encodeToString(JsonObject.serializer(), schemaDraft.content.jsonObject)
+            val document = try {
+                SchemaParser.parse(text, "draft $schemaName")
+            } catch (e: SchemaParseException) {
+                throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the schema draft '$schemaName': ${e.message}")
+            }
+            if (document.types.isEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the schema draft '$schemaName' defines no type")
+            if (schemas.put("schemas/${document.namespace}.json", text) != null) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "two schema drafts have the namespace ${document.namespace}")
+        }
         val manifest = ProjectManifest(
             draft.name, draft.version, plugins.associate { it.manifest.name to "^${it.manifest.version}" },
-            listOf("blueprints/${blueprint.name}.json"), emptyList(), listOf(FabricConfig(blueprint.name, 1, roles, emptyMap())),
+            listOf("blueprints/${blueprint.name}.json"), schemas.keys.toList(), fabricsOf(draft).map { FabricConfig(blueprint.name, it.instances, it.roles, it.labels) },
         )
-        val project = ProjectPackage(manifest, listOf(blueprint), emptyMap(), emptyList())
+        val project = ProjectPackage(manifest, listOf(blueprint), schemas, emptyList())
         val problems = PackageValidator.validateProjectSources(project) + PackageValidator.validateProject(project, plugins)
         if (problems.isNotEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, problems.joinToString("; ") { "${it.path}: ${it.message}" })
-        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), emptyMap(), emptyMap(), it) }.toByteArray()
+        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, emptyMap(), it) }.toByteArray()
         val m = publishPackage(core, bytes)
         return "Published ${m.name} ${m.version}; deploy it on the deployments page"
     }
@@ -230,7 +305,16 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         val base = "/blueprints/${draft.name}"
         val canSave = session.canAnywhere(Permission.OPERATE)
-        val roles = draft.content.jsonObject["roles"]?.jsonArray?.joinToString(", ") { it.jsonPrimitive.content }.orEmpty()
+        val fabrics = fabricsText(fabricsOf(draft))
+        val chosen = schemasOf(draft).toSet()
+        val schemaDrafts = drafts.list("schema")
+        val schemaBox = if (schemaDrafts.isEmpty()) {
+            raw("<p class=\"empty\">No schema draft yet. Write one on <a href=\"/drafts\">Drafts</a>; a project can carry the schemas it needs.</p>")
+        } else {
+            html(
+                schemaDrafts.map { d -> h("<label class=\"check\"><input type=\"checkbox\" class=\"schema-pick\" value=\"{}\"{}> {}</label>", d.name, if (d.name in chosen) raw(" checked") else Html(""), d.name) },
+            )
+        }
         val provides = blueprint.provides.joinToString("\n") { "${it.service}=${it.block}.${it.port}" + (it.type?.let { t -> ":$t" } ?: "") }
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)
         val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) } + BlueprintGraph.unresolved(blueprint, snapshot::block).size
@@ -250,7 +334,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             if (kept > 0) h("<p class=\"info\">{} tethers cannot be shown in the editor; they are kept as they are when you save.</p>", kept) else Html(""),
             raw("<div id=\"editor-bar\">"),
             field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
-            field("Roles of the fabric", h("<input id=\"roles\" value=\"{}\" placeholder=\"role, role\" title=\"engines with all these roles run it\">", roles)),
+            raw("<details id=\"fabrics-box\"><summary>Fabrics</summary>"),
+            h("<textarea id=\"fabrics\" rows=\"3\" cols=\"44\" placeholder=\"2 | edge, gpu | zone=a\">{}</textarea>", fabrics),
+            raw("<small>one fabric per line: instances | roles | labels (roles and labels are optional)</small></details>"),
+            raw("<details id=\"schemas-box\"><summary>Schemas of the project</summary>"),
+            schemaBox,
+            raw("</details>"),
             raw("<details id=\"services-box\"><summary>Provided services</summary>"),
             h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
             raw("<small>service=block.port, one per line</small></details>"),
