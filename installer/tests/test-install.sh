@@ -219,6 +219,26 @@ printf '[Service]\nExecStart=/opt/cringle/current/bin/cringle-daemon --port 7400
 run --release 1.0.0 > /dev/null 2>&1 || fail "upgrade of an oldest installation failed"
 eq "an oldest installation with management keeps it" "management,repository" "$(setting components)"
 
+echo "== a local build (--from-build)"
+new_root
+build_run() { CRINGLE_INSTALL_TTY=/nonexistent CRINGLE_INSTALL_ROOT="$ROOT" CRINGLE_RELEASE_BASE_URL=file:///nonexistent sh "$INSTALLER" "$@"; }
+if [ "$MODE" = staging ]; then
+    build_run --from-build "$RELEASES/v1.0.0" > "$WORK/outb" 2>&1 || { cat "$WORK/outb"; fail "install from a build failed"; }
+    eq "the version is the one of the archive" "1.0.0" "$(readlink "$P/opt/cringle/current")"
+    eq "cringle --version of the build" "cringle 1.0.0" "$("$P/usr/local/bin/cringle" --version 2>&1)"
+    ok "nothing was downloaded" grep -q 'installing the local build 1.0.0' "$WORK/outb"
+    not "a folder that is not there is refused" build_run --from-build "$WORK/nowhere"
+    not "an empty folder is refused" build_run --from-build "$WORK"
+    not "a tampered archive is refused" build_run --from-build "$RELEASES/v9.9.9"
+    mkdir -p "$WORK/two"
+    cp "$RELEASES/v1.0.0/cringle-1.0.0-linux.tar.gz" "$RELEASES/v2.0.0/cringle-2.0.0-linux.tar.gz" "$WORK/two/"
+    cat "$RELEASES/v1.0.0/SHA256SUMS" "$RELEASES/v2.0.0/SHA256SUMS" > "$WORK/two/SHA256SUMS"
+    not "several archives need the version" build_run --from-build "$WORK/two"
+    build_run --from-build "$WORK/two" --release 2.0.0 > /dev/null 2>&1 || fail "install of one of two archives failed"
+    eq "the version that was named" "2.0.0" "$(readlink "$P/opt/cringle/current")"
+    not "--from-build cannot be combined with --uninstall" build_run --uninstall --from-build "$RELEASES/v1.0.0"
+fi
+
 echo "== uninstall"
 echo "keep" > "$P/var/lib/cringle/state"
 run --uninstall > /dev/null 2>&1 || fail "uninstall failed"

@@ -512,23 +512,60 @@ tasks.register("cringleWindowsRuntime") {
     }
 }
 
-// --- Install, update and remove a locally built Cringle on Windows (installer/install.ps1 -FromBuild) ---
+// --- Install, update and remove a locally built Cringle (Windows: installer/install.ps1 -FromBuild, Linux: installer/install.sh --from-build) ---
 //
 // `.\gradlew.bat cringleInstallLocal` builds the distribution (cringleDist) and installs it like a release: program
 // files, the services and the PATH entry; install.ps1 asks for administrative rights (the Windows dialog) unless -PnoService is given.
+// On Linux `sudo ./gradlew cringleInstallLocal` does the same with install.sh (a user with passwordless sudo may leave out the sudo of the
+// command: the task then calls `sudo -n` itself). `-PinstallRoot=<folder>` there is a trial installation below that folder: no root, no systemd.
 // `cringleUpdateLocal` builds and installs over an existing installation (it fails if there is none; the services that were
 // running are started again). `cringleUninstallLocal` removes it (data stays; -Ppurge removes it too).
-// Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot, daemonOnly, noStart, noService, purge.
+// Options (-P...): releaseVersion (default 0.0.0-SNAPSHOT), installRoot, dataRoot (Windows), daemonOnly, noStart, noService (Windows), purge.
 fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks.register(taskName) {
     group = "distribution"
     description = text
     if (mode != "uninstall") dependsOn("cringleDist")
     doLast {
-        if (!System.getProperty("os.name").lowercase().contains("win")) {
-            throw GradleException("$taskName runs the PowerShell installer and works on Windows only; on Linux use `sudo installer/install.sh` (docs/daemon-service.md)")
-        }
         fun option(name: String): String? = providers.gradleProperty(name).orNull
         fun flag(name: String): Boolean = providers.gradleProperty(name).isPresent
+        if (!System.getProperty("os.name").lowercase().contains("win")) {
+            val trialRoot = option("installRoot")?.let { File(it).absoluteFile }
+            val installed = File(trialRoot ?: File("/"), "opt/cringle/current")
+            if (mode == "update" && !installed.exists()) {
+                throw GradleException("nothing is installed (no $installed): install it with `sudo ./gradlew cringleInstallLocal`")
+            }
+            val command = mutableListOf<String>()
+            if (trialRoot == null && System.getProperty("user.name") != "root") {
+                // the build has no terminal to ask for a password: sudo without one, or the person starts Gradle with sudo
+                val sudoWorks = runCatching { ProcessBuilder("sudo", "-n", "true").redirectErrorStream(true).start().waitFor() == 0 }.getOrDefault(false)
+                if (!sudoWorks) {
+                    throw GradleException(
+                        "$taskName installs below /opt, /etc and /var and needs root rights: run `sudo ./gradlew $taskName` " +
+                            "(root needs a JDK 21 in JAVA_HOME or on its PATH), or give -PinstallRoot=<folder> for a trial installation without root",
+                    )
+                }
+                command += listOf("sudo", "-n")
+            }
+            command += listOf("sh", projectDir.toPath().resolve("installer/install.sh").toString())
+            if (mode == "uninstall") {
+                command += "--uninstall"
+                if (flag("purge")) command += "--purge"
+            } else {
+                // no questions: the build has no terminal for them (the settings are the ones the installation has, or the defaults)
+                command += listOf("--from-build", distDir.get().asFile.path, "--release", releaseVersion, "--no-ask")
+                if (flag("daemonOnly")) command += "--daemon-only"
+                if (!flag("noStart")) command += "--start"
+            }
+            logger.lifecycle(command.joinToString(" "))
+            val builder = ProcessBuilder(command).redirectErrorStream(true)
+            trialRoot?.let { builder.environment()["CRINGLE_INSTALL_ROOT"] = it.path }
+            val process = builder.start()
+            val output = process.inputStream.bufferedReader().readText()
+            val result = process.waitFor()
+            if (output.isNotBlank()) logger.lifecycle(output.trim())
+            if (result != 0) throw GradleException("install.sh ended with exit code $result:\n${output.trim()}")
+            return@doLast
+        }
         val installRoot = option("installRoot") ?: File(System.getenv("ProgramFiles") ?: "C:\\Program Files", "Cringle").path
         if (mode == "update" && !File(installRoot, "current").exists()) {
             throw GradleException("nothing is installed in $installRoot (no 'current' link): install it with `.\\gradlew.bat cringleInstallLocal`")
@@ -554,9 +591,9 @@ fun registerLocalInstaller(taskName: String, text: String, mode: String) = tasks
     }
 }
 
-registerLocalInstaller("cringleInstallLocal", "Builds the distribution and installs it on this Windows machine (installer/install.ps1 -FromBuild).", "install")
+registerLocalInstaller("cringleInstallLocal", "Builds the distribution and installs it on this machine (Windows: installer/install.ps1 -FromBuild, Linux: installer/install.sh --from-build).", "install")
 registerLocalInstaller("cringleUpdateLocal", "Builds the distribution and installs it over the existing local installation (fails if there is none).", "update")
-registerLocalInstaller("cringleUninstallLocal", "Removes the Cringle that is installed on this Windows machine (the data stays unless -Ppurge).", "uninstall")
+registerLocalInstaller("cringleUninstallLocal", "Removes the Cringle that is installed on this machine (the data stays unless -Ppurge).", "uninstall")
 
 // --- Start the programs from the IDE -------------------------------------------------------------------------------------
 // One JavaExec task per program, group "cringle", so that the IDE can run and debug each of them from the Gradle tool window
