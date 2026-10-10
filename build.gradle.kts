@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
     alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlin.sam.with.receiver) apply false
     alias(libs.plugins.spotless)
     alias(libs.plugins.protobuf) apply false
 }
