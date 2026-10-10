@@ -54,6 +54,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             if (draft == null) web.problem(404, "Not found", "There is no such draft.", req) else web.render("Blueprint $name", req, editor(req.session!!, draft))
         }
         r.post("/blueprints/{name}/check", Permission.READ) { req -> json(check(req.form)) }
+        r.post("/blueprints/{name}/publish", Permission.OPERATE) { req ->
+            var done: String? = null
+            val error = attempt { done = publish(drafts.load("project", req.params.getValue("name")) ?: throw ManagementException(io.grpc.Status.Code.NOT_FOUND, "there is no such draft")) }
+            fragment(html(notice(error), done?.let { d -> html(info(d), raw("<p><a href=\"/deployments\">Go to the deployments</a></p>")) } ?: Html("")))
+        }
         r.post("/blueprints/{name}/save", Permission.OPERATE) { req ->
             var saved: Draft? = null
             var problems: List<PackageProblem> = emptyList()
@@ -214,11 +219,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
             raw("<small>service=block.port, one per line</small></details>"),
             h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
-            if (canSave) raw("<button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button>") else Html(""),
+            raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"undo\" title=\"Undo\">Undo</button><button type=\"button\" class=\"btn\" id=\"redo\" title=\"Redo\">Redo</button><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Reset the zoom\">Fit</button></div>"),
+            if (canSave) raw("<label class=\"check\"><input type=\"checkbox\" id=\"autosave\" checked> Autosave</label><button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button><button type=\"button\" class=\"btn\" id=\"publish-blueprint\" title=\"Save, then publish as a package\">Publish</button>") else Html(""),
             raw("<div id=\"result\" role=\"status\"></div></div>"),
             h(
-                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\">",
-                palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base,
+                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
+                palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
             ),
             raw("<aside id=\"palette\"><h2>Blocks</h2>"),
             paletteBody,
