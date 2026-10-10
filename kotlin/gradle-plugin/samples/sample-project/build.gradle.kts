@@ -15,6 +15,11 @@ cringle {
     name = "acme-shop"
     // The plugin the blocks of the blueprints come from. The build does not resolve it, the deploy does.
     dependency("acme-orders", "^1.2.0")
+    // A class of that plugin that migrates the data folder of a whole instance of this project when the version of the project changes
+    // (docs/migration-guide.md); optional, like the one for the downgrade.
+    processors {
+        update = "acme.orders.OrdersInstanceUpdate"
+    }
     // Two copies of the blueprint on every engine that has the role `edge` and the label `zone=a`.
     fabric("orders") {
         instances = 2

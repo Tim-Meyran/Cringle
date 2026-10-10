@@ -6,6 +6,7 @@ import cringle.packaging.FabricConfig
 import cringle.packaging.PackageProblem
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
+import cringle.packaging.ProcessorSet
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -27,6 +28,16 @@ class ProjectPackageFunctionalTest {
     lateinit var temp: Path
 
     @Test
+    fun aProcessorThatIsNotAClassNameFailsTheBuildWithTheValidatorsMessage() {
+        val project = SampleProject.copyTo(temp, "bad-processor")
+        val build = project.resolve("build.gradle.kts")
+        Files.writeString(build, Files.readString(build).replace("acme.orders.OrdersInstanceUpdate", "not a class"))
+        val result = SampleProject.runner(project, "cringlePackage").buildAndFail()
+        assertTrue(result.output.contains("processors.update: 'not a class' is not a class name"), result.output)
+        assertFalse(Files.exists(project.resolve("build/distributions/acme-shop-0.3.1.cringle")))
+    }
+
+    @Test
     fun theSampleBuildsAProjectPackageTheRuntimeAccepts() {
         val project = SampleProject.copyTo(temp, "first")
         val result = SampleProject.runner(project, "cringlePackage").build()
@@ -43,6 +54,7 @@ class ProjectPackageFunctionalTest {
         assertEquals(listOf("blueprints/orders.json"), pkg.manifest.blueprints)
         assertEquals(listOf("schemas/acme.shop.json"), pkg.manifest.schemas)
         assertEquals(listOf(FabricConfig("orders", 2, listOf("edge"), mapOf("zone" to "a"))), pkg.manifest.fabrics)
+        assertEquals(ProcessorSet("acme.orders.OrdersInstanceUpdate", null), pkg.manifest.processors)
 
         assertEquals(listOf("orders"), pkg.blueprints.map { it.name })
         assertEquals(listOf("source", "sink"), pkg.blueprints.single().blocks.map { it.id })

@@ -102,6 +102,8 @@ cringle {
 }
 ```
 
+`processors { update = "..."; downgrade = "..." }` names the classes (a `Processor`, usually a `SteppedProcessor`) that migrate the persisted data of the blocks of the plugin when its version changes; both are optional and written to the manifest (`processors.update`, `processors.downgrade`). A name that is not a class name fails the build. How they work: [migration-guide.md](migration-guide.md); the sample has `OrdersUpdate` and `OrdersDowngrade`.
+
 The testkit lets a plugin author test blocks with `BlockTestHarness` without running an engine. The sample at `samples/sample-plugin` shows this with `OrdersBlockTest`, which exercises the `orders` block above against the harness and asserts on its inputs and outputs.
 
 `./gradlew cringlePackage` writes `build/distributions/acme-orders-1.2.0.cringle`; `cringleValidate` checks the same package against the contract without writing it. The package is checked against the plugins it depends on, as the repository does when it is published: a block that uses a schema of a dependency passes, a schema that the dependency does not have fails the build. The build asks the repository for those plugins, with the address and the token of `cringlePublish` (see "Publishing a plugin"); it only reads them and locks or resolves nothing, that is the deploy's job. Without a repository, because none is configured or because it is not reachable or does not answer, `cringleValidate` goes on with a warning and checks what it can: a reference to a schema outside the namespaces of the plugin itself is then taken as coming from its dependencies and checked when the package is published, while a reference into the plugin's own namespace that does not resolve still fails, and so does any reference outside the plugin in a plugin that declares no dependency (the message names the namespace and how to declare the dependency). `cringlePackage` runs `cringleValidate` first. Everything the `cringle { }` block contributes has to exist in the project: the provider and driver classes, a schema document per schema, and whatever goes into `lib/` and `binaries/`. The example project has all of it and is the shortest path from nothing to a working package.
@@ -202,6 +204,8 @@ Everything below `src/main/cringle` goes into the package, each kind under a fix
 | `src/main/cringle/blueprints/**.json` | `blueprints/<name>.json` | One blueprint document per file: its blocks, the plugins they come from, and its tethers. |
 | `src/main/cringle/schemas/**.json` | `schemas/<name>.json` | Schema documents, which the blueprints may refer to by name. |
 | `src/main/cringle/binaries/**` | `binaries/<path>` | Static resources of the application, e.g. configuration files or a web page. |
+
+A project can name processors of the plugins it uses, which migrate the whole data folder of an instance of the project: `cringle { processors { update = "acme.orders.OrdersInstanceUpdate" } }` (see [migration-guide.md](migration-guide.md)).
 
 The manifest is derived from those files: the list of blueprints, schemas and binaries is what the build found, so the package cannot claim a file it does not carry.
 

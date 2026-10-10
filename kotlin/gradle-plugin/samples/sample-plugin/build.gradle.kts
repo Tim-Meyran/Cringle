@@ -38,6 +38,11 @@ cringle {
     dependency("acme-core", "^1.0.0")
     provider("acme.orders.OrdersProvider")
     driver("acme.orders.OrdersDriver")
+    // the classes that migrate the data folder of the blocks when the version of the plugin changes (docs/migration-guide.md)
+    processors {
+        update = "acme.orders.OrdersUpdate"
+        downgrade = "acme.orders.OrdersDowngrade"
+    }
     block("orders") {
         configSchema("acme.orders/OrdersConfig")
         schema("acme.orders/Order")

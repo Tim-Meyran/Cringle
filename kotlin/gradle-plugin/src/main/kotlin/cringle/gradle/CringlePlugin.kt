@@ -112,7 +112,7 @@ public class CringlePlugin : Plugin<Project> {
             providers = extension.providers.get(),
             drivers = extension.drivers.get(),
             blocks = extension.blocks,
-            processors = ProcessorSet(),
+            processors = extension.processorSet,
         )
     }
 

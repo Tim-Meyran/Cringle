@@ -34,7 +34,7 @@ Cringle/
 - **Project Decisions:** See [docs/decisions.md](docs/decisions.md) for binding design decisions.
 - **Tasks:** Work items are GitHub issues (label `agent-task`), grouped by milestones M0–M9.
 - **Agent Instructions & Workflow:** See [AGENTS.md](AGENTS.md) for contributor guidelines and the issue → pull request → independent review → merge flow.
-- **Documentation index:** [docs/README.md](docs/README.md).
+- **Documentation index:** [docs/README.md](docs/README.md). Start with [Getting started](docs/getting-started.md), then [Operations](docs/operations.md) and [Security](docs/security.md); the samples are in [samples/README.md](samples/README.md); what 1.0.0 contains and what not: [docs/acceptance-1.0.md](docs/acceptance-1.0.md).
 
 ## Install
 

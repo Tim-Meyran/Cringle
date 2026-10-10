@@ -11,7 +11,7 @@ Written for an agent that starts without the history of the conversations. It sa
 | M6 – Distribution and shared services | started: the wire format (`spec/wire.md`, module `wire`) is done. Cross-engine tethers are done: the blueprint field (#145), the transport with `MESSAGE` tethers over mTLS (#146), the other types (#147) and the resolution through the registry with supervision and reconnecting (#148). Tethers between projects and shared services are done: service names in blueprints (#170), bindings (#171), engine key and tether port in the status (#172), service callers (#177), bound service tethers (#178), deploy applies the bindings (#179), failover between instances (#173), and the end-to-end proof across two machines (#174, `docs/shared-services.md`). Open decisions about selection rules and capabilities stay `[Offen]` (Architecture 13.3) |
 | M7 – Observability | done: engine metrics (#187) read by the ManagementServer (#191) and carried by the heartbeat (#190), the DWH store (#188), its block driver (#192), recording of tether messages with retention (#193) and access through the ManagementServer (#194), foreign log files (#189), the logging collector (#195), and the proof (#196, `docs/observability.md`). Open decisions stay `[Zu bestätigen]` (memory per engine only, one DWH store per engine as JSON-lines day files) |
 | M8 – WebUI and blueprint editor | done: the web layer in the ManagementServer (HTTPS, login, sessions, CSRF, vendored htmx, Alpine.js and Drawflow, #207), pages for machines, engines and fabrics (#208), deployments, bindings, logs, metrics and the data warehouse (#209), users, groups and tokens (#210), trust and packages (#211), drafts and the schema editor (#212), the blueprint editor with the server-side compatibility check (#213), and the proof (#214, `docs/webui.md`). A blueprint comes into being in the browser and is deployed from there. Open decisions stay `[Zu bestätigen]` (default host `127.0.0.1`, HTTPS with the self-signed identity, drafts as a store of the ManagementServer) |
-| M9 – Operations, security and hardening | partly: self-update, cache cleanup, plugin trust in the repository, logging. Open: blue-green, rollback, migrations, isolated blocks (deferred), assertions, debugging, renewal, documentation |
+| M9 – Operations, security and hardening | done except what is deferred: self-update, cache cleanup, plugin trust, logging, blue-green and rollback (#226, #228), migrations (#227, #259), assertions (#232, #233, #293), remote debugging (#323), renewal of certificates (#224), federation (#231, #295), rights scopes (#229, #230), the configuration manager, the check of chapter 26 and the documentation (#234, [acceptance-1.0.md](acceptance-1.0.md)). Deferred: isolated blocks, their resource limits and the local IPC tether (#18) |
 
 Issues that exist for the open work are on GitHub with the label `agent-task`; the milestone tracking issues (#149 for M6, #150 for M7, #151 for M8, #152 for M9) list what has no issue of its own yet. An agent that picks one of those first splits it into issues that meet the Definition of Ready (AGENTS.md).
 
@@ -50,3 +50,14 @@ Propose them to the owner for `decisions.md`; do not change them without asking.
 - Transitive trust of the management server in the engines of another router is shown by `cringle trust list` (origin = the router) but the management server does not call those engines yet.
 - Isolated (untrusted) blocks and the local IPC tether are deferred (M9).
 - The GitHub workflow `CI` is disabled (billing). The local build replaces it; an agent states the results of `./gradlew build` and of `integrationTest` in the pull request; `./gradlew build integrationTest` is the full verification (two suites, #133).
+
+## M9 acceptance (#234): decisions for the owner
+
+The check of chapter 26 is in [acceptance-1.0.md](acceptance-1.0.md). Proposals for `decisions.md` and `Architecture.md`, not changed by an agent:
+
+- **WebUI technology:** htmx, Alpine.js and Drawflow instead of Svelte 5 with SvelteFlow (already decided in #151); change the sentence in chapter 26.
+- **Encryption of tethers:** tethers between engines are always mutual TLS; there is no choice of method. Either change the sentence of chapter 26 or ask for a per-tether option.
+- **User name and password:** not there, tokens only (also as login and invite links). Decide whether it comes after 1.0.0.
+- **Health check of drivers:** `Driver` has no health call; failover between service instances exists. Proposal: `Driver.health()` after 1.0.0.
+- **Federation:** manual trust of registries only; discovery is left for later.
+- **Isolated blocks (#18):** deferred; an untrusted plugin makes the fabric fail closed. Decide the milestone.

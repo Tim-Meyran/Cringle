@@ -7,6 +7,7 @@ import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
 import cringle.contract.TetherType
+import cringle.packaging.ProcessorSet
 import org.gradle.api.Action
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
@@ -89,6 +90,30 @@ public abstract class CringlePluginExtension @Inject constructor(objects: Object
         action.execute(spec)
         blockSpecs += spec
     }
+
+    private val processorSpec: ProcessorsSpec = ProcessorsSpec()
+
+    /**
+     * The classes of this plugin that migrate the persisted data of its blocks when the version of the plugin changes:
+     * `processors { update = "acme.orders.Update"; downgrade = "acme.orders.Downgrade" }`. Both are optional
+     * (`docs/migration-guide.md`).
+     */
+    public fun processors(action: Action<in ProcessorsSpec>) {
+        action.execute(processorSpec)
+    }
+
+    internal val processorSet: ProcessorSet get() = processorSpec.toSet()
+}
+
+/** The `processors { }` block of a plugin or a project: the class names of the update and the downgrade [cringle.contract.Processor]. */
+public class ProcessorsSpec {
+    /** The class that brings data from an older version of the plugin (or the project) to this one. */
+    public var update: String? = null
+
+    /** The class that brings data from a newer version back to this one. */
+    public var downgrade: String? = null
+
+    internal fun toSet(): ProcessorSet = ProcessorSet(update?.trim()?.ifEmpty { null }, downgrade?.trim()?.ifEmpty { null })
 }
 
 /**

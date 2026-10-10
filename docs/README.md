@@ -20,6 +20,12 @@
 | [observability.md](observability.md) | Logs, metrics, heartbeat, data warehouse, recording and retention. Englisch. |
 | [shared-services.md](shared-services.md) | Shared services: `provides`, service tethers, `cringle bind`, failover, two machines. Englisch. |
 | [updating.md](updating.md) | Self-update of an installed Cringle: `cringle self-update`, rollback, `--allow-major`. Englisch. |
+| [getting-started.md](getting-started.md) | From install to a running application: log in, plugin, project, deploy, look at it. Englisch. |
+| [operations.md](operations.md) | Operating a site: processes and folders, settings and ports, more machines, logs, updates, backups, certificates, troubleshooting. Englisch. |
+| [security.md](security.md) | Trust, TLS, tokens and scopes, the web interface, code that runs; what to do on a new installation. Englisch. |
+| [migration-guide.md](migration-guide.md) | Versions of data: processors, backups, failure, rollback. Englisch. |
+| [debugging.md](debugging.md) | Remote debugging of a fabric: breakpoints on tethers, held values, resume, step. Englisch. |
+| [acceptance-1.0.md](acceptance-1.0.md) | Chapter 26 of the architecture against the code: what is done, changed, partly done or open. Englisch. |
 
 Nicht in `docs/`:
 

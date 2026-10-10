@@ -3,6 +3,7 @@
 package cringle.gradle
 
 import cringle.packaging.FabricConfig
+import cringle.packaging.ProcessorSet
 import org.gradle.api.Action
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.model.ObjectFactory
@@ -73,6 +74,19 @@ public abstract class CringleProjectExtension @Inject constructor(objects: Objec
         action.execute(spec)
         fabricSpecs += spec
     }
+
+    private val processorSpec: ProcessorsSpec = ProcessorsSpec()
+
+    /**
+     * Classes of the plugins this project depends on that migrate the whole data folder of an instance of the project
+     * when the version of the project changes: `processors { update = "acme.orders.ProjectUpdate" }`. Both are
+     * optional (`docs/migration-guide.md`).
+     */
+    public fun processors(action: Action<in ProcessorsSpec>) {
+        action.execute(processorSpec)
+    }
+
+    internal val processorSet: ProcessorSet get() = processorSpec.toSet()
 }
 
 /**
