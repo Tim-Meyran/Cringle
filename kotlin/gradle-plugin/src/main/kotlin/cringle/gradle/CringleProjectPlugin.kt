@@ -90,6 +90,7 @@ public class CringleProjectPlugin : Plugin<Project> {
             version = version,
             dependencies = LinkedHashMap(extension.dependencies.get()),
             fabrics = extension.fabrics,
+            processors = extension.processorSet,
         )
     }
 

@@ -43,3 +43,5 @@ After a successful update the updater keeps the new version and the previous one
 ## Exit codes
 
 0 success (also `--check`), 1 the update failed (including a rollback), 2 the command line is wrong, the installation is not an installed distribution, or a major version was refused without `--allow-major`.
+
+Updating the applications that run on Cringle (new versions of projects and plugins, data migrations, rollback) is a different thing: [migration-guide.md](migration-guide.md) and [operations.md](operations.md).

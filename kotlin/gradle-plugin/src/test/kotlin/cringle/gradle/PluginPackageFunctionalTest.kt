@@ -5,6 +5,7 @@ package cringle.gradle
 import cringle.packaging.PackageProblem
 import cringle.packaging.PackageReader
 import cringle.packaging.PackageValidator
+import cringle.packaging.ProcessorSet
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -40,6 +41,7 @@ class PluginPackageFunctionalTest {
         assertEquals(mapOf("acme-core" to "^1.0.0"), plugin.manifest.dependencies)
         assertEquals(listOf("acme.orders.OrdersProvider"), plugin.manifest.providers)
         assertEquals(listOf("acme.orders.OrdersDriver"), plugin.manifest.drivers)
+        assertEquals(ProcessorSet("acme.orders.OrdersUpdate", "acme.orders.OrdersDowngrade"), plugin.manifest.processors)
         assertEquals(listOf("orders"), plugin.manifest.blocks.map { it.name })
         assertEquals(listOf("schemas/acme.orders.json"), plugin.manifest.schemas)
         assertEquals(
