@@ -330,28 +330,17 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             html(raw("<input type=\"search\" id=\"palette-search\" placeholder=\"Search blocks\" aria-label=\"Search blocks\">"), paletteGroups)
         }
         return html(
-            pageHeader("Blueprint ${draft.name}", "Add blocks from the left, connect an output to an input; the server checks every connection.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a><a class=\"btn\" href=\"/deployments\">Deployments</a>")),
-            if (kept > 0) h("<p class=\"info\">{} tethers cannot be shown in the editor; they are kept as they are when you save.</p>", kept) else Html(""),
-            raw("<div id=\"editor-bar\">"),
-            field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
-            raw("<details id=\"fabrics-box\"><summary>Fabrics</summary>"),
-            h("<textarea id=\"fabrics\" rows=\"3\" cols=\"44\" placeholder=\"2 | edge, gpu | zone=a\">{}</textarea>", fabrics),
-            raw("<small>one fabric per line: instances | roles | labels (roles and labels are optional)</small></details>"),
-            raw("<details id=\"schemas-box\"><summary>Schemas of the project</summary>"),
-            schemaBox,
-            raw("</details>"),
-            raw("<details id=\"services-box\"><summary>Provided services</summary>"),
-            h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
-            raw("<small>service=block.port, one per line</small></details>"),
-            h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
-            raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"undo\" title=\"Undo\">Undo</button><button type=\"button\" class=\"btn\" id=\"redo\" title=\"Redo\">Redo</button><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Reset the zoom\">Fit</button></div>"),
-            if (canSave) raw("<label class=\"check\"><input type=\"checkbox\" id=\"autosave\" checked> Autosave</label><button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button><button type=\"button\" class=\"btn\" id=\"publish-blueprint\" title=\"Save, then publish as a package\">Publish</button>") else Html(""),
-            raw("<div id=\"result\" role=\"status\"></div></div>"),
             h(
                 "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
                 palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
             ),
-            raw("<aside id=\"palette\"><h2>Blocks</h2>"),
+            raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
+            raw("<div id=\"editor-left\"><header id=\"editor-head\" class=\"float\">"),
+            h("<h1>Blueprint {}</h1>", draft.name),
+            raw("<p class=\"subtitle\">Add blocks from the palette, connect an output to an input; the server checks every connection.</p>"),
+            if (kept > 0) h("<p class=\"info\">{} tethers cannot be shown in the editor; they are kept as they are when you save.</p>", kept) else Html(""),
+            raw("<div class=\"page-actions\"><a class=\"btn small\" href=\"/drafts\">All drafts</a><a class=\"btn small\" href=\"/deployments\">Deployments</a></div></header>"),
+            raw("<aside id=\"palette\" class=\"float\"><h2>Blocks</h2>"),
             paletteBody,
             raw(
                 "<div id=\"externals\"><h3>Other engines and services</h3>" +
@@ -359,8 +348,24 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     "<button type=\"button\" data-external=\"remote-send\" title=\"A port on another engine that sends to a local port\">Remote end that sends</button>" +
                     "<button type=\"button\" data-external=\"service\" title=\"A service of another project that a local port calls\">Service</button></div>",
             ),
-            raw("</aside><div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
-            raw("<aside id=\"properties\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside></div>"),
+            raw("</aside></div>"),
+            raw("<div id=\"editor-bar\" class=\"float\">"),
+            field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
+            raw("<details id=\"fabrics-box\"><summary>Fabrics</summary><div class=\"dropdown\">"),
+            h("<textarea id=\"fabrics\" rows=\"3\" cols=\"44\" placeholder=\"2 | edge, gpu | zone=a\">{}</textarea>", fabrics),
+            raw("<small>one fabric per line: instances | roles | labels (roles and labels are optional)</small></div></details>"),
+            raw("<details id=\"schemas-box\"><summary>Schemas of the project</summary><div class=\"dropdown\">"),
+            schemaBox,
+            raw("</div></details>"),
+            raw("<details id=\"services-box\"><summary>Provided services</summary><div class=\"dropdown\">"),
+            h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
+            raw("<small>service=block.port, one per line</small></div></details>"),
+            h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
+            raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"undo\" title=\"Undo\">Undo</button><button type=\"button\" class=\"btn\" id=\"redo\" title=\"Redo\">Redo</button><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Reset the zoom\">Fit</button></div>"),
+            if (canSave) raw("<label class=\"check\"><input type=\"checkbox\" id=\"autosave\" checked> Autosave</label><button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button><button type=\"button\" class=\"btn\" id=\"publish-blueprint\" title=\"Save, then publish as a package\">Publish</button>") else Html(""),
+            raw("</div>"),
+            raw("<aside id=\"properties\" class=\"float\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside>"),
+            raw("<div id=\"result\" class=\"float\" role=\"status\"></div></div>"),
         )
     }
 

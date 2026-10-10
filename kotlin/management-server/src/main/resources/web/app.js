@@ -68,6 +68,10 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.start();
   var graph = JSON.parse(host.dataset.graph);
   if (Object.keys(graph.drawflow.Home.data).length > 0) editor.import(graph);
+  // the palette, the toolbar and the properties float above the canvas: start with the graph clear of the palette and the toolbar
+  editor.canvas_x = 280;
+  editor.canvas_y = 90;
+  editor.zoom_refresh();
 
   function csrf() {
     try { return JSON.parse(document.body.getAttribute('hx-headers'))['X-CSRF-Token']; } catch (e) { return ''; }
@@ -466,7 +470,7 @@ document.addEventListener('htmx:responseError', function (event) {
   document.getElementById('redo').addEventListener('click', function () { if (at < history.length - 1) restore(history[++at]); });
   document.getElementById('zoom-in').addEventListener('click', function () { editor.zoom_in(); });
   document.getElementById('zoom-out').addEventListener('click', function () { editor.zoom_out(); });
-  document.getElementById('zoom-fit').addEventListener('click', function () { editor.zoom_reset(); });
+  document.getElementById('zoom-fit').addEventListener('click', function () { editor.zoom_reset(); editor.canvas_x = 280; editor.canvas_y = 90; editor.zoom_refresh(); });
   editor.on('connectionCreated', function () { /* the verdict of the server decides, see above */ });
   window.cringleEditorSnapshot = snapshot; // the verdict handler snapshots an accepted connection
 })();

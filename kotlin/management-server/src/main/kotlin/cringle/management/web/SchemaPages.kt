@@ -136,28 +136,34 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
             pageHeader("Schema ${draft.name}", "Types for the data that blocks exchange. The document below is checked while you type.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")),
             raw("<datalist id=\"standard-types\"><option>cringle.std/String</option><option>cringle.std/Boolean</option><option>cringle.std/Int</option><option>cringle.std/Double</option><option>cringle.std/Bytes</option><option>cringle.std/Timestamp</option><option>cringle.std/Empty</option><option>cringle.std/Error</option></datalist>"),
             h(
-                "<form id=\"editor\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
+                "<form id=\"editor\" class=\"stack\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
                 data, base,
             ),
             raw(
                 """<input type="hidden" name="model" :value="JSON.stringify({namespace: namespace, types: types})">
 <input type="hidden" id="revision" name="revision" value="${draft.revision}">
-<label>Namespace <input x-model="namespace" placeholder="acme.orders"></label> <label>Version <input name="version" x-model="version" size="10"></label>
-<template x-for="(t, ti) in types" :key="ti"><fieldset>
-<input x-model="t.name" placeholder="TypeName"> <select x-model="t.kind"><option value="record">record</option><option value="enum">enum</option></select>
-<button type="button" @click="types.splice(ti, 1); ${'$'}dispatch('cringle-changed')">Remove type</button>
-<div x-show="t.kind === 'enum'"><input x-model="t.values" placeholder="VALUE_A, VALUE_B" size="40"></div>
-<div x-show="t.kind === 'record'">
-<template x-for="(f, fi) in t.fields" :key="fi"><div>
-<input x-model="f.name" placeholder="fieldName"> <input x-model="f.type" list="standard-types" placeholder="cringle.std/String or Type" size="28">
-<select x-model="f.wrap"><option value="">one value</option><option value="list">list</option><option value="map">map</option><option value="optional">optional</option></select>
-<button type="button" @click="t.fields.splice(fi, 1); ${'$'}dispatch('cringle-changed')">Remove field</button></div></template>
-<button type="button" @click="t.fields.push({name: '', type: 'cringle.std/String', wrap: ''}); ${'$'}dispatch('cringle-changed')">Add field</button>
+<div class="form-row schema-head">
+<label class="field"><span>Namespace</span><input x-model="namespace" placeholder="acme.orders"></label>
+<label class="field"><span>Version</span><input name="version" x-model="version" size="10"></label>
+</div>
+<template x-for="(t, ti) in types" :key="ti"><fieldset class="type-card">
+<div class="type-head">
+<input x-model="t.name" placeholder="TypeName" aria-label="Name of the type">
+<select x-model="t.kind" aria-label="Kind of the type"><option value="record">record</option><option value="enum">enum</option></select>
+<button type="button" class="btn small danger" @click="types.splice(ti, 1); ${'$'}dispatch('cringle-changed')">Remove type</button>
+</div>
+<div x-show="t.kind === 'enum'"><input class="wide" x-model="t.values" placeholder="VALUE_A, VALUE_B" aria-label="Values of the enum"></div>
+<div x-show="t.kind === 'record'" class="fields">
+<template x-for="(f, fi) in t.fields" :key="fi"><div class="field-row">
+<input x-model="f.name" placeholder="fieldName" aria-label="Name of the field"> <input x-model="f.type" list="standard-types" placeholder="cringle.std/String or Type" aria-label="Type of the field">
+<select x-model="f.wrap" aria-label="How often"><option value="">one value</option><option value="list">list</option><option value="map">map</option><option value="optional">optional</option></select>
+<button type="button" class="btn small ghost" @click="t.fields.splice(fi, 1); ${'$'}dispatch('cringle-changed')">Remove field</button></div></template>
+<div><button type="button" class="btn small" @click="t.fields.push({name: '', type: 'cringle.std/String', wrap: ''}); ${'$'}dispatch('cringle-changed')">Add field</button></div>
 </div></fieldset></template>
-<button type="button" @click="types.push({name: '', kind: 'record', fields: [], values: ''}); ${'$'}dispatch('cringle-changed')">Add type</button>""",
+<div class="editor-actions"><button type="button" class="btn" @click="types.push({name: '', kind: 'record', fields: [], values: ''}); ${'$'}dispatch('cringle-changed')">Add type</button>""",
             ),
             if (canSave) h("<button type=\"button\" class=\"btn primary\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
-            raw("</form><div id=\"preview\"></div>"),
+            raw("</div></form><div id=\"preview\"></div>"),
         )
     }
 

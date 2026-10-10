@@ -52,6 +52,7 @@
   --radius-sm: 6px;
   --radius: 10px;
   --sidebar: 244px;
+  --label-h: 24px;
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
@@ -178,7 +179,7 @@ details.engine ul { margin: var(--space-2) 0 var(--space-2) var(--space-5); padd
 .badge.warn { background: var(--warning-tint); color: var(--warning); border-color: transparent; }
 .badge.bad { background: var(--danger-tint); color: var(--danger); border-color: transparent; }
 .badge.info { background: var(--info-tint); color: var(--info); border-color: transparent; }
-.notice, p.error, p.info { padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border); border-left-width: 3px; background: var(--surface); }
+.notice, p.error, p.info { position: relative; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border); border-left-width: 3px; background: var(--surface); }
 .notice.error, p.error { color: var(--danger); background: var(--danger-tint); border-color: rgba(244, 124, 117, 0.3); border-left-color: var(--danger); }
 p.info, .notice.info { color: var(--success); background: var(--success-tint); border-color: rgba(70, 201, 139, 0.3); border-left-color: var(--success); }
 /* Feedback of a request (errors, a new token, a form that continues a flow) lives in #flash, outside the lists that refresh themselves. */
@@ -208,12 +209,7 @@ ul.errors { color: var(--danger); }
 #list { min-height: 2rem; }
 
 /* the blueprint editor */
-#blueprint-editor { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; gap: var(--space-3); height: calc(100vh - 21rem); min-height: 28rem; margin-bottom: var(--space-3); }
-#blueprint-editor aside { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); overflow: auto; }
-#blueprint-editor aside h2 { margin: 0 0 var(--space-3); font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
 #palette button { display: flex; width: 100%; margin-bottom: var(--space-2); justify-content: flex-start; }
-#canvas { position: relative; min-height: 0; }
-#drawflow { height: 100%; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
 #drawflow .drawflow-node { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); width: 200px; padding: var(--space-3); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 #drawflow .drawflow-node:hover { border-color: #46505f; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 #drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0, 0, 0, 0.35); }
@@ -226,22 +222,11 @@ ul.errors { color: var(--danger); }
 #drawflow .connection .main-path { stroke: var(--text-faint); stroke-width: 2px; }
 #drawflow .connection .main-path:hover, #drawflow .connection .main-path.selected { stroke: var(--accent); }
 textarea.invalid { border-color: var(--danger); }
-#editor-bar { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-3); padding: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-#editor-bar .field { margin: 0; }
-#editor-bar .btn-group { display: flex; gap: var(--space-1); }
-#editor-bar .check { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
-#editor-bar #result { flex: 1 1 16rem; min-width: 0; }
-#editor-bar #result p { margin: 0; }
-#fabrics-box summary, #schemas-box summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2) 0; }
-#fabrics-box[open], #schemas-box[open] { flex-basis: 100%; }
 #schemas-box .check { display: flex; gap: var(--space-2); }
-#services-box summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2) 0; }
-#services-box[open] { flex-basis: 100%; }
 #palette h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
 #palette .empty { color: var(--text-muted); }
 #palette input[type=search] { width: 100%; }
 #palette button[hidden], #palette h3[hidden] { display: none; }
-#canvas-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; padding: var(--space-5); text-align: center; color: var(--text-faint); pointer-events: none; }
 #canvas-hint[hidden] { display: none; }
 
 /* below 900 px the sidebar becomes a bar on top */
@@ -256,8 +241,6 @@ textarea.invalid { border-color: var(--danger); }
   .build { display: none; }
   main { padding: var(--space-5) var(--space-4) 48px; }
   .page-header { flex-direction: column; }
-  #blueprint-editor { grid-template-columns: minmax(0, 1fr); height: auto; }
-  #drawflow { height: 30rem; }
   main > table, #list > table { display: block; overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -288,12 +271,12 @@ code.copied { border-color: var(--success); color: var(--success); }
 .facts dd { margin: 0; }
 
 /* forms: labelled fields in a row, checkboxes, popovers */
-.form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); }
+.form-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3); }
 .form-row .field { margin: 0; }
-.form-row > .btn, .form-row > button { align-self: flex-end; }
-.check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; color: var(--text-muted); font-size: var(--text-md); align-self: flex-end; }
+.form-row > .btn, .form-row > button, .form-row > .check { margin-top: var(--label-h); }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; color: var(--text-muted); font-size: var(--text-md); }
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-2) var(--space-4) var(--space-3); margin: 0 0 var(--space-3); min-width: 0; }
-fieldset.roles { display: inline-flex; gap: var(--space-4); align-items: center; padding: 0 var(--space-4); min-height: 40px; align-self: flex-end; }
+fieldset.roles { display: inline-flex; gap: var(--space-4); align-items: center; padding: 0 var(--space-4); min-height: 40px; margin: calc(var(--label-h) - 8px) 0 0; }
 legend { color: var(--text-faint); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 var(--space-2); }
 .field small { color: var(--text-faint); }
 details.popover { position: relative; }
@@ -302,10 +285,81 @@ details.popover > summary::before { content: none; }
 details.popover > summary:hover { background: #29303b; }
 .popover-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 280px; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-3); padding: var(--space-4); text-align: left; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); white-space: normal; }
 details.popover.wide .popover-body { min-width: 520px; }
-.popover-body .form-row { align-items: flex-end; }
+.popover-body .form-row { align-items: flex-start; }
 .confirm { border-color: var(--accent); }
 .confirm h2 { margin-top: 0; }
 @media (max-width: 900px) { .table-wrap { overflow-x: auto; } details.popover.wide .popover-body { min-width: 0; width: 86vw; } .popover-body { right: auto; left: 0; } }
 
 .token-share p { margin: 0 0 var(--space-2); }
 .token-share svg.qr { display: block; width: 220px; max-width: 100%; height: auto; margin: var(--space-3) 0; border-radius: var(--radius-sm); }
+
+
+/* forms that are not a row of fields: the schema editor and the like */
+main form.stack { display: block; }
+.schema-head { margin-bottom: var(--space-4); }
+.type-card { display: grid; gap: var(--space-3); margin: 0 0 var(--space-4); padding: var(--space-4); background: var(--surface); }
+.type-head { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: var(--space-2); align-items: center; }
+.fields { display: grid; gap: var(--space-2); }
+.field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) 140px auto; gap: var(--space-2); align-items: center; }
+.type-card input, .type-card select { width: 100%; }
+.editor-actions { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); }
+#preview pre { margin: 0; padding: var(--space-4); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+#preview pre code { background: none; border: 0; padding: 0; word-break: normal; white-space: pre; }
+#preview > p { margin-bottom: var(--space-3); }
+
+/* the blueprint editor: the canvas fills everything right of the sidebar, the dialogs float above it */
+main:has(#blueprint-editor) { max-width: none; padding: 0; }
+#blueprint-editor { position: fixed; top: 0; right: 0; bottom: 0; left: var(--sidebar); overflow: hidden; background: var(--bg); }
+body:has(.banner) #blueprint-editor { top: 37px; }
+#canvas { position: absolute; inset: 0; }
+#drawflow { width: 100%; height: 100%; background-color: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
+#canvas-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; padding: var(--space-5); text-align: center; color: var(--text-faint); pointer-events: none; }
+#canvas-hint[hidden] { display: none; }
+.float { position: absolute; z-index: 10; background: rgba(18, 21, 27, 0.9); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+#editor-left { position: absolute; z-index: 10; top: var(--space-3); left: var(--space-3); bottom: var(--space-3); width: 248px; display: flex; flex-direction: column; gap: var(--space-3); pointer-events: none; }
+#editor-left > .float { position: static; pointer-events: auto; }
+#editor-head { padding: var(--space-3) var(--space-4); }
+#editor-head h1 { margin: 0; font-size: var(--text-lg); word-break: break-all; }
+#editor-head .subtitle { font-size: var(--text-sm); margin: var(--space-1) 0 var(--space-3); }
+#editor-head .info { font-size: var(--text-sm); padding: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
+#editor-head .page-actions { gap: var(--space-2); }
+#palette { flex: 0 1 auto; min-height: 0; padding: var(--space-3); overflow: auto; }
+#palette h2, #properties h2 { margin: 0 0 var(--space-3); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
+#palette h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+#palette .empty { color: var(--text-muted); }
+#palette input[type=search] { width: 100%; margin-bottom: var(--space-2); }
+#palette button { display: flex; width: 100%; margin-bottom: var(--space-2); justify-content: flex-start; text-align: left; }
+#palette button[hidden], #palette h3[hidden] { display: none; }
+#editor-bar { top: var(--space-3); left: calc(248px + 2 * var(--space-3)); width: max-content; max-width: calc(100% - 248px - 300px - 4 * var(--space-3)); display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); }
+#editor-bar .field { margin: 0; flex-direction: row; align-items: center; gap: var(--space-2); }
+#editor-bar .field input { width: 90px; }
+#editor-bar .btn-group { display: flex; gap: var(--space-1); }
+#editor-bar .check { margin: 0; }
+#editor-bar details { position: relative; }
+#editor-bar details > summary { color: var(--text); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); min-height: 32px; display: inline-flex; align-items: center; padding: 2px 10px; }
+#editor-bar details > summary:hover { background: #29303b; }
+#editor-bar details > summary::before { content: none; }
+#editor-bar details > .dropdown { position: absolute; z-index: 20; left: 0; top: calc(100% + var(--space-2)); width: 360px; max-width: 80vw; padding: var(--space-3); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+#editor-bar details[open] > summary { border-color: var(--accent); }
+#editor-bar .dropdown textarea { display: block; width: 100%; }
+#editor-bar .dropdown small { display: block; margin-top: var(--space-2); color: var(--text-faint); }
+#schemas-box .check { display: flex; gap: var(--space-2); }
+#properties { top: var(--space-3); right: var(--space-3); width: 300px; max-height: calc(100% - 2 * var(--space-3)); padding: var(--space-3) var(--space-4); overflow: auto; }
+#properties:has(#node-properties:empty), #properties:has(#node-properties > p:only-child) { display: none; }
+#node-properties > p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+#node-properties label { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--space-3); font-size: var(--text-sm); color: var(--text-muted); }
+#node-properties input, #node-properties select, #node-properties textarea { width: 100%; }
+#node-properties label input[type="checkbox"] { width: auto; }
+#node-properties fieldset { margin-bottom: var(--space-3); }
+#result { bottom: var(--space-3); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(640px, calc(100% - 2 * 300px - 6 * var(--space-3))); max-height: 35%; overflow: auto; padding: var(--space-2) var(--space-3); }
+#result:empty { display: none; }
+#result p { margin: 0; }
+#result ul { margin: var(--space-2) 0 0 var(--space-4); padding: 0; }
+main:has(#blueprint-editor) #flash { position: fixed; z-index: 40; right: calc(300px + 2 * var(--space-3)); bottom: var(--space-3); width: min(420px, 50vw); margin: 0; }
+@media (max-width: 900px) {
+  #blueprint-editor { position: relative; inset: auto; height: calc(100vh - 7rem); min-height: 28rem; }
+  #editor-left { width: 180px; }
+  #editor-bar { left: calc(180px + 2 * var(--space-3)); right: var(--space-3); }
+  #properties { top: auto; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); width: auto; max-height: 40%; }
+  .type-head, .field-row { grid-template-columns: minmax(0, 1fr); }
+}
