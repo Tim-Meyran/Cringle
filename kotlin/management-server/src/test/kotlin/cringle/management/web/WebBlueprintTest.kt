@@ -115,6 +115,14 @@ class WebBlueprintTest {
     }
 
     @Test
+    fun retryOnADropTetherIsListedAsAProblem() {
+        val connected = graph(node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))), node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))))
+        val options = """{"reader.out>writer.in": {"delivery": "DROP", "record": false, "retry": {"maxAttempts": 3}}}"""
+        val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to connected, "options" to options, "version" to "1.0.0", "roles" to "", "revision" to "1")).body()
+        assertTrue(saved.contains("Saved as revision 2") && saved.contains("has problems") && saved.contains("retry"), saved)
+    }
+
+    @Test
     fun theServerDecidesWhetherTwoPortsMayBeConnected() {
         assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("acme-flow/src", 1, "acme-flow/sink", 1))
         val schema = check("acme-flow/src", 1, "acme-flow/numbers", 1)

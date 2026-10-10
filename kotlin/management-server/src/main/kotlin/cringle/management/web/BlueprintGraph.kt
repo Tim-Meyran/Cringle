@@ -127,7 +127,7 @@ internal object BlueprintGraph {
      * The blueprint [name] for [graph]; [options] holds the options of the edges, [kept] are the tethers and the services the graph cannot show, [assertions] those of the draft (the editor cannot edit them, but must not lose them).
      * The type of a tether is the first one its two ports share; an edge whose ports share none is an error.
      */
-    fun toBlueprint(name: String, graph: JsonObject, options: JsonObject, kept: List<TetherDef>, provides: List<cringle.packaging.ProvidedService>, assertions: List<cringle.packaging.Assertion> = emptyList(), definition: (String) -> BlockDefinition?): Blueprint {
+    fun toBlueprint(name: String, graph: JsonObject, options: JsonObject, kept: List<TetherDef>, provides: List<cringle.packaging.ProvidedService>, assertions: List<cringle.packaging.Assertion> = emptyList(), previousBlocks: List<BlueprintBlock> = emptyList(), definition: (String) -> BlockDefinition?): Blueprint {
         val nodes = nodes(graph)
         val byNumber = HashMap<String, BlueprintBlock>()
         for ((number, n) in nodes) {
@@ -135,7 +135,8 @@ internal object BlueprintGraph {
             val id = data["id"]?.jsonPrimitive?.content?.trim().orEmpty()
             val block = data["block"]?.jsonPrimitive?.content.orEmpty()
             val config = data["config"] as? JsonObject ?: JsonObject(emptyMap())
-            byNumber[number] = BlueprintBlock(id, block, config)
+            val before = previousBlocks.firstOrNull { it.id == id && it.block == block }
+            byNumber[number] = BlueprintBlock(id, block, config, before?.isolation ?: cringle.contract.IsolationLevel.SHARED, before?.varArgCounts ?: emptyMap())
         }
         val tethers = ArrayList<TetherDef>()
         for ((number, n) in nodes) {
@@ -156,7 +157,14 @@ internal object BlueprintGraph {
                     tethers += TetherDef(
                         type, a, b,
                         delivery = if (o?.get("delivery")?.jsonPrimitive?.content == "BUFFER") DeliveryPolicy.BUFFER else DeliveryPolicy.DROP,
-                        record = if (o?.get("record")?.jsonPrimitive?.boolean == true) RecordConfig() else null,
+                        record = if (o?.get("record")?.jsonPrimitive?.boolean == true) {
+                            RecordConfig(o.long("recordMaxAgeMs")?.let { java.time.Duration.ofMillis(it) }, o.long("recordMaxBytes"))
+                        } else {
+                            null
+                        },
+                        bufferCapacity = o?.long("bufferCapacity")?.toInt(),
+                        requestTimeout = o?.long("requestTimeoutMs")?.let { java.time.Duration.ofMillis(it) },
+                        retry = (o?.get("retry") as? JsonObject)?.takeIf { it.isNotEmpty() }?.let { retryOf(it) },
                     )
                 }
             }
@@ -166,12 +174,44 @@ internal object BlueprintGraph {
         return Blueprint(name, blocks, tethers.sortedBy { key(it.from!!, it.to!!) } + kept, provides, assertions)
     }
 
+    private fun JsonObject.long(key: String): Long? {
+        val v = this[key] as? JsonPrimitive ?: return null
+        if (v.content.isBlank()) return null
+        return v.content.toLongOrNull() ?: throw GraphException("'$key' of a tether is not a whole number: ${v.content}")
+    }
+
+    private fun retryOf(o: JsonObject): cringle.packaging.RetryConfig = cringle.packaging.RetryConfig(
+        maxAttempts = o.long("maxAttempts")?.toInt(),
+        backoffMs = o.long("backoffMs") ?: 50L,
+        backoff = o["backoff"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { name ->
+            cringle.packaging.Backoff.entries.firstOrNull { it.name == name } ?: throw GraphException("unknown backoff '$name'")
+        } ?: cringle.packaging.Backoff.FIXED,
+        maxBackoffMs = o.long("maxBackoffMs") ?: 5000L,
+    )
+
     /** The edge options of [blueprint] in the form that the editor sends. */
     fun options(blueprint: Blueprint): JsonObject = JsonObject(
-        blueprint.tethers.filter { drawable(it) && (it.delivery == DeliveryPolicy.BUFFER || it.record != null) }.associate { t ->
+        blueprint.tethers.filter {
+            drawable(it) && (it.delivery == DeliveryPolicy.BUFFER || it.record != null || it.bufferCapacity != null || it.requestTimeout != null || it.retry != null)
+        }.associate { t ->
             key(t.from!!, t.to!!) to buildJsonObject {
                 put("delivery", t.delivery.name)
                 put("record", JsonPrimitive(t.record != null))
+                t.record?.maxAge?.let { put("recordMaxAgeMs", JsonPrimitive(it.toMillis())) }
+                t.record?.maxBytes?.let { put("recordMaxBytes", JsonPrimitive(it)) }
+                t.bufferCapacity?.let { put("bufferCapacity", JsonPrimitive(it)) }
+                t.requestTimeout?.let { put("requestTimeoutMs", JsonPrimitive(it.toMillis())) }
+                t.retry?.let { r ->
+                    put(
+                        "retry",
+                        buildJsonObject {
+                            r.maxAttempts?.let { put("maxAttempts", JsonPrimitive(it)) }
+                            put("backoffMs", JsonPrimitive(r.backoffMs))
+                            put("backoff", JsonPrimitive(r.backoff.name))
+                            put("maxBackoffMs", JsonPrimitive(r.maxBackoffMs))
+                        },
+                    )
+                }
             }
         },
     )

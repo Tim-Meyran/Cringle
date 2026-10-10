@@ -65,7 +65,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 val kept = previous?.let { blueprintOf(it) }?.tethers.orEmpty().filterNot { BlueprintGraph.drawable(it) }
                 val graph = parse(req.form["graph"]).jsonObject
                 val blueprint = try {
-                    BlueprintGraph.toBlueprint(name, graph, parse(req.form["options"]) as? JsonObject ?: JsonObject(emptyMap()), kept, parseProvides(req.form["provides"].orEmpty()), previous?.let { blueprintOf(it) }?.assertions.orEmpty(), snapshot::block)
+                    BlueprintGraph.toBlueprint(name, graph, parse(req.form["options"]) as? JsonObject ?: JsonObject(emptyMap()), kept, parseProvides(req.form["provides"].orEmpty()), previous?.let { blueprintOf(it) }?.assertions.orEmpty(), previous?.let { blueprintOf(it) }?.blocks.orEmpty(), snapshot::block)
                 } catch (e: GraphException) {
                     throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, e.message ?: "invalid graph")
                 }
