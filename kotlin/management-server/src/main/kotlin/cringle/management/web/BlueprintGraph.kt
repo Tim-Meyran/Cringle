@@ -42,31 +42,62 @@ internal object BlueprintGraph {
     /** The tether type for a tether from [out] to [input]: the first they both support, `null` if there is none. */
     fun commonType(out: PortDefinition, input: PortDefinition): TetherType? = typeOrder.firstOrNull { it in out.tetherTypes && it in input.tetherTypes }
 
+    /** A port as a node of the graph draws it: a plain port once, a VarArg port once per slot ([index] counts from 0). */
+    data class Slot(val port: PortDefinition, val index: Int?) {
+        val label: String get() = if (index == null) port.name else "${port.name}[$index]"
+    }
+
+    /** The slots of the ports of [definition] in [direction], in the order of the definition; a VarArg port has [counts] slots (at least one). */
+    fun slots(definition: BlockDefinition, direction: PortDirection, counts: Map<String, Int>): List<Slot> =
+        definition.ports.filter { it.direction == direction }.flatMap { p ->
+            if (p.varArg) (0 until (counts[p.name] ?: 1).coerceAtLeast(1)).map { Slot(p, it) } else listOf(Slot(p, null))
+        }
+
+    /** The counts of the VarArg ports of [definition]: an entry for each, from [counts] or 1. */
+    fun countsFor(definition: BlockDefinition?, counts: Map<String, Int>): Map<String, Int> =
+        definition?.ports?.filter { it.varArg }?.associate { it.name to (counts[it.name] ?: 1).coerceAtLeast(1) } ?: emptyMap()
+
+    private fun endpointKey(e: Endpoint): String = "${e.block}.${e.port}" + (e.index?.let { "[$it]" } ?: "")
+
     /** The key of the options of a tether. */
-    fun key(from: Endpoint, to: Endpoint): String = "${from.block}.${from.port}>${to.block}.${to.port}"
+    fun key(from: Endpoint, to: Endpoint): String = "${endpointKey(from)}>${endpointKey(to)}"
 
     /** The content of a node: the block id, the block, and the names of its ports (Drawflow draws the ports as dots without labels). */
-    fun nodeHtml(id: String, block: String, ins: List<PortDefinition>, outs: List<PortDefinition>): String =
-        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small><small class=\"ports\">in: " + esc(ins.joinToString(", ") { it.name }) +
-            " | out: " + esc(outs.joinToString(", ") { it.name }) + "</small>"
+    fun nodeHtml(id: String, block: String, ins: List<Slot>, outs: List<Slot>): String =
+        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small><small class=\"ports\">in: " + esc(ins.joinToString(", ") { it.label }) +
+            " | out: " + esc(outs.joinToString(", ") { it.label }) + "</small>"
 
     /** The tethers that the graph shows: both ends are local ports and the type is a plain one. The others are kept aside by the caller. */
-    fun drawable(t: TetherDef): Boolean = t.from != null && t.to != null && t.remote == null && t.service == null && t.from!!.index == null && t.to!!.index == null
+    fun drawable(t: TetherDef): Boolean = t.from != null && t.to != null && t.remote == null && t.service == null
 
     /** The Drawflow export for [blueprint]; [positions] maps a block id to `[x, y]`. */
     fun toGraph(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, definition: (String) -> BlockDefinition?): JsonObject {
         val nodes = LinkedHashMap<String, JsonElement>()
         val numbers = blueprint.blocks.mapIndexed { i, b -> b.id to (i + 1) }.toMap()
+        fun slotsOf(blockId: String, direction: PortDirection): List<Slot> {
+            val block = blueprint.blocks.firstOrNull { it.id == blockId } ?: return emptyList()
+            val def = definition(block.block) ?: return emptyList()
+            return slots(def, direction, block.varArgCounts)
+        }
         for ((i, b) in blueprint.blocks.withIndex()) {
             val def = definition(b.block)
-            val ins = def?.let(::inputs).orEmpty()
-            val outs = def?.let(::outputs).orEmpty()
+            val ins = slotsOf(b.id, PortDirection.IN)
+            val outs = slotsOf(b.id, PortDirection.OUT)
             val x = positions[b.id]?.first ?: (40.0 + 220 * (i % 4))
             val y = positions[b.id]?.second ?: (40.0 + 140 * (i / 4))
             nodes[(i + 1).toString()] = buildJsonObject {
                 put("id", i + 1)
                 put("name", b.block)
-                put("data", buildJsonObject { put("id", b.id); put("block", b.block); put("config", b.config) })
+                put(
+                    "data",
+                    buildJsonObject {
+                        put("id", b.id)
+                        put("block", b.block)
+                        put("config", b.config)
+                        put("isolation", b.isolation.name)
+                        put("varArgCounts", JsonObject(countsFor(def, b.varArgCounts).mapValues { JsonPrimitive(it.value) }))
+                    },
+                )
                 put("class", "cringle-block")
                 put("html", nodeHtml(b.id, b.block, ins, outs))
                 put("typenode", false)
@@ -78,9 +109,8 @@ internal object BlueprintGraph {
                                 put(
                                     "connections",
                                     JsonArray(
-                                        blueprint.tethers.filter { drawable(it) && it.to!!.block == b.id && it.to!!.port == ins[n].name }.map { t ->
-                                            val fromDef = blueprint.blocks.firstOrNull { it.id == t.from!!.block }?.block?.let(definition)
-                                            val index = fromDef?.let(::outputs)?.indexOfFirst { it.name == t.from!!.port } ?: -1
+                                        blueprint.tethers.filter { drawable(it) && it.to!!.block == b.id && it.to!!.port == ins[n].port.name && it.to!!.index == ins[n].index }.map { t ->
+                                            val index = slotsOf(t.from!!.block, PortDirection.OUT).indexOfFirst { it.port.name == t.from!!.port && it.index == t.from!!.index }
                                             buildJsonObject { put("node", numbers.getValue(t.from!!.block).toString()); put("input", "output_${index + 1}") }
                                         },
                                     ),
@@ -97,9 +127,8 @@ internal object BlueprintGraph {
                                 put(
                                     "connections",
                                     JsonArray(
-                                        blueprint.tethers.filter { drawable(it) && it.from!!.block == b.id && it.from!!.port == outs[n].name }.map { t ->
-                                            val toDef = blueprint.blocks.firstOrNull { it.id == t.to!!.block }?.block?.let(definition)
-                                            val index = toDef?.let(::inputs)?.indexOfFirst { it.name == t.to!!.port } ?: -1
+                                        blueprint.tethers.filter { drawable(it) && it.from!!.block == b.id && it.from!!.port == outs[n].port.name && it.from!!.index == outs[n].index }.map { t ->
+                                            val index = slotsOf(t.to!!.block, PortDirection.IN).indexOfFirst { it.port.name == t.to!!.port && it.index == t.to!!.index }
                                             buildJsonObject { put("node", numbers.getValue(t.to!!.block).toString()); put("output", "input_${index + 1}") }
                                         },
                                     ),
@@ -136,23 +165,30 @@ internal object BlueprintGraph {
             val block = data["block"]?.jsonPrimitive?.content.orEmpty()
             val config = data["config"] as? JsonObject ?: JsonObject(emptyMap())
             val before = previousBlocks.firstOrNull { it.id == id && it.block == block }
-            byNumber[number] = BlueprintBlock(id, block, config, before?.isolation ?: cringle.contract.IsolationLevel.SHARED, before?.varArgCounts ?: emptyMap())
+            val isolation = data["isolation"]?.jsonPrimitive?.content?.let { name ->
+                cringle.contract.IsolationLevel.entries.firstOrNull { it.name == name } ?: throw GraphException("unknown isolation '$name'")
+            } ?: before?.isolation ?: cringle.contract.IsolationLevel.SHARED
+            val given = (data["varArgCounts"] as? JsonObject)?.mapValues { (k, v) -> v.jsonPrimitive.content.toIntOrNull() ?: throw GraphException("the count of '$k' is not a number") }
+                ?: before?.varArgCounts.orEmpty()
+            byNumber[number] = BlueprintBlock(id, block, config, isolation, countsFor(definition(block), given))
         }
         val tethers = ArrayList<TetherDef>()
         for ((number, n) in nodes) {
             val from = byNumber.getValue(number)
             val fromDef = definition(from.block) ?: throw GraphException("unknown block '${from.block}'")
-            val outs = outputs(fromDef)
+            val outs = slots(fromDef, PortDirection.OUT, from.varArgCounts)
             for ((outName, out) in n.jsonObject["outputs"]?.jsonObject.orEmpty()) {
-                val outPort = outs.getOrNull(outName.removePrefix("output_").toIntOrNull()?.minus(1) ?: -1) ?: throw GraphException("'${from.block}' has no output $outName")
+                val outSlot = outs.getOrNull(outName.removePrefix("output_").toIntOrNull()?.minus(1) ?: -1) ?: throw GraphException("'${from.block}' has no output $outName")
+                val outPort = outSlot.port
                 for (c in out.jsonObject["connections"]?.jsonArray.orEmpty()) {
                     val to = byNumber[c.jsonObject["node"]?.jsonPrimitive?.content] ?: throw GraphException("a connection leads to a node that does not exist")
                     val toDef = definition(to.block) ?: throw GraphException("unknown block '${to.block}'")
-                    val inPort = inputs(toDef).getOrNull(c.jsonObject["output"]?.jsonPrimitive?.content?.removePrefix("input_")?.toIntOrNull()?.minus(1) ?: -1)
+                    val inSlot = slots(toDef, PortDirection.IN, to.varArgCounts).getOrNull(c.jsonObject["output"]?.jsonPrimitive?.content?.removePrefix("input_")?.toIntOrNull()?.minus(1) ?: -1)
                         ?: throw GraphException("'${to.block}' has no input ${c.jsonObject["output"]}")
+                    val inPort = inSlot.port
                     val type = commonType(outPort, inPort) ?: throw GraphException("${from.id}.${outPort.name} and ${to.id}.${inPort.name} share no tether type")
-                    val a = Endpoint(from.id, outPort.name)
-                    val b = Endpoint(to.id, inPort.name)
+                    val a = Endpoint(from.id, outPort.name, outSlot.index)
+                    val b = Endpoint(to.id, inPort.name, inSlot.index)
                     val o = options[key(a, b)] as? JsonObject
                     tethers += TetherDef(
                         type, a, b,

@@ -37,6 +37,7 @@ class BlueprintGraphTest {
             listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string), PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), string), PortDefinition("log", PortDirection.OUT, setOf(TetherType.MESSAGE), string)),
             emptyList(),
         ),
+        "p/fan" to BlockDefinition("fan", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string, varArg = true)), emptyList()),
         "p/sink" to BlockDefinition("sink", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)), emptyList()),
     )
 
@@ -94,15 +95,41 @@ class BlueprintGraphTest {
     fun retentionIsolationAndVarArgCountsSurviveASave() {
         val blueprint = Blueprint(
             "app",
-            listOf(BlueprintBlock("a", "p/src", isolation = IsolationLevel.PROCESS, varArgCounts = mapOf("out" to 2)), BlueprintBlock("c", "p/sink")),
-            listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in"), record = RecordConfig(java.time.Duration.ofDays(7), 1_000_000L))),
+            listOf(BlueprintBlock("a", "p/src", isolation = IsolationLevel.PROCESS), BlueprintBlock("c", "p/fan", varArgCounts = mapOf("in" to 2))),
+            listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in", 1), record = RecordConfig(java.time.Duration.ofDays(7), 1_000_000L))),
         )
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
         val saved = BlueprintGraph.toBlueprint("app", graph, BlueprintGraph.options(blueprint), emptyList(), emptyList(), previousBlocks = blueprint.blocks, definition = ::definition)
         assertEquals(blueprint, saved)
-        // without the previous blocks the defaults come back (a new block has no history)
-        val fresh = BlueprintGraph.toBlueprint("app", graph, BlueprintGraph.options(blueprint), emptyList(), emptyList(), definition = ::definition)
-        assertEquals(IsolationLevel.SHARED, fresh.blocks.first().isolation)
+        // the node carries them, so they survive even without the previous blueprint
+        assertEquals(blueprint, BlueprintGraph.toBlueprint("app", graph, BlueprintGraph.options(blueprint), emptyList(), emptyList(), definition = ::definition))
+    }
+
+    @Test
+    fun varArgSlotsComeBackAsTethersWithIndex() {
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("b", "p/src"), BlueprintBlock("f", "p/fan", varArgCounts = mapOf("in" to 2))),
+            listOf(
+                TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("f", "in", 0)),
+                TetherDef(TetherType.MESSAGE, Endpoint("b", "out"), Endpoint("f", "in", 1)),
+            ),
+        )
+        assertEquals(blueprint, roundTrip(blueprint))
+        assertEquals(listOf("in[0]", "in[1]"), BlueprintGraph.slots(definitions.getValue("p/fan"), PortDirection.IN, mapOf("in" to 2)).map { it.label })
+        assertEquals(listOf("a.out>f.in[0]", "b.out>f.in[1]"), blueprint.tethers.map { BlueprintGraph.key(it.from!!, it.to!!) })
+    }
+
+    @Test
+    fun isolationAndCountsOfTheNodeAreWritten() {
+        val blueprint = Blueprint("app", listOf(BlueprintBlock("f", "p/fan", isolation = IsolationLevel.PROCESS, varArgCounts = mapOf("in" to 3))), emptyList())
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
+        val data = graph.toString()
+        assertEquals(true, data.contains("\"isolation\":\"PROCESS\"") && data.contains("\"varArgCounts\":{\"in\":3}"), data)
+        assertEquals(blueprint, BlueprintGraph.toBlueprint("app", graph, JsonObject(emptyMap()), emptyList(), emptyList(), definition = ::definition))
+        // a node without counts gets one slot per VarArg port
+        val bare = Blueprint("app", listOf(BlueprintBlock("f", "p/fan")), emptyList())
+        assertEquals(mapOf("in" to 1), BlueprintGraph.toBlueprint("app", BlueprintGraph.toGraph(bare, emptyMap(), ::definition), JsonObject(emptyMap()), emptyList(), emptyList(), definition = ::definition).blocks.single().varArgCounts)
     }
 
     @Test

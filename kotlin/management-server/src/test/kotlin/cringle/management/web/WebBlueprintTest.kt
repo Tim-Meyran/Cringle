@@ -46,6 +46,7 @@ class WebBlueprintTest {
         val plugin = TestPluginBuilder("acme-flow", "1.0.0").provider("com.acme.FlowProvider")
             .block(block("src", PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE, TetherType.STREAM), string)))
             .block(block("bytes", PortDefinition("out", PortDirection.OUT, setOf(TetherType.BYTE_STREAM), string)))
+            .block(block("fan", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string, varArg = true)))
             .block(block("sink", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
             .block(block("numbers", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), int)))
             .build(Files.createDirectories(dir.resolve("plugins")))
@@ -137,6 +138,19 @@ class WebBlueprintTest {
         val done = admin.post("/blueprints/flow-app/publish").body()
         assertTrue(done.contains("Published flow-app 1.0.0") && done.contains("/deployments") && !done.contains("<table"), done)
         assertEquals(403, viewer.post("/blueprints/flow-app/publish").statusCode())
+    }
+
+    @Test
+    fun aVarArgSlotCanBeCheckedAndAnOutOfRangeSlotIsRefused() {
+        fun check(slot: Int, counts: String) = admin.post(
+            "/blueprints/flow-app/check",
+            mapOf("fromBlock" to "acme-flow/src", "fromOutput" to "1", "toBlock" to "acme-flow/fan", "toInput" to "$slot", "toCounts" to counts),
+        ).body()
+        assertEquals("""{"ok":true,"type":"MESSAGE"}""", check(2, """{"in":2}"""))
+        assertTrue(check(3, """{"in":2}""").contains("has no such input"))
+        assertEquals("""{"ok":true,"type":"MESSAGE"}""", check(1, "{}"), "a VarArg port without a count has one slot")
+        val page = admin.get("/blueprints/flow-app").body()
+        assertTrue(page.contains("acme-flow/fan") && page.contains("varArg"), page)
     }
 
     @Test
