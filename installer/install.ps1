@@ -348,22 +348,49 @@ function Write-Settings {
     [IO.File]::WriteAllText($SettingsFile, $text, (New-Object Text.UTF8Encoding($false)))
 }
 
+# The java that the daemon service starts: the runtime of the installation (current\jre), else %JAVA_HOME% if the machine has it set (read when the
+# service starts, so a new JDK in the same place needs no reinstallation), else the java of the PATH. $null if there is none. The service starts
+# java itself and not cringle-daemon.bat: WinSW ends a service with Ctrl+C, a batch file answers it with "Terminate batch job (Y/N)?" and waits
+# for an answer that never comes, so every stop took the whole stoptimeout and ended with a hard kill (#347).
+function Find-ServiceJava {
+    $bundled = Join-Path (Join-Path (Join-Path $InstallRoot 'current') 'jre') 'bin\java.exe'
+    if (Test-Path -LiteralPath $bundled) { return $bundled }
+    $javaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine')
+    if ($javaHome -and (Test-Path -LiteralPath (Join-Path $javaHome 'bin\java.exe'))) { return '%JAVA_HOME%\bin\java.exe' }
+    $found = Get-Command java.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { return $found.Source }
+    return $null
+}
+
 function Write-ServiceConfig($Service, [string]$Path) {
-    $bat = Join-Path (Join-Path (Join-Path $InstallRoot 'current') 'bin') $Service.Script
+    $current = Join-Path $InstallRoot 'current'
+    $bat = Join-Path (Join-Path $current 'bin') $Service.Script
     $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    $executable = $cmd
+    $arguments = '/c ""' + $bat + '" ' + $Service.Arguments + '"'
+    $stopTimeout = '60 sec'
+    $java = if ($Service.Id -eq 'cringle-daemon') { Find-ServiceJava } else { $null }
+    if ($java) {
+        # the arguments of cringle-daemon.bat: -Dcringle.home and the class path of the installation; CRINGLE_JVM_OPTS is not read here
+        $executable = $java
+        $arguments = ('-Dcringle.home="' + $current + '" -cp "' + (Join-Path $current 'lib') + '\*" cringle.daemon.MainKt ' + $Service.Arguments).TrimEnd()
+        $stopTimeout = '30 sec'
+    } elseif ($Service.Id -eq 'cringle-daemon') {
+        Write-Info 'no Java found to start the daemon directly: the service starts it through cringle-daemon.bat, and a stop takes up to a minute'
+    }
     $esc = { param($Text) [Security.SecurityElement]::Escape($Text) }
     $xml = @"
 <service>
   <id>$(& $esc $Service.Id)</id>
   <name>$(& $esc $Service.Name)</name>
   <description>$(& $esc $Service.Description)</description>
-  <executable>$(& $esc $cmd)</executable>
-  <arguments>$(& $esc ('/c ""' + $bat + '" ' + $Service.Arguments + '"'))</arguments>
+  <executable>$(& $esc $executable)</executable>
+  <arguments>$(& $esc $arguments)</arguments>
   <env name="CRINGLE_HOME" value="$(& $esc $DataRoot)"/>
   <logpath>$(& $esc (Join-Path $DataRoot 'logs'))</logpath>
   <log mode="roll"/>
   <onfailure action="restart" delay="5 sec"/>
-  <stoptimeout>60 sec</stoptimeout>
+  <stoptimeout>$stopTimeout</stoptimeout>
   <startmode>Automatic</startmode>
 </service>
 "@
