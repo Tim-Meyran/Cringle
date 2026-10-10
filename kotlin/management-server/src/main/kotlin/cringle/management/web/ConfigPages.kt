@@ -63,19 +63,23 @@ internal class ConfigPages(private val core: ManagementCore) {
         }
         val editable = session.canFor(Permission.ADMINISTER, scopes(machine))
         val rows = result.entriesList.map { e ->
-            val value = if (editable) {
-                h(
-                    "<form class=\"inline\" hx-post=\"/config/{}/{}\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input name=\"value\" value=\"{}\" aria-label=\"{}\"><button class=\"btn small\">Save</button></form>",
-                    machine, e.key, e.value, e.key,
+            val value = h("<code>{}</code>", e.value.ifEmpty { "(empty)" })
+            val edit = if (editable) {
+                rowDialog(
+                    "config-$machine-${e.key}", "Edit", "Setting ${e.key}", "${e.description} Changing it restarts: ${e.restartsList.joinToString(", ").ifEmpty { "nothing" }}.",
+                    h(
+                        "<form class=\"form-row\" hx-post=\"/config/{}/{}\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}<button type=\"button\" class=\"btn\" data-close>Cancel</button><button class=\"btn primary\">Save</button></form>",
+                        machine, e.key, field("Value", h("<input name=\"value\" value=\"{}\" aria-label=\"{}\">", e.value, e.key), "the default is " + e.defaultValue.ifEmpty { "empty" }),
+                    ),
                 )
             } else {
-                h("<code>{}</code>", e.value.ifEmpty { "(empty)" })
+                Html("")
             }
             h(
                 "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}{}<br><small class=\"muted\">{} Changing it restarts: {}.</small></td>{}</tr>",
                 e.key, value, h("<code>{}</code>", e.defaultValue.ifEmpty { "(empty)" }), if (e.isSet) badge("set", Tone.INFO) else raw("<span class=\"muted\">default</span>"),
                 if (e.overridden) h(" {}", badge("argument wins", Tone.WARN)) else Html(""), e.description, e.restartsList.joinToString(", "),
-                actionsCell(if (e.isSet) button(session, Permission.ADMINISTER, "Reset", "/config/$machine/${e.key}/unset", null, scopes(machine)) else Html("")),
+                actionsCell(edit, if (e.isSet) button(session, Permission.ADMINISTER, "Reset", "/config/$machine/${e.key}/unset", null, scopes(machine)) else Html("")),
             )
         }
         return html(

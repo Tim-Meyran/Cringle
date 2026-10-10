@@ -177,11 +177,14 @@ internal class OverviewPages(private val core: ManagementCore) {
         if (!session.canFor(Permission.OPERATE, scopes)) {
             Html("")
         } else {
-            h(
-                "<details class=\"popover\"><summary>Tags</summary><form class=\"popover-body\" hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary small\">Save tags</button></form></details>",
-                base,
-                field("Roles", h("<input name=\"roles\" value=\"{}\" placeholder=\"role, role\">", roles.joinToString(", ")), "comma separated"),
-                field("Labels", h("<input name=\"labels\" value=\"{}\" placeholder=\"key=value, key=value\">", labels.entries.joinToString(", ") { "${it.key}=${it.value}" }), "key=value, comma separated"),
+            rowDialog(
+                "tags-$base", "Tags", "Tags", "Roles and labels decide where the fabrics of a project are placed (see deployments).",
+                h(
+                    "<form class=\"form-row\" hx-post=\"{}/tags\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary\">Save tags</button></form>",
+                    base,
+                    field("Roles", h("<input name=\"roles\" value=\"{}\" placeholder=\"role, role\">", roles.joinToString(", ")), "comma separated"),
+                    field("Labels", h("<input name=\"labels\" value=\"{}\" placeholder=\"key=value, key=value\">", labels.entries.joinToString(", ") { "${it.key}=${it.value}" }), "key=value, comma separated"),
+                ),
             )
         }
 

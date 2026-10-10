@@ -132,38 +132,61 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         val data = Json.encodeToString(JsonObject.serializer(), JsonObject(model + ("version" to kotlinx.serialization.json.JsonPrimitive(draft.version))))
         val base = "/schemas/${draft.name}"
         val canSave = session.canAnywhere(Permission.OPERATE)
+        val actions = html(
+            raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>"),
+            if (canSave) h("<button type=\"button\" class=\"btn primary\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
+        )
         return html(
-            pageHeader("Schema ${draft.name}", "Types for the data that blocks exchange. The document below is checked while you type.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")),
-            raw("<datalist id=\"standard-types\"><option>cringle.std/String</option><option>cringle.std/Boolean</option><option>cringle.std/Int</option><option>cringle.std/Double</option><option>cringle.std/Bytes</option><option>cringle.std/Timestamp</option><option>cringle.std/Empty</option><option>cringle.std/Error</option></datalist>"),
+            pageHeader("Schema ${draft.name}", "Types for the data that blocks exchange. Every change is checked while you type; the document on the right is what is saved.", actions),
             h(
-                "<form id=\"editor\" class=\"stack\" x-data=\"{}\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
+                "<div class=\"schema-layout\"><form id=\"editor\" class=\"stack schema-editor\" x-data=\"schemaEditor({})\" hx-post=\"{}/check\" hx-trigger=\"input delay:400ms, change, cringle-changed, load\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">",
                 data, base,
             ),
             raw(
                 """<input type="hidden" name="model" :value="JSON.stringify({namespace: namespace, types: types})">
 <input type="hidden" id="revision" name="revision" value="${draft.revision}">
-<div class="form-row schema-head">
-<label class="field"><span>Namespace</span><input x-model="namespace" placeholder="acme.orders"></label>
-<label class="field"><span>Version</span><input name="version" x-model="version" size="10"></label>
+<section class="panel schema-meta"><h2>Schema</h2>
+<div class="form-row">
+<label class="field"><span>Namespace</span><input x-model="namespace" placeholder="acme.orders" aria-label="Namespace"><small>The types are named <code x-text="(namespace || 'namespace') + '/TypeName'"></code></small></label>
+<label class="field"><span>Version</span><input name="version" x-model="version" size="10"><small>Of the package that carries it</small></label>
+</div></section>
+<div class="types-head"><h2>Types</h2><button type="button" class="btn small" @click="openNew()">New type</button></div>
+<div class="empty-card" x-show="types.length === 0"><strong>No type yet</strong><p>A type describes the data that two blocks exchange: a <em>record</em> has named fields, an <em>enum</em> a fixed set of values.</p><button type="button" class="btn primary" @click="openNew()">Create the first type</button></div>
+<datalist id="schema-types"><template x-for="o in typeOptions()" :key="o"><option :value="o"></option></template></datalist>
+<template x-for="(t, ti) in types" :key="ti"><section class="type-card" :class="{open: t.open}">
+<div class="type-head" @click="t.open = !t.open" role="button" tabindex="0" :aria-expanded="t.open" @keydown.enter.prevent="t.open = !t.open">
+<span class="chev" aria-hidden="true"></span><strong x-text="t.name || 'unnamed type'"></strong><span class="tag" x-text="t.kind"></span><span class="muted" x-text="summary(t)"></span>
+<button type="button" class="icon-btn" title="Remove the type" aria-label="Remove the type" @click.stop="removeType(ti)">&times;</button>
 </div>
-<template x-for="(t, ti) in types" :key="ti"><fieldset class="type-card">
-<div class="type-head">
-<input x-model="t.name" placeholder="TypeName" aria-label="Name of the type">
-<select x-model="t.kind" aria-label="Kind of the type"><option value="record">record</option><option value="enum">enum</option></select>
-<button type="button" class="btn small danger" @click="types.splice(ti, 1); ${'$'}dispatch('cringle-changed')">Remove type</button>
+<div class="type-body" x-show="t.open">
+<div class="form-row">
+<label class="field grow"><span>Name</span><input x-model="t.name" placeholder="TypeName"><small class="field-error" x-show="t.name &amp;&amp; !validName(t.name)">Start with a capital letter; letters and digits only.</small></label>
+<div class="field"><span>Kind</span><div class="segmented" role="group" aria-label="Kind"><button type="button" :class="{on: t.kind === 'record'}" @click="t.kind = 'record'; changed()">Record</button><button type="button" :class="{on: t.kind === 'enum'}" @click="t.kind = 'enum'; changed()">Enum</button></div></div>
 </div>
-<div x-show="t.kind === 'enum'"><input class="wide" x-model="t.values" placeholder="VALUE_A, VALUE_B" aria-label="Values of the enum"></div>
 <div x-show="t.kind === 'record'" class="fields">
+<div class="field-row field-row-head" x-show="t.fields.length &gt; 0"><span>Field</span><span>Type</span><span>How often</span><span></span></div>
 <template x-for="(f, fi) in t.fields" :key="fi"><div class="field-row">
-<input x-model="f.name" placeholder="fieldName" aria-label="Name of the field"> <input x-model="f.type" list="standard-types" placeholder="cringle.std/String or Type" aria-label="Type of the field">
+<input x-model="f.name" placeholder="fieldName" aria-label="Name of the field"><input x-model="f.type" list="schema-types" placeholder="cringle.std/String" aria-label="Type of the field">
 <select x-model="f.wrap" aria-label="How often"><option value="">one value</option><option value="list">list</option><option value="map">map</option><option value="optional">optional</option></select>
-<button type="button" class="btn small ghost" @click="t.fields.splice(fi, 1); ${'$'}dispatch('cringle-changed')">Remove field</button></div></template>
-<div><button type="button" class="btn small" @click="t.fields.push({name: '', type: 'cringle.std/String', wrap: ''}); ${'$'}dispatch('cringle-changed')">Add field</button></div>
-</div></fieldset></template>
-<div class="editor-actions"><button type="button" class="btn" @click="types.push({name: '', kind: 'record', fields: [], values: ''}); ${'$'}dispatch('cringle-changed')">Add type</button>""",
+<button type="button" class="icon-btn" title="Remove the field" aria-label="Remove the field" @click="removeField(t, fi)">&times;</button></div></template>
+<div><button type="button" class="btn small" @click="addField(t)">Add field</button></div>
+</div>
+<div x-show="t.kind === 'enum'" class="enum-values">
+<span class="muted">Values</span>
+<div class="chips"><template x-for="(v, vi) in valueList(t)" :key="vi"><span class="chip"><span x-text="v"></span><button type="button" :aria-label="'Remove ' + v" @click="removeValue(t, vi)">&times;</button></span></template>
+<input class="chip-input" placeholder="Add a value, press Enter" aria-label="Add a value" @keydown.enter.prevent="addValue(t, ${'$'}event)" @keydown.comma.prevent="addValue(t, ${'$'}event)" @blur="addValue(t, ${'$'}event)"></div>
+</div>
+</div></section></template>
+<dialog class="dialog small" x-ref="newType" @input.stop @change.stop>
+<div class="dialog-head"><h2>New type</h2><button type="button" class="icon-btn" aria-label="Close" @click="${'$'}refs.newType.close()">&times;</button></div>
+<div class="dialog-body"><p class="hint">A record has named fields, an enum a fixed set of values. You can change the kind later.</p>
+<div class="dialog-error" x-show="newError" x-text="newError"></div>
+<label class="field"><span>Name</span><input x-ref="newName" x-model="newName" placeholder="Order" autocomplete="off" @keydown.enter.prevent="createType()"></label>
+<div class="field"><span>Kind</span><div class="segmented" role="group" aria-label="Kind"><button type="button" :class="{on: newKind === 'record'}" @click="newKind = 'record'">Record</button><button type="button" :class="{on: newKind === 'enum'}" @click="newKind = 'enum'">Enum</button></div></div>
+<div class="dialog-actions"><button type="button" class="btn" @click="${'$'}refs.newType.close()">Cancel</button><button type="button" class="btn primary" @click="createType()">Create type</button></div></div>
+</dialog>""",
             ),
-            if (canSave) h("<button type=\"button\" class=\"btn primary\" hx-post=\"{}/save\" hx-include=\"#editor\" hx-target=\"#preview\" hx-swap=\"morph:innerHTML\">Save draft</button>", base) else Html(""),
-            raw("</div></form><div id=\"preview\"></div>"),
+            raw("</form><aside class=\"schema-preview\"><h2>Document</h2><div id=\"preview\"></div></aside></div>"),
         )
     }
 

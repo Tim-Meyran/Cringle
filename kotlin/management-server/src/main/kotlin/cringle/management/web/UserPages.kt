@@ -81,24 +81,28 @@ internal class UserPages(private val users: UserManager, private val web: WebSer
         action(role, scope)
     }
 
-    /** The scoped roles of a user or group ([base] is `/users/<id>` or `/groups/<name>`): the list with a revoke form each, and the form to grant one. */
-    internal fun scopedPopover(base: String, scoped: Set<RoleAssignment>): Html = h(
-        "<details class=\"popover wide\"><summary>{}</summary><div class=\"popover-body\">{}<form class=\"form-row\" hx-post=\"{}/grant\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}<button class=\"btn primary small\">Grant</button></form></div></details>",
-        if (scoped.isEmpty()) "none" else "${scoped.size} scoped",
-        dataTable(
-            listOf("Role", "For", ""),
-            scoped.sortedWith(compareBy({ it.scope.encode() }, { it.role })).map { a ->
-                h(
-                    "<tr><td>{}</td><td><code>{}</code></td><td class=\"actions\"><form hx-post=\"{}/revoke\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"role\" value=\"{}\"><input type=\"hidden\" name=\"scope\" value=\"{}\"><button class=\"btn small\">Revoke</button></form></td></tr>",
-                    a.role.name.lowercase().replace('_', '-'), a.scope.encode(), base, a.role.name, a.scope.encode(),
-                )
-            },
-            raw("No scoped role."),
+    /** The scoped roles of a user or group ([base] is `/users/<id>` or `/groups/<name>`): the list with a revoke form each, and the form to grant one, in a dialog. */
+    internal fun scopedPopover(base: String, scoped: Set<RoleAssignment>): Html = rowDialog(
+        "scoped-$base", if (scoped.isEmpty()) "none" else "${scoped.size} scoped", "Scoped roles", "A role for one machine, project, fabric or framework function only.",
+        html(
+            dataTable(
+                listOf("Role", "For", ""),
+                scoped.sortedWith(compareBy({ it.scope.encode() }, { it.role })).map { a ->
+                    h(
+                        "<tr><td>{}</td><td><code>{}</code></td><td class=\"actions\"><form hx-post=\"{}/revoke\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"role\" value=\"{}\"><input type=\"hidden\" name=\"scope\" value=\"{}\"><button class=\"btn small\">Revoke</button></form></td></tr>",
+                        a.role.name.lowercase().replace('_', '-'), a.scope.encode(), base, a.role.name, a.scope.encode(),
+                    )
+                },
+                raw("No scoped role."),
+            ),
+            h(
+                "<h3>Grant a scoped role</h3><form class=\"form-row\" hx-post=\"{}/grant\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}<button class=\"btn primary\">Grant</button></form>",
+                base,
+                field("Role", raw("<select name=\"role\"><option value=\"OPERATOR\">operator</option><option value=\"VIEWER\">viewer</option><option value=\"ADMIN\">admin</option></select>")),
+                field("For", raw("<select name=\"kind\"><option>machine</option><option>project</option><option>fabric</option><option>function</option></select>")),
+                field("Name", raw("<input name=\"name\" placeholder=\"m1, shop, trust, ...\" required>"), "function: trust, plugin-trust, users, config"),
+            ),
         ),
-        base,
-        field("Role", raw("<select name=\"role\"><option value=\"OPERATOR\">operator</option><option value=\"VIEWER\">viewer</option><option value=\"ADMIN\">admin</option></select>")),
-        field("For", raw("<select name=\"kind\"><option>machine</option><option>project</option><option>fabric</option><option>function</option></select>")),
-        field("Name", raw("<input name=\"name\" placeholder=\"m1, shop, trust, ...\" required>"), "function: trust, plugin-trust, users"),
     )
 
     internal fun roleBoxes(): Html = html(
@@ -132,23 +136,27 @@ internal class UserPages(private val users: UserManager, private val web: WebSer
         )
     }
 
-    private fun tokenPopover(userId: String, tokens: List<cringle.router.users.TokenInfo>): Html = h(
-        "<details class=\"popover wide\"><summary>{} active</summary><div class=\"popover-body\">{}<form class=\"form-row\" hx-post=\"/users/{}/tokens\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary small\">Create token</button></form></div></details>",
-        tokens.count { !it.revoked }.toString(),
-        dataTable(
-            listOf("Label", "Created", "Expires", ""),
-            tokens.map { t ->
-                h(
-                    "<tr><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
-                    t.label, t.createdAt.toString().take(16).replace("T", " "), t.expiresAt?.toString()?.take(16)?.replace("T", " ") ?: "never",
-                    if (t.revoked) h("<td class=\"actions\">{}</td>", badge("revoked", Tone.BAD)) else actionsCell(button(NO_SESSION_CHECK, Permission.AUTHENTICATED, "Revoke", "/tokens/${t.id}/revoke", "Revoke token ${t.label}?")),
-                )
-            },
-            raw("No token yet."),
+    private fun tokenPopover(userId: String, tokens: List<cringle.router.users.TokenInfo>): Html = rowDialog(
+        "tokens-$userId", "${tokens.count { !it.revoked }} active", "Tokens", "A token signs a user in; its value is shown once, when it is created.",
+        html(
+            dataTable(
+                listOf("Label", "Created", "Expires", ""),
+                tokens.map { t ->
+                    h(
+                        "<tr><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                        t.label, t.createdAt.toString().take(16).replace("T", " "), t.expiresAt?.toString()?.take(16)?.replace("T", " ") ?: "never",
+                        if (t.revoked) h("<td class=\"actions\">{}</td>", badge("revoked", Tone.BAD)) else actionsCell(button(NO_SESSION_CHECK, Permission.AUTHENTICATED, "Revoke", "/tokens/${t.id}/revoke", "Revoke token ${t.label}?")),
+                    )
+                },
+                raw("No token yet."),
+            ),
+            h(
+                "<h3>Create a token</h3><form class=\"form-row\" hx-post=\"/users/{}/tokens\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}<button class=\"btn primary\">Create token</button></form>",
+                userId,
+                field("Label", raw("<input name=\"label\" placeholder=\"laptop\">")),
+                field("Lifetime (hours)", raw("<input name=\"hours\" placeholder=\"never expires\">")),
+            ),
         ),
-        userId,
-        field("Label", raw("<input name=\"label\" placeholder=\"laptop\">")),
-        field("Lifetime (hours)", raw("<input name=\"hours\" placeholder=\"never expires\">")),
     )
 
     private fun groupsList(error: String?): Html {
