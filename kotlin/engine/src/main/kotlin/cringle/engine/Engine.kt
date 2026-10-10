@@ -366,6 +366,28 @@ public class Engine private constructor(
                 cringle.engine.v1.SetRecordingResponse.getDefaultInstance()
             }
 
+        override suspend fun setBreakpoint(request: cringle.engine.v1.SetBreakpointRequest): cringle.engine.v1.SetBreakpointResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                fabrics.setBreakpoint(request.fabricId.value, request.tether, request.enabled)
+                cringle.engine.v1.SetBreakpointResponse.getDefaultInstance()
+            }
+
+        override suspend fun getDebugState(request: cringle.engine.v1.GetDebugStateRequest): cringle.engine.v1.GetDebugStateResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                val state = fabrics.debugState(request.fabricId.value)
+                cringle.engine.v1.GetDebugStateResponse.newBuilder().addAllBreakpoints(state.breakpoints).addAllHeld(
+                    state.held.map {
+                        cringle.engine.v1.HeldValue.newBuilder().setId(it.id).setTether(it.tether).setFrom(it.from).setTo(it.to)
+                            .setKind(it.kind.name.lowercase().replace('_', '-')).setPayload(it.payload).setSinceEpochMillis(it.since.toEpochMilli()).build()
+                    },
+                ).build()
+            }
+
+        override suspend fun resumeFabric(request: cringle.engine.v1.ResumeFabricRequest): cringle.engine.v1.ResumeFabricResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                cringle.engine.v1.ResumeFabricResponse.newBuilder().setReleased(fabrics.resume(request.fabricId.value, request.tether.ifEmpty { null }, request.one)).build()
+            }
+
         override suspend fun setDwhRetention(request: cringle.engine.v1.SetDwhRetentionRequest): cringle.engine.v1.SetDwhRetentionResponse =
             fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
                 fabrics.status(request.fabricId.value) // NOT_FOUND for an unknown fabric

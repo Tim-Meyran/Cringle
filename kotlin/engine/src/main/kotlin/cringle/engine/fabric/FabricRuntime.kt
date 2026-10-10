@@ -76,6 +76,8 @@ public class FabricSpec(
     public val onClose: AutoCloseable? = null,
     /** Records the tethers of the fabric in the data warehouse (#193); closed with the fabric. */
     public val recorder: cringle.engine.dwh.TetherRecorder? = null,
+    /** Holds values back at breakpoints (#323); closed with the fabric. */
+    public val debugger: FabricDebugger? = null,
     /** Migrates the persistent data folders before the blocks start (#258); `null` if the fabric has none. */
     public val migrations: DataMigrations? = null,
     /** How often the assertions of the blueprint are evaluated (#233). */
@@ -282,6 +284,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             if (phase == FabricState.CREATED || phase == FabricState.STOPPED) return
             phase = FabricState.STOPPING
             publish()
+            spec.debugger?.close()
             network?.close()
             // the sockets of the TCP tethers are closed without blocking; the ports are free a moment later
             if (network != null && network.awaitClosed(TCP_CLOSE_TIMEOUT) == false) {
@@ -319,6 +322,20 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     public fun setRecording(all: Boolean, default: cringle.packaging.RecordConfig?) {
         (spec.recorder ?: throw FabricException("fabric '${spec.id}' has no data warehouse to record into")).setMode(all, default)
     }
+
+    private fun debugger(): FabricDebugger = spec.debugger ?: throw FabricException("fabric '${spec.id}' has no tethers to debug")
+
+    /** Sets or removes a breakpoint on a tether (#323, see [FabricDebugger]). */
+    public fun setBreakpoint(tether: String, enabled: Boolean) {
+        if (enabled && network?.stats()?.none { it.id == tether } != false) throw FabricException("fabric '${spec.id}' has no tether '$tether'")
+        debugger().setBreakpoint(tether, enabled)
+    }
+
+    /** The breakpoints and the values held at them. */
+    public fun debugState(): FabricDebugger.State = debugger().state()
+
+    /** Releases held values (one or all, of one tether or of all); returns how many. */
+    public fun resume(tether: String?, one: Boolean): Int = debugger().resume(tether, one)
 
     /** Replaces the instances of the services that the sending tethers call; see [TetherNetwork.updateServiceBindings]. */
     public fun updateServiceBindings(remotes: Map<String, cringle.packaging.RemoteEndpoint>) {

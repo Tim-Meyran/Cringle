@@ -119,7 +119,7 @@ class RoleMatrixTest {
             "CleanupCache" to Permission.OPERATE, "DeployFabric" to Permission.OPERATE, "StartFabric" to Permission.OPERATE,
             "StopFabric" to Permission.OPERATE, "RemoveFabric" to Permission.OPERATE, "GetFabric" to Permission.READ,
             "ListFabrics" to Permission.READ, "QueryLogs" to Permission.READ, "GetMetrics" to Permission.READ, "SetLogCollection" to Permission.OPERATE, "ListConfig" to Permission.READ, "GetConfig" to Permission.READ, "SetConfig" to Permission.ADMINISTER, "UnsetConfig" to Permission.ADMINISTER, "QueryDwh" to Permission.READ, "ListDwhPartitions" to Permission.READ,
-            "SetRecording" to Permission.OPERATE, "SetDwhRetention" to Permission.OPERATE, "AddRemoteRouter" to Permission.ADMINISTER,
+            "SetRecording" to Permission.OPERATE, "SetBreakpoint" to Permission.OPERATE, "GetDebugState" to Permission.OPERATE, "ResumeFabric" to Permission.OPERATE, "SetDwhRetention" to Permission.OPERATE, "AddRemoteRouter" to Permission.ADMINISTER,
             "RemoveRemoteRouter" to Permission.ADMINISTER, "ListRemoteRouters" to Permission.READ, "PublishPackage" to Permission.OPERATE,
             "ListPackages" to Permission.READ, "ListVersions" to Permission.READ, "GetPackage" to Permission.READ,
             "SetPluginTrust" to Permission.ADMINISTER, "DownloadPackage" to Permission.READ, "Recover" to Permission.OPERATE,

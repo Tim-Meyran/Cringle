@@ -119,6 +119,17 @@ service ManagementService {
   // Sets the retention of a partition of a fabric.
   rpc SetDwhRetention(SetDwhRetentionRequest) returns (SetDwhRetentionResponse);
 
+  // --- Remote debugging (Architecture 16.4) ---
+
+  // Sets or removes a breakpoint on a tether of a fabric: values on it are held back before the receiving block gets them.
+  rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
+
+  // The breakpoints of a fabric and the values held at them.
+  rpc GetDebugState(GetDebugStateRequest) returns (GetDebugStateResponse);
+
+  // Releases the held values: the oldest one or all, of one tether or of all.
+  rpc ResumeFabric(ResumeFabricRequest) returns (ResumeFabricResponse);
+
   // --- Routers ---
 
   // Points the local Router at another Router (federation of Routers).
@@ -329,6 +340,33 @@ message SetRecordingRequest {
 }
 
 message SetRecordingResponse {}
+
+message SetBreakpointRequest {
+  string fabric = 1;
+  string tether = 2;
+  bool enabled = 3;
+}
+
+message SetBreakpointResponse {}
+
+message GetDebugStateRequest {
+  string fabric = 1;
+}
+
+message GetDebugStateResponse {
+  repeated string breakpoints = 1;
+  repeated cringle.engine.v1.HeldValue held = 2;
+}
+
+message ResumeFabricRequest {
+  string fabric = 1;
+  string tether = 2;
+  bool one = 3;
+}
+
+message ResumeFabricResponse {
+  int32 released = 1;
+}
 
 message SetDwhRetentionRequest {
   string fabric = 1;
