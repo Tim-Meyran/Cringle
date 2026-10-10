@@ -106,6 +106,48 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("file: hello file")
     }
 
+    @Test
+    fun aCalculationRunsThroughTheStandardBlocks() {
+        // 2.5 + 4.0 is compared with 6.5; the sum and the verdict go to the log as text
+        deployStd(
+            "std-calc",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("tick", "flow.fan-out-int"),
+                    block("total", "flow.fan-out-number"),
+                    block("c1", "math.constant", config("value" to 2.5)),
+                    block("c2", "math.constant", config("value" to 4.0)),
+                    block("c3", "math.constant", config("value" to 6.5)),
+                    block("add", "math.add"),
+                    block("cmp", "logic.compare"),
+                    block("verdict", "text.boolean-to-string"),
+                    block("sum", "text.double-to-string"),
+                    block("l1", "flow.log", config("prefix" to "calc: ")),
+                    block("l2", "flow.log", config("prefix" to "sum: ")),
+                ),
+                listOf(
+                    // an output port has one tether: the fan-out blocks copy a value to several blocks
+                    tether("t", "tick", "tick", "in"),
+                    tether("tick", "a", "c1", "trigger"),
+                    tether("tick", "b", "c2", "trigger"),
+                    tether("tick", "c", "c3", "trigger"),
+                    tether("c1", "out", "add", "a"),
+                    tether("c2", "out", "add", "b"),
+                    tether("add", "out", "total", "in"),
+                    tether("total", "a", "cmp", "a"),
+                    tether("total", "b", "sum", "in"),
+                    tether("c3", "out", "cmp", "b"),
+                    tether("cmp", "out", "verdict", "in"),
+                    tether("verdict", "out", "l1", "in"),
+                    tether("sum", "out", "l2", "in"),
+                ),
+            ),
+        )
+        awaitLog("calc: true", "sum: 6.5")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

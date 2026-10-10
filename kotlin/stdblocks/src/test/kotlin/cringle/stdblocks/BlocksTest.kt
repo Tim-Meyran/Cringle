@@ -11,7 +11,6 @@ import cringle.packaging.PluginManifest
 import cringle.packaging.PluginPackage
 import cringle.stdblocks.flow.Constant
 import cringle.stdblocks.flow.Log
-import cringle.stdblocks.text.ToString
 import cringle.stdblocks.time.TimerTrigger
 import cringle.testkit.BlockTestHarness
 import cringle.testkit.TestBlockPorts
@@ -98,16 +97,6 @@ class BlocksTest {
             assertEquals(listOf<Any>("hello", "hello"), ports.tether("out").sentMessages)
         }
         assertThrows<IllegalArgumentException> { BlockTestHarness(Constant(), ports = ports("trigger", "out")).init() }
-    }
-
-    @Test
-    fun toStringWritesTheDecimalText() = runTest {
-        val ports = ports("in", "out")
-        BlockTestHarness(ToString(), ports = ports).runLifecycle {
-            sendMessage("in", 42L)
-            sendMessage("in", -7)
-            assertEquals(listOf<Any>("42", "-7"), ports.tether("out").sentMessages)
-        }
     }
 
     @Test

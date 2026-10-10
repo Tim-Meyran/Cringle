@@ -12,8 +12,8 @@ The management server carries the plugin (the jar of the module `kotlin/stdblock
 
 ## Rules of the library
 
-- **Block names** are `<theme>.<name>` in lower case: `time.timer-trigger`, `flow.log`. The themes are `time`, `flow`, `text` and `file`; `math` and `logic` follow.
-- **Fixed types.** A block works on one type: counters are `Int`, texts are `String`, conditions will be `Boolean`, numbers `Double`. **Converter blocks** (`text.to-string` so far) join them. There is no type that stands for any value; a block that only passes values on (delay, buffer, merge) therefore exists for `String` until that is decided (`docs/status.md`).
+- **Block names** are `<theme>.<name>` in lower case: `time.timer-trigger`, `flow.log`. The themes are `time`, `flow`, `text`, `file`, `math` and `logic`.
+- **Fixed types.** A block works on one type: counters are `Int`, texts are `String`, conditions are `Boolean`, numbers `Double`. **Converter blocks** (`text.to-string`, `text.parse-int`, `math.int-to-double`, …) join them. There is no type that stands for any value; a block that only passes values on (delay, buffer, merge) therefore exists for `String` until that is decided (`docs/status.md`).
 - Every block has a configuration schema in the namespace `cringle.stdblocks` (`kotlin/stdblocks/src/main/resources/cringle/stdblocks/schema.json`) when it needs a configuration; the editor and the engine check it.
 - A block never reaches outside through anything but a driver: `flow.log` uses the logging driver, the `file` blocks the driver `filesystem-fabric` (below).
 
@@ -25,6 +25,42 @@ The management server carries the plugin (the jar of the module `kotlin/stdblock
 | `flow.constant` | IN `trigger` (`Int`), OUT `out` (`String`) | `value` | Sends `value` for every message at `trigger`. |
 | `text.to-string` | IN `in` (`Int`), OUT `out` (`String`) | – | The decimal text of the integer. |
 | `flow.log` | IN `in` (`String`) | `level` (`DEBUG`, `INFO` default, `WARN`, `ERROR`), `prefix` (optional) | Writes `prefix + text` to the log of the fabric (`cringle logs`). |
+
+Two rules apply to all blocks with more than one input or output:
+
+- **Two inputs `a` and `b`** (`text.concat`, `math.add`, `logic.compare`, …): the block keeps the **latest value of each** and sends a result whenever one of them arrives, as soon as both have a value.
+- **An output port has one tether.** A value that has to go to several blocks goes through a **fan-out** block (`flow.fan-out`, `-int`, `-number`, `-boolean`): every message at `in` leaves on `a`, `b` and `c`; connect what you need.
+- A bad input (a text that is no number, a division by zero, no match) is sent on a port `error` or `nomatch` with the reason or the input; it never throws.
+
+### Flow, text, math and logic
+
+| Block | Ports | Configuration | What it does |
+|---|---|---|---|
+| `flow.fan-out`, `-int`, `-number`, `-boolean` | IN `in`, OUT `a`, `b`, `c` | – | Copies every value to three outputs. |
+| `text.concat` | IN `a`, `b`, OUT `out` | `separator` | `a + separator + b`. |
+| `text.template` | IN `in`, OUT `out` | `template` (with `{}`) | The template with the text at `{}`. |
+| `text.split` | IN `in`, OUT `part` | `separator` | One message per part. |
+| `text.replace` | IN `in`, OUT `out` | `find`, `replacement`, `regex` | Replaces every occurrence (regular expression if `regex`). |
+| `text.regex-match` | IN `in`, OUT `match`, `nomatch` | `pattern`, `group` (default 0) | The group of the first match, or the input on `nomatch`. |
+| `text.trim`, `text.upper`, `text.lower` | IN `in`, OUT `out` | – | Trims, upper-cases, lower-cases. |
+| `text.length` | IN `in`, OUT `out` (`Int`) | – | Number of characters. |
+| `text.contains` | IN `in`, OUT `yes`, `no` | `needle` | The text goes out on `yes` or `no`. |
+| `text.parse-int`, `-double`, `-boolean` | IN `in`, OUT `out` (`Int`, `Double`, `Boolean`), `error` | – | Converts; `error` has the reason. |
+| `text.double-to-string`, `text.boolean-to-string` | IN `in`, OUT `out` | – | The text of a number or a boolean. |
+| `math.constant` | IN `trigger` (`Int`), OUT `out` (`Double`) | `value` | Sends `value` for every trigger. |
+| `math.add`, `subtract`, `multiply`, `min`, `max` | IN `a`, `b`, OUT `out` (`Double`) | – | The result of the latest values. |
+| `math.divide`, `math.modulo` | IN `a`, `b`, OUT `out`, `error` | – | As above; `error` says `division by zero` when `b` is 0. |
+| `math.abs`, `negate`, `floor`, `ceil` | IN `in`, OUT `out` | – | One-number functions. |
+| `math.round` | IN `in`, OUT `out` | `decimals` (0 to 15, default 0) | Rounds half up. |
+| `math.random` | IN `trigger`, OUT `out` | `min` (0), `max` (1) | A random number from `min` up to, not including, `max`. |
+| `math.counter` | IN `in`, `reset` (`Int`), OUT `count` (`Int`) | `start` (0), `step` (1) | Adds `step` for every `in` and sends the count; `reset` goes back to `start`. |
+| `math.accumulator` | IN `in` (`Double`), `reset`, OUT `sum` | – | The running sum; `reset` sets it to 0. |
+| `math.int-to-double`, `math.to-int` | IN `in`, OUT `out` (`error` for `to-int`) | – | Converts (`to-int` rounds; `error` for a value out of range). |
+| `logic.compare`, `logic.compare-text` | IN `a`, `b`, OUT `out` (`Boolean`) | `operator` (`EQ` default, `NE`, `LT`, `LE`, `GT`, `GE`) | Compares numbers or texts. |
+| `logic.and`, `or`, `xor` | IN `a`, `b`, OUT `out` | – | Boolean operators. |
+| `logic.not` | IN `in`, OUT `out` | – | Negation. |
+| `logic.if`, `logic.if-number` | IN `condition`, `value`, OUT `then`, `else` | – | Sends a `value` on `then` or `else`, by the latest `condition` (none yet counts as false). |
+| `logic.filter`, `logic.filter-number` | IN `condition`, `value`, OUT `out` | – | A `value` passes while the latest `condition` is true. |
 
 ### Files: `file.*`
 

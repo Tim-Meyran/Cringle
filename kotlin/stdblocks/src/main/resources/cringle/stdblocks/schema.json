@@ -42,6 +42,39 @@
         "reportExisting": { "optional": "cringle.std/Boolean" }
       }
     },
+    "ConcatConfig": { "record": { "separator": { "optional": "cringle.std/String" } } },
+    "TemplateConfig": { "record": { "template": "cringle.std/String" } },
+    "SplitConfig": { "record": { "separator": "cringle.std/String" } },
+    "ReplaceConfig": {
+      "record": {
+        "find": "cringle.std/String",
+        "replacement": { "optional": "cringle.std/String" },
+        "regex": { "optional": "cringle.std/Boolean" }
+      }
+    },
+    "RegexMatchConfig": {
+      "record": {
+        "pattern": "cringle.std/String",
+        "group": { "optional": "cringle.std/Int" }
+      }
+    },
+    "ContainsConfig": { "record": { "needle": "cringle.std/String" } },
+    "MathConstantConfig": { "record": { "value": "cringle.std/Double" } },
+    "RoundConfig": { "record": { "decimals": { "optional": "cringle.std/Int" } } },
+    "RandomConfig": {
+      "record": {
+        "min": { "optional": "cringle.std/Double" },
+        "max": { "optional": "cringle.std/Double" }
+      }
+    },
+    "CounterConfig": {
+      "record": {
+        "start": { "optional": "cringle.std/Int" },
+        "step": { "optional": "cringle.std/Int" }
+      }
+    },
+    "CompareOperator": { "enum": ["EQ", "NE", "LT", "LE", "GT", "GE"] },
+    "CompareConfig": { "record": { "operator": { "optional": "CompareOperator" } } },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }
