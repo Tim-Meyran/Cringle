@@ -16,6 +16,7 @@ import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
 import cringle.packaging.ManifestJson
 import cringle.packaging.RecordConfig
+import cringle.packaging.RemoteEndpoint
 import cringle.packaging.TetherDef
 import java.nio.file.Files
 import java.nio.file.Path
@@ -133,13 +134,53 @@ class BlueprintGraphTest {
     }
 
     @Test
+    fun remoteAndServiceTethersAreDrawnAndComeBackUnchanged() {
+        val remote = RemoteEndpoint(null, "ab".repeat(32), "other", "in", "port")
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("c", "p/sink")),
+            listOf(
+                TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), null, delivery = DeliveryPolicy.BUFFER, remote = remote.copy(address = "10.0.0.5:7460")),
+                TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), null, service = "orders"),
+                TetherDef(TetherType.MESSAGE, null, Endpoint("c", "in"), remote = remote),
+            ),
+        )
+        assertEquals(true, blueprint.tethers.all { BlueprintGraph.drawable(it) })
+        assertEquals(blueprint, roundTrip(blueprint))
+        assertEquals(setOf("a.out>ext1"), BlueprintGraph.options(blueprint).keys)
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition).toString()
+        assertEquals(true, graph.contains("\"class\":\"cringle-external\"") && graph.contains("\"mode\":\"service\"") && graph.contains("\"send\":false"), graph)
+    }
+
+    @Test
+    fun aRemoteEndNeedsAPortThatSupportsItsType() {
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src")),
+            listOf(TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("a", "out"), null, remote = RemoteEndpoint(null, "ab".repeat(32), "other", "in", "port"))),
+        )
+        val e = assertThrows<GraphException> { roundTrip(blueprint) }
+        assertEquals(true, e.message!!.contains("does not support REQUEST_RESPONSE"), e.message)
+    }
+
+    @Test
+    fun aTetherToAPortThatNoLongerExistsIsKeptNotLost() {
+        val gone = TetherDef(TetherType.MESSAGE, Endpoint("a", "gone"), null, service = "orders")
+        val blueprint = Blueprint("app", listOf(BlueprintBlock("a", "p/src")), listOf(gone))
+        assertEquals(listOf(gone), BlueprintGraph.unresolved(blueprint, ::definition))
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
+        val saved = BlueprintGraph.toBlueprint("app", graph, JsonObject(emptyMap()), BlueprintGraph.unresolved(blueprint, ::definition), emptyList(), definition = ::definition)
+        assertEquals(blueprint, saved)
+    }
+
+    @Test
     fun theSampleBlueprintsComeBackUnchangedWithTheirServicesKept() {
         for (file in listOf("shop/blueprints/app.json", "orders-service/blueprints/service.json")) {
             val text = Files.readString(Path.of("..", "..", "samples", "shared-service", file))
             val blueprint = ManifestJson.parseBlueprint(text, file)
             val defs = blueprint.blocks.associate { it.block to BlockDefinition(it.block.substringAfter('/'), emptyList(), emptyList(), emptyList()) }
             val graph = BlueprintGraph.toGraph(blueprint, emptyMap()) { defs[it] }
-            val back = BlueprintGraph.toBlueprint(blueprint.name, graph, JsonObject(emptyMap()), blueprint.tethers.filterNot { BlueprintGraph.drawable(it) }, blueprint.provides) { defs[it] }
+            val back = BlueprintGraph.toBlueprint(blueprint.name, graph, BlueprintGraph.options(blueprint), blueprint.tethers.filterNot { BlueprintGraph.drawable(it) } + BlueprintGraph.unresolved(blueprint) { defs[it] }, blueprint.provides) { defs[it] }
             assertEquals(blueprint, back, file)
         }
     }
