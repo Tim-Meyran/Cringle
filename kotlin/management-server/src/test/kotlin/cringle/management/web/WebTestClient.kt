@@ -47,6 +47,13 @@ class WebTestClient(private val port: Int, serverKey: String) {
         client = HttpClient.newBuilder().sslContext(context).followRedirects(HttpClient.Redirect.NEVER).build()
     }
 
+    /** Takes over the session that [response] set (a sign-in that did not go through the login form, the invitation). */
+    fun adopt(response: HttpResponse<String>): WebTestClient {
+        cookie = response.headers().firstValue("Set-Cookie").get().substringBefore(';')
+        csrf = Regex("\"X-CSRF-Token\": \"([^\"]+)\"").find(get("/").body())?.groupValues?.get(1)
+        return this
+    }
+
     /** Logs in with [token]; later requests carry the session. */
     fun login(token: String): WebTestClient {
         val response = post("/login", mapOf("token" to token), withCsrf = false)
