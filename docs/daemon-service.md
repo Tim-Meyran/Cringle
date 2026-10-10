@@ -200,13 +200,15 @@ Use a service wrapper such as [WinSW](https://github.com/winsw/winsw). `cringle-
 <service>
   <id>cringle-daemon</id>
   <name>Cringle Daemon</name>
-  <executable>%SystemRoot%\System32\cmd.exe</executable>
-  <arguments>/c ""C:\Program Files\Cringle\current\bin\cringle-daemon.bat" --port 7400 --combined"</arguments>
+  <executable>%JAVA_HOME%\bin\java.exe</executable>
+  <arguments>-Dcringle.home="C:\Program Files\Cringle\current" -cp "C:\Program Files\Cringle\current\lib\*" cringle.daemon.MainKt --port 7400 --combined</arguments>
   <env name="CRINGLE_HOME" value="C:\ProgramData\Cringle"/>
   <onfailure action="restart" delay="5 sec"/>
-  <stoptimeout>60 sec</stoptimeout>
+  <stoptimeout>30 sec</stoptimeout>
 </service>
 ```
+
+The service starts `java` itself. It used to start `cmd /c cringle-daemon.bat`, but WinSW ends a service with Ctrl+C, a batch file answers that with "Terminate batch job (Y/N)?" and waits, so every stop took the whole `stoptimeout` and ended in a hard kill without the shutdown of the daemon (#347). `install.ps1` takes the java of the installation (`current\jre`), else `%JAVA_HOME%` if the machine has it set (read when the service starts), else the java of the PATH; without one it falls back to the batch file. The direct start does not read `CRINGLE_JVM_OPTS` and does not check for Java 21: a java that is too old ends with a class version error in `logs\cringle-daemon.err.log`. A service file of an earlier installation stays as it is until the installer runs again (`self-update` does not rewrite it).
 
 ```
 cringle-daemon.exe install
