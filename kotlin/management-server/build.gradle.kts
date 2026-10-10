@@ -5,6 +5,8 @@ plugins {
 }
 
 dependencies {
+    // the standard blocks (plugin cringle-std): their classes give the definitions, their jar is the lib of the package that is published at start
+    implementation(project(":stdblocks"))
     api(project(":common"))
     implementation(project(":contract"))
     implementation(project(":router"))
@@ -24,4 +26,14 @@ dependencies {
     testImplementation(project(":repository"))
     testImplementation(project(":testkit"))
     testImplementation(testFixtures(project(":common")))
+}
+
+// the jar of the standard blocks is a resource: StdBlocksInstaller builds the package `cringle-std` from it
+tasks.processResources {
+    dependsOn(":stdblocks:jar")
+    from(project(":stdblocks").layout.buildDirectory.dir("libs")) {
+        include("stdblocks*.jar")
+        into("std")
+        rename { "stdblocks.jar" }
+    }
 }

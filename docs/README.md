@@ -26,6 +26,7 @@
 | [migration-guide.md](migration-guide.md) | Versions of data: processors, backups, failure, rollback. Englisch. |
 | [debugging.md](debugging.md) | Remote debugging of a fabric: breakpoints on tethers, held values, resume, step. Englisch. |
 | [acceptance-1.0.md](acceptance-1.0.md) | Chapter 26 of the architecture against the code: what is done, changed, partly done or open. Englisch. |
+| [standard-blocks.md](standard-blocks.md) | The plugin `cringle-std`: the library of standard blocks, how it reaches the repository, the rules for new blocks. Englisch. |
 
 Nicht in `docs/`:
 
