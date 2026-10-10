@@ -29,14 +29,13 @@ The management server carries the plugin (the jar of the module `kotlin/stdblock
 Two rules apply to all blocks with more than one input or output:
 
 - **Two inputs `a` and `b`** (`text.concat`, `math.add`, `logic.compare`, …): the block keeps the **latest value of each** and sends a result whenever one of them arrives, as soon as both have a value.
-- **An output port has one tether.** A value that has to go to several blocks goes through a **fan-out** block (`flow.fan-out`, `-int`, `-number`, `-boolean`): every message at `in` leaves on `a`, `b` and `c`; connect what you need.
+- **An output port can start several `MESSAGE` tethers** (`spec/tether.md`): connect it to every block that needs the value; there are no copy blocks. A port that sends requests or streams has one tether.
 - A bad input (a text that is no number, a division by zero, no match) is sent on a port `error` or `nomatch` with the reason or the input; it never throws.
 
-### Flow, text, math and logic
+### Text, math and logic
 
 | Block | Ports | Configuration | What it does |
 |---|---|---|---|
-| `flow.fan-out`, `-int`, `-number`, `-boolean` | IN `in`, OUT `a`, `b`, `c` | – | Copies every value to three outputs. |
 | `text.concat` | IN `a`, `b`, OUT `out` | `separator` | `a + separator + b`. |
 | `text.template` | IN `in`, OUT `out` | `template` (with `{}`) | The template with the text at `{}`. |
 | `text.split` | IN `in`, OUT `part` | `separator` | One message per part. |

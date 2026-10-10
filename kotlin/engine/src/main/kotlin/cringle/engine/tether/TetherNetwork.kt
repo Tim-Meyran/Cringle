@@ -81,6 +81,8 @@ public fun interface TetherDeliverer {
 public class TetherNetwork private constructor(
     private val config: TetherConfig,
     private val connections: Map<String, Connection>,
+    /** The tethers that start at an `OUT` endpoint, by the key of the endpoint: several if they are all `MESSAGE` tethers (fan-out). */
+    private val outgoing: Map<String, List<Connection>> = emptyMap(),
     private val onDeliveryFailure: (TetherInfo, Throwable) -> Unit,
 ) : PortWiring, AutoCloseable {
     private val validator = config.schemas?.let { SchemaValidator(it) }
@@ -792,12 +794,46 @@ public class TetherNetwork private constructor(
 
     override fun tether(blockId: BlockId, port: PortDefinition, index: Int?): Tether {
         val key = key(blockId.value, port.name, index)
-        val connection = connections[key]
-        return when {
-            connection == null -> Unconnected(blockId.value, port, index)
-            port.direction == PortDirection.OUT -> Outgoing(connection)
-            else -> Incoming(connection)
+        if (port.direction == PortDirection.OUT) {
+            val starting = outgoing[key].orEmpty()
+            return when (starting.size) {
+                0 -> Unconnected(blockId.value, port, index)
+                1 -> Outgoing(starting.single())
+                else -> FanOut(starting.map { Outgoing(it) })
+            }
         }
+        val connection = connections[key] ?: return Unconnected(blockId.value, port, index)
+        return Incoming(connection)
+    }
+
+    /**
+     * An `OUT` port with several tethers (all `MESSAGE`): a message goes to every tether in the order of the blueprint. A tether that cannot take it does not
+     * stop the others; the first failure is thrown after all were tried.
+     */
+    private class FanOut(private val all: List<Tether>) : Tether {
+        override val type: TetherType = all.first().type
+
+        override suspend fun send(message: Any) {
+            var failure: Exception? = null
+            for (t in all) {
+                try {
+                    t.send(message)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (failure == null) failure = e else failure.addSuppressed(e)
+                }
+            }
+            failure?.let { throw it }
+        }
+
+        private fun unsupported(): Nothing = throw IllegalStateException("a port with several tethers sends messages only")
+
+        override suspend fun request(request: Any): Any = unsupported()
+
+        override suspend fun openStream(): TetherStream = unsupported()
+
+        override suspend fun openByteStream(): TetherByteStream = unsupported()
     }
 
     private class Unconnected(block: String, port: PortDefinition, index: Int?) : Tether {
@@ -943,6 +979,18 @@ public class TetherNetwork private constructor(
         ): TetherNetwork {
             val problems = ArrayList<String>()
             val connections = HashMap<String, Connection>()
+            val outgoing = HashMap<String, MutableList<Connection>>()
+
+            // an OUT endpoint can start several tethers if all of them are MESSAGE tethers; every other endpoint belongs to one tether only
+            fun addOutgoing(k: String, c: Connection, problem: String) {
+                val starting = outgoing.getOrPut(k) { ArrayList() }
+                if (starting.isNotEmpty() && (c.info.type != TetherType.MESSAGE || starting.first().info.type != TetherType.MESSAGE)) {
+                    problems += problem
+                    return
+                }
+                connections[if (starting.isEmpty()) k else "$k#${starting.size}"] = c
+                starting += c
+            }
             val counts = blueprint.blocks.associate { it.id to it.varArgCounts }
 
             fun endpoint(e: Endpoint, direction: PortDirection, label: String): PortDefinition? {
@@ -1029,7 +1077,11 @@ public class TetherNetwork private constructor(
                         sends,
                     )
                     val k = key(local.block, local.port, local.index)
-                    if (connections.put(k, c) != null) problems += "tether $id: endpoint '${local.block}.${local.port}' is already connected"
+                    if (sends) {
+                        addOutgoing(k, c, "tether $id: endpoint '${local.block}.${local.port}' is already connected")
+                    } else if (connections.put(k, c) != null) {
+                        problems += "tether $id: endpoint '${local.block}.${local.port}' is already connected"
+                    }
                     if (!sends) receivers += c to remote
                     continue
                 }
@@ -1067,13 +1119,11 @@ public class TetherNetwork private constructor(
                     t.retry ?: RetryConfig(),
                     t.serial,
                 )
-                for (e in listOf(localFrom, localTo)) {
-                    val k = key(e.block, e.port, e.index)
-                    if (connections.put(k, c) != null) problems += "tether $id: endpoint '${e.block}.${e.port}' is already connected"
-                }
+                addOutgoing(key(localFrom.block, localFrom.port, localFrom.index), c, "tether $id: endpoint '${localFrom.block}.${localFrom.port}' is already connected")
+                if (connections.put(key(localTo.block, localTo.port, localTo.index), c) != null) problems += "tether $id: endpoint '${localTo.block}.${localTo.port}' is already connected"
             }
             if (problems.isNotEmpty()) throw TetherWiringException("tethers cannot be wired:\n" + problems.joinToString("\n") { "  $it" })
-            val network = TetherNetwork(config, connections, onDeliveryFailure)
+            val network = TetherNetwork(config, connections, outgoing, onDeliveryFailure)
             if (receivers.isNotEmpty()) {
                 network.registration = config.remote!!.register(
                     receivers.map { (c, remote) ->

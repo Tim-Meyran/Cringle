@@ -75,6 +75,7 @@ class TetherNetworkTest {
         emptyList(),
         listOf(
             PortDefinition("in", PortDirection.IN, all, string),
+            PortDefinition("in2", PortDirection.IN, all, string),
             PortDefinition("inInt", PortDirection.IN, setOf(TetherType.MESSAGE), int),
         ),
         emptyList(),
@@ -292,6 +293,38 @@ class TetherNetworkTest {
         val wrongDirection = listOf(TetherDef(TetherType.MESSAGE, Endpoint("d", "in"), null, remote = remote))
         val direction = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, wrongDirection), defs, config) }
         assertTrue(direction.message!!.contains("expected OUT"), direction.message)
+    }
+
+    @Test
+    fun aMessageOutPortCanHaveSeveralTethers(): Unit = runBlocking {
+        val received = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val both = CompletableDeferred<Unit>()
+        val tethers = listOf(tether(TetherType.MESSAGE, "out", "in"), tether(TetherType.MESSAGE, "out", "in2"))
+        setup(tethers) { e ->
+            received += "${(e as TetherEvent.Message).port.name}=${e.value}"
+            if (received.size == 2) both.complete(Unit)
+        }.use { s ->
+            s.out("out").send("hi")
+            withTimeout(10.seconds) { both.await() }
+            assertEquals(setOf("in=hi", "in2=hi"), received.toSet())
+        }
+    }
+
+    @Test
+    fun otherTypesStayOneTetherPerOutPort() {
+        val defs = mapOf("s" to srcDef, "d" to dstDef)
+        val blocks = listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst"))
+        val twoRequests = listOf(tether(TetherType.REQUEST_RESPONSE, "out", "in"), tether(TetherType.REQUEST_RESPONSE, "out", "in2"))
+        val mixed = listOf(tether(TetherType.MESSAGE, "out", "in"), tether(TetherType.STREAM, "out", "in2"))
+        val mixedOtherWay = listOf(tether(TetherType.STREAM, "out", "in"), tether(TetherType.MESSAGE, "out", "in2"))
+        for (tethers in listOf(twoRequests, mixed, mixedOtherWay)) {
+            val e = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, tethers), defs, config()) }
+            assertTrue(e.message!!.contains("endpoint 's.out' is already connected"), e.message)
+        }
+        // an input port still belongs to one tether only
+        val intoOne = listOf(tether(TetherType.MESSAGE, "out", "in"), tether(TetherType.MESSAGE, "unused", "in"))
+        val e = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, intoOne), defs, config()) }
+        assertTrue(e.message!!.contains("endpoint 'd.in' is already connected"), e.message)
     }
 
     @Test
