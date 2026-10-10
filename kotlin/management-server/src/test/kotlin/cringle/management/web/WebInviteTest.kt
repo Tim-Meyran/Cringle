@@ -71,16 +71,24 @@ class WebInviteTest {
         assertEquals("no-referrer", form.headers().firstValue("Referrer-Policy").get())
         assertTrue(form.body().contains("viewer") && form.body().contains("operator for machine:m1"), form.body())
 
+        // the name is the last step: the person is signed in, no token and no second code are shown
         val done = visitor.post(path, mapOf("name" to "newbie"), withCsrf = false)
-        assertEquals(200, done.statusCode())
-        assertEquals("no-referrer", done.headers().firstValue("Referrer-Policy").get())
-        val token = Regex("<code data-copy=\"(crt_[^\"]+)\"").find(done.body())!!.groupValues[1]
-        assertTrue(done.body().contains("/login#token=$token") && done.body().contains("<svg class=\"qr\""), done.body())
+        assertEquals(303, done.statusCode(), done.body())
+        assertEquals("/", done.headers().firstValue("Location").get())
+        assertTrue(done.headers().firstValue("Set-Cookie").get().contains("cringle_session=") && done.headers().firstValue("Set-Cookie").get().contains("HttpOnly"))
+        assertFalse(done.body().contains("crt_") || done.body().contains("<svg"))
         val user = users.listUsers().first { it.user.name == "newbie" }
         assertEquals(setOf(UserRole.VIEWER), user.user.roles)
         assertEquals(1, user.user.scoped.size)
-        assertNotNull(users.authenticate(token))
-        WebTestClient(server.port, key).login(token)
+        // the session works: the start page opens for the new user
+        val signedIn = anonymous().adopt(done)
+        val start = signedIn.get("/")
+        assertEquals(200, start.statusCode())
+        assertTrue(start.body().contains("newbie") || start.body().contains("Dashboard"), start.body())
+        // the token that came with the user ends after minutes and nobody knows it
+        val token = users.listTokens(user.user.id).single()
+        assertEquals("invite", token.label)
+        assertTrue(java.time.Duration.between(token.createdAt, token.expiresAt).toMinutes() <= 10)
 
         // the second visit, and a second redeem, show the neutral page
         for (response in listOf(anonymous().get(path), anonymous().post(path, mapOf("name" to "other"), withCsrf = false))) {
@@ -92,13 +100,24 @@ class WebInviteTest {
     }
 
     @Test
+    fun aUserWithoutTheRightToReadIsSignedInAndSeesAWelcome() {
+        val answer = admin.post("/invites", mapOf("role-END_USER" to "on")).body()
+        val path = Regex("data-copy=\"(https://[^\"]+/invite/inv_[^\"]+)\"").find(answer)!!.groupValues[1].substringAfter("https://localhost:${server.port}")
+        val done = anonymous().post(path, mapOf("name" to "guest"), withCsrf = false)
+        assertEquals(200, done.statusCode())
+        assertTrue(done.body().contains("Welcome, guest") && done.body().contains("no rights"), done.body())
+        assertTrue(done.headers().firstValue("Set-Cookie").get().contains("cringle_session="))
+        assertEquals("no-store", done.headers().firstValue("Cache-Control").get())
+    }
+
+    @Test
     fun aTakenNameKeepsTheInviteValid() {
         users.createUser("taken", setOf(UserRole.VIEWER))
         val path = createInvite()
         val visitor = anonymous()
         val refused = visitor.post(path, mapOf("name" to "taken"), withCsrf = false)
         assertTrue(refused.body().contains("already exists") && refused.body().contains("<form"), refused.body())
-        assertEquals(200, visitor.post(path, mapOf("name" to "fresh"), withCsrf = false).statusCode())
+        assertEquals(303, visitor.post(path, mapOf("name" to "fresh"), withCsrf = false).statusCode())
         assertTrue(users.listUsers().any { it.user.name == "fresh" })
     }
 

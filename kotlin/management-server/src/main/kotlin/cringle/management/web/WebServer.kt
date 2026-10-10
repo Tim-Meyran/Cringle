@@ -165,6 +165,12 @@ public class WebServer(
         return layout.page("Sign in", null, content, openMode = users == null)
     }
 
+    /** Signs in with [token] without the login form (the invitation): the session, `null` if the token is not accepted. */
+    internal fun openSession(token: String): Session? = sessions.login(token)
+
+    /** The cookie that carries [session]. */
+    internal fun sessionCookieOf(session: Session): String = sessionCookie(session.id)
+
     private fun sessionCookie(value: String, maxAge: Int? = null): String =
         "cringle_session=$value; HttpOnly; Secure; SameSite=Strict; Path=/" + (maxAge?.let { "; Max-Age=$it" } ?: "")
 

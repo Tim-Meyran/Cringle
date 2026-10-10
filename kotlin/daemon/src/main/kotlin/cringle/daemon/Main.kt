@@ -15,6 +15,18 @@ private const val USAGE =
 
 /** Entry point of the daemon process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
+    try {
+        runDaemon(args)
+    } catch (e: java.io.IOException) {
+        System.err.println("error: the daemon cannot start: ${e.message}")
+        if (e is java.net.BindException || e.message?.contains("bind", ignoreCase = true) == true) {
+            System.err.println("another program may use the port (daemon.port), and a port below 1024 needs root or the capability CAP_NET_BIND_SERVICE (docs/daemon-service.md)")
+        }
+        exitProcess(1)
+    }
+}
+
+private fun runDaemon(args: Array<String>) {
     var home: java.nio.file.Path? = null
     var port = 0
     var router: String? = null

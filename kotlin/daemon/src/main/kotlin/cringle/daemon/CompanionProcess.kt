@@ -45,6 +45,10 @@ internal class CompanionProcess(
 
     @Volatile
     private var pumpThread: Thread? = null
+
+    /** The size of the error log when the program was started the last time: what it wrote after that is the reason it ended. */
+    @Volatile
+    private var errorFrom = 0L
     private val starts = AtomicInteger()
 
     /** How often the program was started, the first start included. */
@@ -83,6 +87,8 @@ internal class CompanionProcess(
                     break
                 }
                 if (!stopped) log.warn("{} ended with exit code {}", name, code)
+                // the reason is in the error output of the program: it goes to the log of the daemon too, so that `journalctl -u cringle-daemon` shows it
+                if (!stopped && code != 0) errorTail()?.let { log.warn("{} said: {}", name, it) }
             }
             if (stopped) break
             quick = if (Duration.ofNanos(System.nanoTime() - began) >= stableAfter) 0 else quick + 1
@@ -98,7 +104,9 @@ internal class CompanionProcess(
 
     private fun launch(): Process? {
         val cmd = listOf(command.java) + command.jvmArgs + listOf("-cp", command.classPath, mainClass) + arguments
-        val builder = ProcessBuilder(cmd).redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("$name.err.log").toFile()))
+        val errorLog = logs.resolve("$name.err.log")
+        errorFrom = runCatching { Files.size(errorLog) }.getOrDefault(0L)
+        val builder = ProcessBuilder(cmd).redirectError(ProcessBuilder.Redirect.appendTo(errorLog.toFile()))
         builder.environment().putAll(environment)
         val started = try {
             builder.start()
@@ -113,6 +121,16 @@ internal class CompanionProcess(
             start()
         }
         return started
+    }
+
+    /** The last lines that the program wrote to its error output since it was started the last time, `null` if there are none. */
+    internal fun errorTail(): String? = try {
+        val file = logs.resolve("$name.err.log")
+        val bytes = Files.readAllBytes(file)
+        val from = minOf(errorFrom, bytes.size.toLong()).toInt()
+        tailOf(String(bytes, from, bytes.size - from, Charsets.UTF_8))
+    } catch (e: IOException) {
+        null
     }
 
     /** Copies the output to the log file, without the lines that are secrets. */
@@ -142,6 +160,19 @@ internal class CompanionProcess(
         thread?.join(2000)
         pumpThread?.join(2000)
     }
+}
+
+/**
+ * The last [lines] lines of [text] (blank ones left out) in one line, separated by ` | ` and not longer than 1500 characters; `null` if there are none.
+ * The lines of a stack trace come in reverse for the reader: the exception is the last `Exception in thread` line, so those are kept first.
+ */
+internal fun tailOf(text: String, lines: Int = 10): String? {
+    val all = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    if (all.isEmpty()) return null
+    val exception = all.lastOrNull { it.startsWith("Exception in thread") || it.startsWith("Error:") }
+    val tail = all.takeLast(lines)
+    val chosen = if (exception != null && exception !in tail) listOf(exception) + tail else tail
+    return chosen.joinToString(" | ").takeLast(1500)
 }
 
 /**
