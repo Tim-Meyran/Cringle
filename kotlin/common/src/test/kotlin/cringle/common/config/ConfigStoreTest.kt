@@ -61,6 +61,21 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun theNameOfTheMachineAndTheRouterAreChecked() {
+        val store = store()
+        for (value in listOf("node1", "node1.tail1234.ts.net", "100.64.0.7", "[fd7a:115c::1]")) assertEquals(value, store.set("cringle.host", value))
+        for (value in listOf("https://node1", "node1:7500", "node 1", "node1/path", "-node1")) assertThrows<ConfigException>(value) { store.set("cringle.host", value) }
+        assertEquals("", store.set("cringle.host", ""))
+        assertEquals("7450", store.get("router.port"))
+        assertEquals("local", store.get("router.mode"))
+        assertEquals("remote", store.set("router.mode", "Remote"))
+        assertThrows<ConfigException> { store.set("router.mode", "everywhere") }
+        assertEquals("node2.tail.example:7450", store.set("router.address", "node2.tail.example:7450"))
+        for (value in listOf("node2", "node2:0", ":7450", "node2:abc")) assertThrows<ConfigException>(value) { store.set("router.address", value) }
+        assertThrows<ConfigException> { store.set("router.port", "99999") }
+    }
+
+    @Test
     fun valuesAreWrittenInTheirNormalForm() {
         val store = store()
         assertEquals("all", store.set("bind", "ALL"))

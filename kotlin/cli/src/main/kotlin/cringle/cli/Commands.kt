@@ -1011,13 +1011,15 @@ internal val COMMANDS: List<Command> = listOf(
 
     // --- installation ---
     Command(
-        listOf("setup"), "[--bind <loopback|all>] [--components LIST] [--port N] [--web-port N] [--web-url URL] [--repository-port N] [--daemon-port N]",
+        listOf("setup"), "[--bind <loopback|all>] [--host NAME] [--components LIST] [--port N] [--web-port N] [--web-url URL] [--repository-port N] [--daemon-port N] [--router-port N]",
         "Change the settings of the services on THIS machine (without options: ask for each, an empty answer keeps the value) and restart the daemon; cringle config does it through the management server",
         listOf(
             opt("bind", "loopback (default) or all (every network interface)", "VALUE"),
             opt("components", "what the daemon runs besides itself: management, repository, both (comma) or none", "LIST"),
             opt("port", "port of the management server (default 7500)", "PORT"),
             opt("web-port", "port of the web interface (default 8443)", "PORT"),
+            opt("host", "the name or address under which other Cringle machines reach this one (in a Tailscale network its Tailscale name or address)", "NAME"),
+            opt("router-port", "port of the router of the daemon (default 7450)", "PORT"),
             opt("web-url", "public address of the web interface for links and QR codes, https://host:port", "URL"),
             opt("repository-port", "port of the repository (default 7600)", "PORT"),
             opt("daemon-port", "port of the daemon (default 7400)", "PORT"),
@@ -1036,6 +1038,7 @@ internal val COMMANDS: List<Command> = listOf(
         val given = linkedMapOf(
             "bind" to a.option("bind"), "components" to a.option("components"), "daemon.port" to a.option("daemon-port"), "management.port" to a.option("port"),
             "management.web.port" to a.option("web-port"), "management.web.url" to a.option("web-url"), "repository.port" to a.option("repository-port"),
+            "cringle.host" to a.option("host"), "router.port" to a.option("router-port"),
         )
         val current = store.all().associateBy { it.key.name }
         val changes = LinkedHashMap<String, String>()

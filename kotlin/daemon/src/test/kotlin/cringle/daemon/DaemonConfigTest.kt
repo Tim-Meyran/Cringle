@@ -68,7 +68,13 @@ class DaemonConfigTest {
         val daemon = daemon()
         val stub = stub(daemon)
         val list = stub.listConfig(ListConfigRequest.getDefaultInstance())
-        assertEquals(listOf("bind", "components", "daemon.port", "management.port", "management.web.port", "management.web.url", "repository.port"), list.entriesList.map { it.key })
+        assertEquals(
+            listOf(
+                "bind", "cringle.host", "components", "daemon.port", "router.mode", "router.port", "router.address",
+                "management.port", "management.web.port", "management.web.url", "repository.port",
+            ),
+            list.entriesList.map { it.key },
+        )
         assertTrue(list.entriesList.none { it.isSet })
 
         val set = stub.setConfig(SetConfigRequest.newBuilder().setKey("management.web.port").setValue("9443").build())
@@ -127,6 +133,24 @@ class DaemonConfigTest {
         val stopped = stub.setConfig(SetConfigRequest.newBuilder().setKey("components").setValue("none").build())
         assertEquals(listOf("stopped repository"), stopped.restartedList)
         assertEquals(emptyList<String>(), stub.setConfig(SetConfigRequest.newBuilder().setKey("repository.port").setValue("7612").build()).restartedList)
+    }
+
+    @Test
+    fun theRouterListensOnThePortOfTheSettingAndItIsAChangeOfTheDaemon() = runBlocking {
+        val free = java.net.ServerSocket(0).use { it.localPort }
+        val store = store()
+        store.set("router.port", free.toString())
+        val daemon = Daemon(home, 0, combined = true, config = store).start().also { closeables += it }
+        assertEquals(free, daemon.router!!.port, "the router has the port of the setting, not a free one")
+        val stub = stub(daemon)
+        val change = stub.setConfig(SetConfigRequest.newBuilder().setKey("router.port").setValue((free + 1).toString()).build())
+        assertTrue(change.restartRequired, "the port of the router changes with the next start of the daemon")
+        assertEquals(free, daemon.router!!.port)
+        assertEquals("local", stub.getConfig(GetConfigRequest.newBuilder().setKey("router.mode").build()).value)
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { stub.setConfig(SetConfigRequest.newBuilder().setKey("router.mode").setValue("sometimes").build()) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { stub.setConfig(SetConfigRequest.newBuilder().setKey("router.address").setValue("no-port").build()) })
+        assertEquals(Status.Code.INVALID_ARGUMENT, code { stub.setConfig(SetConfigRequest.newBuilder().setKey("cringle.host").setValue("https://node1").build()) })
+        assertEquals("node1.tail.example", stub.setConfig(SetConfigRequest.newBuilder().setKey("cringle.host").setValue("node1.tail.example").build()).entry.value)
     }
 
     @Test

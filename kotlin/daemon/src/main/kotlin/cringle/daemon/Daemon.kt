@@ -63,6 +63,8 @@ public class Daemon(
     private val config: cringle.common.config.ConfigStore? = null,
     /** The settings the daemon was started with as arguments (`management.port` ...): they win over the store (#314). */
     private val overrides: Map<String, String> = emptyMap(),
+    /** The port of the router that runs inside this process (`combined`); `null`: the setting `router.port` if the daemon has a store, else any free port. */
+    routerPort: Int? = null,
 ) : AutoCloseable {
     private val bind: String? = cringle.common.BindAddress.interfaceChoice(bindHost)
 
@@ -104,6 +106,7 @@ public class Daemon(
         val routerTrustStore = TrustStore(routerDir.resolve("trust.json"))
         RouterServer(
             routerDir.resolve("registry.json"),
+            port = routerPort ?: if (config != null) effectiveValue("router.port").toInt() else 0,
             tls = RouterTls(routerIdentity, routerTrustStore),
             bindHost = bind,
         )
@@ -255,6 +258,7 @@ public class Daemon(
             for (target in configKey.restarts) {
                 when (target) {
                     cringle.common.config.RestartTarget.DAEMON -> restartRequired = true
+                    cringle.common.config.RestartTarget.NONE -> Unit
                     cringle.common.config.RestartTarget.REPOSITORY -> restart("repository")
                     cringle.common.config.RestartTarget.MANAGEMENT -> restart("management")
                     cringle.common.config.RestartTarget.COMPONENTS -> {

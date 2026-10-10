@@ -15,6 +15,9 @@ public enum class RestartTarget {
 
     /** The set of programs the daemon runs besides itself: they are started and stopped as the list says. */
     COMPONENTS,
+
+    /** Nothing: the value is only read when it is used (the name of the machine in the addresses that are shown). */
+    NONE,
 }
 
 /** One setting: its [name], the [default] it has when it is not set, what [restarts] when it changes, and a check that returns the problem or `null`. */
@@ -63,6 +66,21 @@ public object ConfigCatalog {
         }
     }
 
+    private fun host(value: String): String? = when {
+        value.isEmpty() -> null
+        value.length > 253 -> "is too long"
+        Regex("[A-Za-z0-9][A-Za-z0-9._-]*|\\[[0-9A-Fa-f:.]+]").matches(value) -> null
+        else -> "'$value' is not a host name or an address (no scheme, port or path)"
+    }
+
+    private fun hostAndPort(value: String): String? {
+        if (value.isEmpty()) return null
+        val port = value.substringAfterLast(':', "")
+        val host = value.substringBeforeLast(':', "")
+        if (host.isEmpty() || port.toIntOrNull()?.let { it in 1..65535 } != true) return "'$value' is not host:port"
+        return host(host)
+    }
+
     /** All settings, in the order they are shown. */
     public val keys: List<ConfigKey> = listOf(
         ConfigKey(
@@ -71,11 +89,23 @@ public object ConfigCatalog {
             { it.lowercase() },
         ),
         ConfigKey(
+            "cringle.host", "",
+            "The name or address under which other Cringle machines reach this machine (in a Tailscale network its Tailscale name or address). The Connect page builds its addresses from it.",
+            setOf(RestartTarget.NONE), "host", ::host,
+        ),
+        ConfigKey(
             "components", "none", "What the daemon runs besides itself: management, repository, both separated by a comma, or none.", setOf(RestartTarget.COMPONENTS), "list",
             { if (normalizeComponents(it) != null) null else "'$it' is not management, repository, both separated by a comma, or none" },
             { normalizeComponents(it) ?: it },
         ),
         ConfigKey("daemon.port", "7400", "Port of the daemon.", setOf(RestartTarget.DAEMON), "port", ::port),
+        ConfigKey(
+            "router.mode", "local", "The router of this machine: local (the daemon runs one), remote (it uses the router at router.address) or none.", setOf(RestartTarget.DAEMON), "local|remote|none",
+            { if (it.lowercase() in setOf("local", "remote", "none")) null else "'$it' is not local, remote or none" },
+            { it.lowercase() },
+        ),
+        ConfigKey("router.port", "7450", "Port of the router that the daemon runs (router.mode local). Other machines add this address as a remote router.", setOf(RestartTarget.DAEMON), "port", ::port),
+        ConfigKey("router.address", "", "host:port of the router that this machine uses (router.mode remote).", setOf(RestartTarget.DAEMON), "host:port", ::hostAndPort),
         ConfigKey("management.port", "7500", "Port of the management server (gRPC: CLI and daemons).", setOf(RestartTarget.MANAGEMENT), "port", ::port),
         ConfigKey("management.web.port", "8443", "Port of the web interface of the management server.", setOf(RestartTarget.MANAGEMENT), "port", ::port),
         ConfigKey(
