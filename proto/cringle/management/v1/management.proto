@@ -169,6 +169,12 @@ service ManagementService {
 
   // Starts the registered Engines and restores their fabrics. Runs automatically when the server starts.
   rpc Recover(RecoverRequest) returns (RecoverResponse);
+
+  // The settings of a machine (#316): the calls of the daemon of the machine with the right of the caller checked here (`function:config`).
+  rpc ListConfig(ConfigRequest) returns (cringle.daemon.v1.ListConfigResponse);
+  rpc GetConfig(ConfigKeyRequest) returns (cringle.daemon.v1.ConfigEntry);
+  rpc SetConfig(ConfigSetRequest) returns (cringle.daemon.v1.ConfigChange);
+  rpc UnsetConfig(ConfigKeyRequest) returns (cringle.daemon.v1.ConfigChange);
 }
 
 message AddMachineRequest {
@@ -513,4 +519,20 @@ message RemoveTrustRequest {
 message RemoveTrustResponse {
   // Number of entries removed: the key itself and, for a Router, every entry that came through it.
   int32 removed_entries = 1;
+}
+
+// The machine whose settings are read ("local" is the machine of the daemon that runs this server).
+message ConfigRequest {
+  string machine_id = 1;
+}
+
+message ConfigKeyRequest {
+  string machine_id = 1;
+  string key = 2;
+}
+
+message ConfigSetRequest {
+  string machine_id = 1;
+  string key = 2;
+  string value = 3;
 }

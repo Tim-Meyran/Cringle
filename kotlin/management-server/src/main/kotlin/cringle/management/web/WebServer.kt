@@ -76,6 +76,7 @@ public class WebServer(
         server.createContext("/") { exchange -> runCatching { handle(exchange) }.onFailure { fail(exchange, it) } }
         registerFoundation()
         OverviewPages(core).register(this)
+        ConfigPages(core).register(this)
         DeploymentPages(core).register(this)
         DebugPages(core).register(this)
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
@@ -161,6 +162,12 @@ public class WebServer(
         )
         return layout.page("Sign in", null, content, openMode = users == null)
     }
+
+    /** Signs in with [token] without the login form (the invitation): the session, `null` if the token is not accepted. */
+    internal fun openSession(token: String): Session? = sessions.login(token)
+
+    /** The cookie that carries [session]. */
+    internal fun sessionCookieOf(session: Session): String = sessionCookie(session.id)
 
     private fun sessionCookie(value: String, maxAge: Int? = null): String =
         "cringle_session=$value; HttpOnly; Secure; SameSite=Strict; Path=/" + (maxAge?.let { "; Max-Age=$it" } ?: "")

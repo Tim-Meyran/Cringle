@@ -337,6 +337,25 @@ public class ManagementServer(
             cringle.management.v1.SetDwhRetentionResponse.getDefaultInstance()
         }
 
+        // the settings of a machine (#316): reading needs READ and changing ADMINISTER, for the machine or for the function `config`
+        private fun configScopes(machineId: String) = access.machine(machineId.ifEmpty { "local" }) + access.function("config")
+
+        override suspend fun listConfig(request: cringle.management.v1.ConfigRequest): cringle.daemon.v1.ListConfigResponse = guard { need(Permission.READ, configScopes(request.machineId));
+            core.listConfig(request.machineId)
+        }
+
+        override suspend fun getConfig(request: cringle.management.v1.ConfigKeyRequest): cringle.daemon.v1.ConfigEntry = guard { need(Permission.READ, configScopes(request.machineId));
+            core.getConfig(request.machineId, request.key)
+        }
+
+        override suspend fun setConfig(request: cringle.management.v1.ConfigSetRequest): cringle.daemon.v1.ConfigChange = guard { need(Permission.ADMINISTER, configScopes(request.machineId));
+            core.setConfig(request.machineId, request.key, request.value)
+        }
+
+        override suspend fun unsetConfig(request: cringle.management.v1.ConfigKeyRequest): cringle.daemon.v1.ConfigChange = guard { need(Permission.ADMINISTER, configScopes(request.machineId));
+            core.unsetConfig(request.machineId, request.key)
+        }
+
         override suspend fun setLogCollection(request: cringle.management.v1.SetLogCollectionRequest): cringle.management.v1.SetLogCollectionResponse = guard { need(Permission.OPERATE, access.machine(request.engine.machineId));
             core.setLogCollection(request.engine.machineId, request.engine.engineId.value, request.enabled)
             cringle.management.v1.SetLogCollectionResponse.getDefaultInstance()
@@ -443,6 +462,7 @@ public class ManagementServer(
             "QueryLogs" to Permission.READ,
             "GetMetrics" to Permission.READ,
             "SetLogCollection" to Permission.OPERATE,
+            "ListConfig" to Permission.READ, "GetConfig" to Permission.READ, "SetConfig" to Permission.ADMINISTER, "UnsetConfig" to Permission.ADMINISTER,
             "QueryDwh" to Permission.READ,
             "ListDwhPartitions" to Permission.READ,
             "SetRecording" to Permission.OPERATE,

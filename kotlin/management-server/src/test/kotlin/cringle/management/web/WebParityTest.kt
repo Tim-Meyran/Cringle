@@ -41,6 +41,7 @@ class WebParityTest {
         "user grant" to "POST /users/u1/grant", "user revoke" to "POST /users/u1/revoke",
         "group create" to "POST /groups", "group list" to "GET /groups", "group grant" to "POST /groups/g1/grant", "group revoke" to "POST /groups/g1/revoke",
         "token create" to "POST /users/u1/tokens", "token list" to "GET /users/list", "token revoke" to "POST /tokens/t1/revoke",
+        "config list" to "GET /config/m1/list", "config get" to "GET /config/m1", "config set" to "POST /config/m1/bind", "config unset" to "POST /config/m1/bind/unset",
         "registry key" to "GET /registries", "registry trust" to "POST /registries", "registry list" to "GET /registries/list", "registry untrust" to "POST /registries/r1/delete",
         "registry grant" to "POST /registries/r1/grant", "registry revoke" to "POST /registries/r1/revoke", "registry issue-token" to "POST /registries/token",
     )

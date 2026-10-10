@@ -986,59 +986,80 @@ internal val COMMANDS: List<Command> = listOf(
         Output.Rows(renewed, "nothing to renew: every certificate is valid for more than 30 days")
     },
 
+    // --- the settings of a machine (#314 to #316) ---
+    Command(listOf("config", "list"), "[machine]", "List the settings of a machine (default: local) with their values, defaults and what a change restarts", maxArgs = 1) { env, a ->
+        val r = env.m.listConfig(cringle.management.v1.ConfigRequest.newBuilder().setMachineId(a.positional.firstOrNull().orEmpty()).build())
+        r.problemsList.forEach { env.warn("settings file: $it") }
+        Output.Rows(r.entriesList.map(::configRow), "no settings")
+    },
+    Command(listOf("config", "get"), "[machine] <key>", "Show one setting of a machine", minArgs = 1, maxArgs = 2) { env, a ->
+        val (machine, key) = machineAndKey(a.positional)
+        Output.Detail(configRow(env.m.getConfig(cringle.management.v1.ConfigKeyRequest.newBuilder().setMachineId(machine).setKey(key).build())))
+    },
+    Command(
+        listOf("config", "set"), "[machine] <key> <value>", "Change a setting of a machine; its daemon restarts what the key affects", minArgs = 2, maxArgs = 3,
+    ) { env, a ->
+        val key = a.positional[a.positional.size - 2]
+        val value = a.positional.last()
+        val machine = if (a.positional.size == 3) a.positional[0] else ""
+        Output.Detail(configChangeRow(env.m.setConfig(cringle.management.v1.ConfigSetRequest.newBuilder().setMachineId(machine).setKey(key).setValue(value).build())))
+    },
+    Command(listOf("config", "unset"), "[machine] <key>", "Remove a setting of a machine: its default is in effect again", minArgs = 1, maxArgs = 2) { env, a ->
+        val (machine, key) = machineAndKey(a.positional)
+        Output.Detail(configChangeRow(env.m.unsetConfig(cringle.management.v1.ConfigKeyRequest.newBuilder().setMachineId(machine).setKey(key).build())))
+    },
+
     // --- installation ---
     Command(
-        listOf("setup"), "[--bind <loopback|all>] [--components LIST] [--port N] [--web-port N] [--repository-port N] [--daemon-port N]",
-        "Change the address and the ports of the installed services (without options: ask for each, an empty answer keeps the value) and restart them",
+        listOf("setup"), "[--bind <loopback|all>] [--components LIST] [--port N] [--web-port N] [--web-url URL] [--repository-port N] [--daemon-port N]",
+        "Change the settings of the services on THIS machine (without options: ask for each, an empty answer keeps the value) and restart the daemon; cringle config does it through the management server",
         listOf(
             opt("bind", "loopback (default) or all (every network interface)", "VALUE"),
             opt("components", "what the daemon runs besides itself: management, repository, both (comma) or none", "LIST"),
             opt("port", "port of the management server (default 7500)", "PORT"),
             opt("web-port", "port of the web interface (default 8443)", "PORT"),
+            opt("web-url", "public address of the web interface for links and QR codes, https://host:port", "URL"),
             opt("repository-port", "port of the repository (default 7600)", "PORT"),
             opt("daemon-port", "port of the daemon (default 7400)", "PORT"),
-            opt("config-file", "the settings file (default: /etc/cringle/cringle.env, on Windows service/cringle-daemon.xml of the installation)", "FILE"),
-            opt("install-root", "the installation root (default: the parent of cringle.home)", "DIR"),
+            opt("config-file", "the settings file (default: <CRINGLE_HOME>/config/cringle.conf, CRINGLE_HOME is /var/lib/cringle or %ProgramData%\\Cringle if not set)", "FILE"),
             flag("show", "only show the current settings"),
-            flag("no-restart", "do not restart the services"),
+            flag("no-restart", "do not restart the daemon"),
         ),
         needsServer = false,
     ) { env, a ->
         val platform = Platform.current()
-        val root = a.option("install-root")?.let { Paths.get(it).toAbsolutePath().normalize() }
-            ?: System.getProperty(Distribution.HOME_PROPERTY)?.takeIf { it.isNotBlank() }?.let { Paths.get(it).toRealPath().parent }
-        val file = a.option("config-file")?.let { Paths.get(it) } ?: ServiceSettings.defaultFile(platform, root)
-        if (!Files.isRegularFile(file)) throw UsageException("$file does not exist: Cringle is not installed here (use --config-file <file>)")
-        val current = ServiceSettings.read(file, platform)
+        val file = a.option("config-file")?.let { Paths.get(it) } ?: setupFile(platform, env.environment)
+        val store = cringle.common.config.ConfigStore(file)
+        if (!Files.isRegularFile(file) && !Files.isDirectory(file.parent ?: Paths.get("."))) {
+            throw UsageException("${file.parent} does not exist: Cringle is not installed here (use --config-file <file>)")
+        }
         val given = linkedMapOf(
-            ServiceSettings.BIND to a.option("bind"), ServiceSettings.COMPONENTS to a.option("components"),
-            ServiceSettings.MANAGEMENT_PORT to a.option("port"), ServiceSettings.WEB_PORT to a.option("web-port"),
-            ServiceSettings.REPOSITORY_PORT to a.option("repository-port"), ServiceSettings.DAEMON_PORT to a.option("daemon-port"),
+            "bind" to a.option("bind"), "components" to a.option("components"), "daemon.port" to a.option("daemon-port"), "management.port" to a.option("port"),
+            "management.web.port" to a.option("web-port"), "management.web.url" to a.option("web-url"), "repository.port" to a.option("repository-port"),
         )
+        val current = store.all().associateBy { it.key.name }
         val changes = LinkedHashMap<String, String>()
         if (a.flag("show")) {
             // nothing to change
         } else if (given.values.all { it == null }) {
-            val labels = mapOf(
-                ServiceSettings.BIND to "Listen on (loopback or all)", ServiceSettings.COMPONENTS to "Components (management, repository, both separated by a comma, or none)",
-                ServiceSettings.MANAGEMENT_PORT to "Port of the management server",
-                ServiceSettings.WEB_PORT to "Port of the web interface", ServiceSettings.REPOSITORY_PORT to "Port of the repository", ServiceSettings.DAEMON_PORT to "Port of the daemon",
-            )
-            for (key in given.keys) {
-                System.err.print("${labels.getValue(key)} [${current.getValue(key)}]: ")
+            for ((name, value) in current) {
+                System.err.print("${value.key.description} [${value.value}]: ")
                 System.err.flush()
                 val answer = env.readSecret()?.trim().orEmpty()
-                if (answer.isNotEmpty() && answer != current[key]) changes[key] = answer
+                if (answer.isNotEmpty() && answer != value.value) changes[name] = answer
             }
         } else {
-            for ((key, value) in given) if (value != null) changes[key] = value
+            for ((name, value) in given) if (value != null) changes[name] = value
         }
-        for ((key, value) in changes) ServiceSettings.problem(key, value)?.let { throw UsageException("${key.removePrefix("CRINGLE_").lowercase()}: $it") }
         val result = LinkedHashMap<String, Any?>()
+        try {
+            if (changes.isNotEmpty()) store.setAll(changes)
+        } catch (e: cringle.common.config.ConfigException) {
+            throw UsageException(e.message ?: "invalid setting")
+        }
         if (changes.isNotEmpty()) {
-            ServiceSettings.write(file, changes)
             if (a.flag("no-restart")) {
-                env.warn("the services keep the old settings until they are restarted")
+                env.warn("the daemon keeps the old settings until it is restarted")
             } else {
                 val services = if (platform == Platform.WINDOWS) WindowsServiceController() else SystemdServiceController()
                 val name = if (platform == Platform.WINDOWS) "cringle-daemon" else "cringle-daemon.service"
@@ -1048,14 +1069,8 @@ internal val COMMANDS: List<Command> = listOf(
                 }
             }
         }
-        val now = current + changes
         result["file"] = file.toString()
-        result["listen"] = now.getValue(ServiceSettings.BIND)
-        result["components"] = ServiceSettings.normalizeComponents(now.getValue(ServiceSettings.COMPONENTS)) ?: now.getValue(ServiceSettings.COMPONENTS)
-        result["managementPort"] = now.getValue(ServiceSettings.MANAGEMENT_PORT)
-        result["webPort"] = now.getValue(ServiceSettings.WEB_PORT)
-        result["repositoryPort"] = now.getValue(ServiceSettings.REPOSITORY_PORT)
-        result["daemonPort"] = now.getValue(ServiceSettings.DAEMON_PORT)
+        for (value in store.all()) result[value.key.name] = value.value
         Output.Detail(result)
     },
     Command(
@@ -1121,4 +1136,33 @@ private fun probeFingerprint(address: String, what: String): String {
         // an SSLException is an IOException as well
         throw IllegalStateException("cannot reach the $what $address over TLS: ${e.message}")
     }
+}
+
+private fun machineAndKey(positional: List<String>): Pair<String, String> =
+    if (positional.size == 2) positional[0] to positional[1] else "" to positional[0]
+
+private fun configRow(e: cringle.daemon.v1.ConfigEntry): Map<String, Any?> = linkedMapOf(
+    "key" to e.key,
+    "value" to e.value,
+    "default" to e.defaultValue,
+    "set" to e.isSet,
+    "overridden" to e.overridden,
+    "restarts" to e.restartsList,
+    "description" to e.description,
+)
+
+private fun configChangeRow(c: cringle.daemon.v1.ConfigChange): Map<String, Any?> = linkedMapOf(
+    "key" to c.entry.key,
+    "value" to c.entry.value,
+    "set" to c.entry.isSet,
+    "restarted" to c.restartedList,
+    "restartRequired" to c.restartRequired,
+    "note" to c.note,
+)
+
+/** The settings file that `cringle setup` changes: `<CRINGLE_HOME>/config/cringle.conf`, the home of the service if the variable is not set. */
+private fun setupFile(platform: Platform, environment: Map<String, String>): Path {
+    val home = environment["CRINGLE_HOME"]?.takeIf { it.isNotBlank() }?.let { Paths.get(it) }
+        ?: if (platform == Platform.WINDOWS) Paths.get(System.getenv("ProgramData") ?: "C:\\ProgramData", "Cringle") else Paths.get("/var/lib/cringle")
+    return home.resolve("config").resolve("cringle.conf")
 }

@@ -487,6 +487,31 @@ public class ManagementCore(
         null
     }
 
+    private suspend fun <T> daemonCall(machineId: String, body: suspend (DaemonServiceCoroutineStub) -> T): T {
+        val m = machine(machineId.ifEmpty { "local" })
+        try {
+            return body(daemon(m))
+        } catch (e: StatusException) {
+            throw ManagementException(e.status.code, e.status.description ?: e.status.code.name)
+        }
+    }
+
+    /** The settings of the machine [machineId] (empty: `local`), asked of its daemon (#316). */
+    public suspend fun listConfig(machineId: String): cringle.daemon.v1.ListConfigResponse =
+        daemonCall(machineId) { it.listConfig(cringle.daemon.v1.ListConfigRequest.getDefaultInstance()) }
+
+    /** One setting of the machine [machineId]. */
+    public suspend fun getConfig(machineId: String, key: String): cringle.daemon.v1.ConfigEntry =
+        daemonCall(machineId) { it.getConfig(cringle.daemon.v1.GetConfigRequest.newBuilder().setKey(key).build()) }
+
+    /** Changes a setting of the machine [machineId]; its daemon restarts what the key affects. */
+    public suspend fun setConfig(machineId: String, key: String, value: String): cringle.daemon.v1.ConfigChange =
+        daemonCall(machineId) { it.setConfig(cringle.daemon.v1.SetConfigRequest.newBuilder().setKey(key).setValue(value).build()) }
+
+    /** Removes a setting of the machine [machineId], so that its default is in effect again. */
+    public suspend fun unsetConfig(machineId: String, key: String): cringle.daemon.v1.ConfigChange =
+        daemonCall(machineId) { it.unsetConfig(cringle.daemon.v1.UnsetConfigRequest.newBuilder().setKey(key).build()) }
+
     /** Switches the LoggingCollector of the machine of the engine [id] on or off for it (#195). */
     public suspend fun setLogCollection(machineId: String, id: String, enabled: Boolean) {
         val m = machine(machineId)

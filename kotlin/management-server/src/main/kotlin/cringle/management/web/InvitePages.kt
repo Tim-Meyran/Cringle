@@ -50,9 +50,8 @@ internal class InvitePages(private val users: UserManager, private val web: WebS
         web.router.post("/invite/{secret}", null) { req ->
             val secret = req.params.getValue("secret")
             try {
-                val redeemed = users.redeemInvite(secret, req.form["name"].orEmpty().trim())
-                val link = web.baseUrl(req) + "/login#token=" + redeemed.token.secret
-                guest(200, "Welcome", h("<div class=\"panel auth-card\"><h1>Welcome, {}</h1>{}</div>", redeemed.user.user.name, tokenShare(link, redeemed.token.secret, redeemed.user.user.name, redeemed.token.info.expiresAt)))
+                // the person is signed in at once: the token that comes with the user only serves this sign-in and ends after a few minutes
+                signedIn(users.redeemInvite(secret, req.form["name"].orEmpty().trim(), "invite", Duration.ofMinutes(10)))
             } catch (e: UserException) {
                 when (e.kind) {
                     UserException.Kind.NOT_FOUND -> invalid()
@@ -60,6 +59,18 @@ internal class InvitePages(private val users: UserManager, private val web: WebS
                 }
             }
         }
+    }
+
+    /** The answer to a redeemed invite: the session of the new user and the start page, or a short welcome for a user who has nothing to read (an end user of an application). */
+    private suspend fun signedIn(redeemed: cringle.router.users.RedeemedInvite): WebResponse {
+        val session = web.openSession(redeemed.token.secret) ?: return invalid()
+        val cookie = web.sessionCookieOf(session)
+        if (session.can(Permission.READ)) return WebResponse.redirect("/", listOf(cookie))
+        val page = guest(
+            200, "Welcome",
+            h("<div class=\"panel auth-card\"><h1>Welcome, {}</h1><p>You are signed in. Your user has no rights for the pages of this server.</p></div>", redeemed.user.user.name),
+        )
+        return WebResponse(page.status, page.body, page.contentType, page.headers, listOf(cookie))
     }
 
     private suspend fun invalid(): WebResponse {

@@ -15,6 +15,7 @@
 #   -Components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
 #                       user logins), repository (the package repository), both separated by a comma, or none. Default: both.
 #   -DaemonOnly         the same as -Components none
+#   -WebUrl <url>       the public address of the web interface for login links and QR codes, https://host:port (default: the address of the request)
 #   -NoAsk              do not ask: on the first installation, in a console, the script asks for every value that no option gives
 #                       (the components, the ports, the address) before it asks for administrative rights; without a console it
 #                       never asks and takes the options or the defaults
@@ -23,8 +24,8 @@
 #   -WebPort <n>        port of the web interface (default 8443)
 #   -RepositoryPort <n> port of the repository (default 7600)
 #   -DaemonPort <n>     port of the daemon (default 7400)
-#                       The values are kept as <env> elements in the service file of the daemon and stay when the script is run
-#                       again without them; change them later with `cringle setup`.
+#                       The values are kept in %ProgramData%\Cringle\config\cringle.conf and stay when the script is run again without them;
+#                       change them later with `cringle config` or `cringle setup`.
 #   -WithManagement     no longer needed (the default); accepted for old scripts
 #   -Start              start the registered services (default: they start at the next boot only)
 #   -Uninstall          stop and remove the services, the PATH entry and the program files; the data stays
@@ -45,6 +46,7 @@ param(
     [switch]$WithManagement,
     [switch]$DaemonOnly,
     [string]$Components,
+    [string]$WebUrl,
     [switch]$NoAsk,
     [string]$Bind,
     [string]$Port,
@@ -74,17 +76,19 @@ $LatestApi = 'https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest'
 # the service wrapper of a release (docs/releasing.md); a local build downloads it from here when it is not in the build folder
 $WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
 $WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
-# the settings of the services: <env> elements of the service file of the daemon, which the arguments refer to as %KEY% (cringle setup changes them)
-$SettingDefaults = [ordered]@{ CRINGLE_BIND = 'loopback'; CRINGLE_COMPONENTS = 'management,repository'; CRINGLE_DAEMON_PORT = '7400'; CRINGLE_MANAGEMENT_PORT = '7500'; CRINGLE_WEB_PORT = '8443'; CRINGLE_REPOSITORY_PORT = '7600' }
+# the settings of the services: the key-value store of the daemon, <data>\config\cringle.conf (docs/daemon-service.md; `cringle config` and `cringle setup` change it)
+$SettingDefaults = [ordered]@{ 'bind' = 'loopback'; 'components' = 'management,repository'; 'daemon.port' = '7400'; 'management.port' = '7500'; 'management.web.port' = '8443'; 'management.web.url' = ''; 'repository.port' = '7600' }
+# the names of the settings in the service file of an older installation (<env> elements)
+$LegacyNames = @{ 'bind' = 'CRINGLE_BIND'; 'components' = 'CRINGLE_COMPONENTS'; 'daemon.port' = 'CRINGLE_DAEMON_PORT'; 'management.port' = 'CRINGLE_MANAGEMENT_PORT'; 'management.web.port' = 'CRINGLE_WEB_PORT'; 'repository.port' = 'CRINGLE_REPOSITORY_PORT' }
 if ($DaemonOnly -and -not $Components) { $Components = 'none' }
-$SettingGiven = @{ CRINGLE_COMPONENTS = $Components; CRINGLE_BIND = $Bind; CRINGLE_DAEMON_PORT = $DaemonPort; CRINGLE_MANAGEMENT_PORT = $Port; CRINGLE_WEB_PORT = $WebPort; CRINGLE_REPOSITORY_PORT = $RepositoryPort }
-# the command line of the daemon is the setting CRINGLE_DAEMON_ARGS (never empty), so `cringle setup` can change the components and the ports
-$DaemonArguments = '%CRINGLE_DAEMON_ARGS%'
+$SettingGiven = @{ 'components' = $Components; 'bind' = $Bind; 'daemon.port' = $DaemonPort; 'management.port' = $Port; 'management.web.port' = $WebPort; 'management.web.url' = $WebUrl; 'repository.port' = $RepositoryPort }
+# the daemon takes its settings from its store: the service has no arguments
+$DaemonArguments = ''
 $Services = @(
     @{ Id = 'cringle-daemon'; Name = 'Cringle Daemon'; Script = 'cringle-daemon.bat'
        Arguments = $DaemonArguments; Description = 'Cringle daemon: starts and supervises the engines of this machine' },
     @{ Id = 'cringle-management'; Name = 'Cringle Management Server'; Script = 'cringle-management-server.bat'
-       Arguments = '--port %CRINGLE_MANAGEMENT_PORT%'; Description = 'Cringle management server' }
+       Arguments = '--port 7500'; Description = 'Cringle management server (an older installation; the daemon runs it now)' }
 )
 
 function Write-Info([string]$Message) {
@@ -281,27 +285,25 @@ function ConvertTo-Components([string]$Text) {
     if ($names) { return ($names -join ',') } else { return 'none' }
 }
 
-# the command line of the daemon for the settings (the same text as install.sh and `cringle setup` write)
-function Get-DaemonArguments($Settings) {
-    $arguments = "--port $($Settings['CRINGLE_DAEMON_PORT']) --combined"
-    $components = $Settings['CRINGLE_COMPONENTS'] -split ','
-    if ($components -contains 'management') { $arguments += " --with-management $($Settings['CRINGLE_MANAGEMENT_PORT']) --web-port $($Settings['CRINGLE_WEB_PORT'])" }
-    if ($components -contains 'repository') { $arguments += " --with-repository $($Settings['CRINGLE_REPOSITORY_PORT'])" }
-    return $arguments
-}
+$SettingsFile = Join-Path (Join-Path $DataRoot 'config') 'cringle.conf'
 
-# the value of every setting: the one given as an option, else the one in the service file that is there, else the default
-function Get-Settings([string]$Path) {
+# the value of every setting: the one given as an option, else the one in the settings file, else the one the service file of an older installation
+# has (<env> elements), else the default
+function Get-Settings([string]$ConfFile, [string]$LegacyXml) {
     $result = [ordered]@{}
-    $existing = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
+    $conf = if (Test-Path -LiteralPath $ConfFile) { [IO.File]::ReadAllText($ConfFile) } else { '' }
+    $legacy = if ($LegacyXml -and (Test-Path -LiteralPath $LegacyXml)) { [IO.File]::ReadAllText($LegacyXml) } else { '' }
     foreach ($key in $SettingDefaults.Keys) {
-        if ($key -eq 'CRINGLE_DAEMON_ARGS') { continue }
         $value = $SettingGiven[$key]
-        if (-not $value -and $existing -match ('<env name="' + $key + '" value="([^"]*)"')) { $value = $Matches[1] }
+        if (-not $value -and $conf -match ('(?m)^' + [regex]::Escape($key) + '=(.*)\r?$')) { $value = $Matches[1].Trim() }
+        if (-not $value -and $LegacyNames.ContainsKey($key) -and $legacy -match ('<env name="' + $LegacyNames[$key] + '" value="([^"]*)"')) { $value = $Matches[1] }
         if (-not $value) { $value = $SettingDefaults[$key] }
         $result[$key] = $value
     }
-    $result['CRINGLE_DAEMON_ARGS'] = Get-DaemonArguments $result
+    # an installation from before the components were a setting: the arguments of its service decide
+    if (-not $SettingGiven['components'] -and $conf -notmatch '(?m)^components=' -and $legacy -notmatch 'CRINGLE_COMPONENTS' -and $legacy -and $legacy -notmatch '--with-management|CRINGLE_DAEMON_ARGS') {
+        $result['components'] = 'none'
+    }
     return $result
 }
 
@@ -310,20 +312,36 @@ function Assert-Settings {
     foreach ($key in @($SettingGiven.Keys)) {
         $value = $SettingGiven[$key]
         if (-not $value) { continue }
-        if ($key -eq 'CRINGLE_COMPONENTS') {
+        if ($key -eq 'components') {
             if (-not (ConvertTo-Components $value)) { throw "-Components needs management, repository, both separated by a comma, or none, not '$value'" }
             $SettingGiven[$key] = ConvertTo-Components $value
-        } elseif ($key -eq 'CRINGLE_BIND') {
+        } elseif ($key -eq 'bind') {
             if ($value -notin @('loopback', 'all')) { throw "-Bind needs loopback or all, not '$value'" }
+        } elseif ($key -eq 'management.web.url') {
+            if ($value -notmatch '^https://[^/ ?#@]+$') { throw "-WebUrl needs an address like https://host:port, not '$value'" }
         } elseif ($value -notmatch '^[0-9]{1,5}$' -or [int]$value -lt 1 -or [int]$value -gt 65535) {
             throw "a port needs a number from 1 to 65535, not '$value' ($key)"
         }
     }
 }
 
+# writes the settings file of the daemon: the settings of the options, of the file that is there or of an older installation, or the defaults
+function Write-Settings {
+    $oldXml = Join-Path (Join-Path $InstallRoot 'service') 'cringle-daemon.xml'
+    $values = Get-Settings $SettingsFile $oldXml
+    $text = if (Test-Path -LiteralPath $SettingsFile) { [IO.File]::ReadAllText($SettingsFile) } else { "# Settings of the Cringle services of this machine. Change them with ``cringle config`` or the web interface, or here and restart the daemon.`n" }
+    foreach ($key in $values.Keys) {
+        $value = $values[$key]
+        if (-not $value -and $key -eq 'management.web.url') { continue }
+        $line = "$key=$value"
+        $pattern = '(?m)^' + [regex]::Escape($key) + '=.*$'
+        if ($text -match $pattern) { $text = [regex]::Replace($text, $pattern, { param($m) $line }) } else { $text = $text.TrimEnd("`r", "`n") + "`n" + $line + "`n" }
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $SettingsFile) | Out-Null
+    [IO.File]::WriteAllText($SettingsFile, $text, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Write-ServiceConfig($Service, [string]$Path) {
-    $settings = Get-Settings $Path
-    $envXml = ($settings.Keys | ForEach-Object { '  <env name="' + $_ + '" value="' + [Security.SecurityElement]::Escape($settings[$_]) + '"/>' }) -join "`n"
     $bat = Join-Path (Join-Path (Join-Path $InstallRoot 'current') 'bin') $Service.Script
     $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
     $esc = { param($Text) [Security.SecurityElement]::Escape($Text) }
@@ -335,7 +353,6 @@ function Write-ServiceConfig($Service, [string]$Path) {
   <executable>$(& $esc $cmd)</executable>
   <arguments>$(& $esc ('/c ""' + $bat + '" ' + $Service.Arguments + '"'))</arguments>
   <env name="CRINGLE_HOME" value="$(& $esc $DataRoot)"/>
-$envXml
   <logpath>$(& $esc (Join-Path $DataRoot 'logs'))</logpath>
   <log mode="roll"/>
   <onfailure action="restart" delay="5 sec"/>
@@ -453,6 +470,8 @@ function Invoke-Install {
 
         New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
         if (-not $NoService) {
+            # the settings file is written before the service file is: the service file of an older installation is read for its settings first
+            Write-Settings
             Install-CringleService $Services[0] (Join-Path $downloads 'winsw.exe')
             # an older installation ran the management server as a service of its own; the daemon runs it now
             if (Get-CringleService $Services[1].Id) {
@@ -545,34 +564,45 @@ function Test-CanAsk {
 
 function Invoke-Questions {
     if ($Uninstall -or $NoAsk -or -not (Test-CanAsk)) { return }
-    # a later installation keeps what the first one decided
-    if (Test-Path -LiteralPath (Join-Path (Join-Path $InstallRoot 'service') 'cringle-daemon.xml')) { return }
+    # a later installation keeps what the first one decided; so does an older one (it has a service file)
+    if ((Test-Path -LiteralPath $SettingsFile) -or (Test-Path -LiteralPath (Join-Path (Join-Path $InstallRoot 'service') 'cringle-daemon.xml'))) { return }
     Write-Host 'Cringle installation: press Enter to take the value in [ ]. (-NoAsk or the options skip the questions.)'
     $set = {
         param($Key, $ParameterName, $Value)
         $script:SettingGiven[$Key] = $Value
         $script:GivenArguments[$ParameterName] = $Value
     }
-    if (-not $SettingGiven['CRINGLE_COMPONENTS']) {
+    if (-not $SettingGiven['components']) {
         $chosen = @()
         if (Read-Yes 'Run the management server (web interface, user logins) on this machine?' 'yes') { $chosen += 'management' }
         if (Read-Yes 'Run the package repository on this machine?' 'yes') { $chosen += 'repository' }
-        & $set 'CRINGLE_COMPONENTS' 'Components' (ConvertTo-Components ($chosen -join ','))
+        & $set 'components' 'Components' (ConvertTo-Components ($chosen -join ','))
         # the switch -DaemonOnly would contradict the answer
         if ($GivenArguments.ContainsKey('DaemonOnly')) { $GivenArguments.Remove('DaemonOnly') | Out-Null }
     }
-    $components = $SettingGiven['CRINGLE_COMPONENTS'] -split ','
+    $components = $SettingGiven['components'] -split ','
     if ($components -contains 'management') {
-        if (-not $SettingGiven['CRINGLE_MANAGEMENT_PORT']) { & $set 'CRINGLE_MANAGEMENT_PORT' 'Port' (Read-Port 'Port of the management server' $SettingDefaults['CRINGLE_MANAGEMENT_PORT']) }
-        if (-not $SettingGiven['CRINGLE_WEB_PORT']) { & $set 'CRINGLE_WEB_PORT' 'WebPort' (Read-Port 'Port of the web interface' $SettingDefaults['CRINGLE_WEB_PORT']) }
+        if (-not $SettingGiven['management.port']) { & $set 'management.port' 'Port' (Read-Port 'Port of the management server' $SettingDefaults['management.port']) }
+        if (-not $SettingGiven['management.web.port']) { & $set 'management.web.port' 'WebPort' (Read-Port 'Port of the web interface' $SettingDefaults['management.web.port']) }
+        if (-not $SettingGiven['management.web.url']) {
+            for ($try = 0; $try -lt 3; $try++) {
+                $answer = Read-Answer 'Public address of the web interface for links and QR codes (https://host:port, Enter: the address of the request)' ''
+                if (-not $answer -or $answer -match '^https://[^/ ?#@]+$') {
+                    if ($answer) { & $set 'management.web.url' 'WebUrl' $answer }
+                    break
+                }
+                Write-Host 'that is not an address like https://host:port'
+                if ($try -eq 2) { throw 'no valid address given' }
+            }
+        }
     }
-    if ($components -contains 'repository' -and -not $SettingGiven['CRINGLE_REPOSITORY_PORT']) {
-        & $set 'CRINGLE_REPOSITORY_PORT' 'RepositoryPort' (Read-Port 'Port of the repository' $SettingDefaults['CRINGLE_REPOSITORY_PORT'])
+    if ($components -contains 'repository' -and -not $SettingGiven['repository.port']) {
+        & $set 'repository.port' 'RepositoryPort' (Read-Port 'Port of the repository' $SettingDefaults['repository.port'])
     }
-    if (-not $SettingGiven['CRINGLE_DAEMON_PORT']) { & $set 'CRINGLE_DAEMON_PORT' 'DaemonPort' (Read-Port 'Port of the daemon' $SettingDefaults['CRINGLE_DAEMON_PORT']) }
-    if (-not $SettingGiven['CRINGLE_BIND']) {
+    if (-not $SettingGiven['daemon.port']) { & $set 'daemon.port' 'DaemonPort' (Read-Port 'Port of the daemon' $SettingDefaults['daemon.port']) }
+    if (-not $SettingGiven['bind']) {
         $all = Read-Yes 'Listen on all network interfaces (no: only on this machine)?' 'no'
-        & $set 'CRINGLE_BIND' 'Bind' $(if ($all) { 'all' } else { 'loopback' })
+        & $set 'bind' 'Bind' $(if ($all) { 'all' } else { 'loopback' })
     }
 }
 
@@ -581,7 +611,7 @@ function Invoke-Questions {
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
     Assert-Settings
-    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort -or $Components -or $NoAsk)) { throw '-Uninstall cannot be combined with -Bind, -Components, -NoAsk or the port options' }
+    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort -or $Components -or $WebUrl -or $NoAsk)) { throw '-Uninstall cannot be combined with -Bind, -Components, -WebUrl, -NoAsk or the port options' }
     if ($Uninstall -and ($Version -or $WithManagement -or $DaemonOnly -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -DaemonOnly, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     # before the elevation: the questions need the console of the person, the elevated run has none

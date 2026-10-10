@@ -48,15 +48,34 @@ irm https://github.com/Tim-Meyran/Cringle/releases/download/v0.0.3/install.ps1 -
 
 The daemon alone (a machine that is not the central one of a site): add `--daemon-only` (Linux) or `-DaemonOnly` (Windows). Only the repository, or only the management server: `--components repository` or `--components management` (`-Components`; the default is `management,repository`). Remove everything but the data: `... | sudo sh -s -- --uninstall` and `powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`.
 
-**Address and ports.** By default every server listens on the loopback interface only, with the ports 7400 (daemon), 7500 (management server), 8443 (web interface) and 7600 (repository). Change them at the installation with `--bind <loopback|all>`, `--port`, `--web-port`, `--repository-port`, `--daemon-port` (Windows: `-Bind`, `-Port`, `-WebPort`, `-RepositoryPort`, `-DaemonPort`), for example `... | sudo sh -s -- --bind all --web-port 9443 --start`, or later with `cringle setup` (as root, or in an administrative PowerShell), which asks for each value, writes it and restarts the daemon:
+**Settings (the configuration manager, #314 to #318).** The address, the ports and what the daemon runs live in one key-value store per machine, the file `<home>/config/cringle.conf` (`/var/lib/cringle/config/cringle.conf`, on Windows `%ProgramData%\Cringle\config\cringle.conf`): lines `key=value`, comments and unknown lines are kept. The daemon owns it; the installers, `cringle setup`, `cringle config` and the web interface write it.
+
+| Key | Default | What it is | A change restarts |
+|---|---|---|---|
+| `bind` | `loopback` | where the servers of the machine listen: `loopback` or `all` (every network interface) | the daemon |
+| `components` | `none` (the installers write `management,repository`) | what the daemon runs besides itself: `management`, `repository`, both, or `none` | the programs that start or stop |
+| `daemon.port` | `7400` | port of the daemon | the daemon |
+| `management.port` | `7500` | port of the management server (gRPC: CLI and daemons) | the management server |
+| `management.web.port` | `8443` | port of the web interface | the management server |
+| `management.web.url` | empty | public address for login links and QR codes (`https://host:port`); empty: the `Host` header of the request | the management server |
+| `repository.port` | `7600` | port of the package repository | the repository and the management server |
+
+The daemon reads the store when it starts. Arguments of the daemon (`--port`, `--bind`, `--with-management`, `--with-repository`, `--web-port`) **win** over the store; what they do not give comes from the store, then from the default. The unit and the service of the current installers start the daemon without arguments, so the store decides; a daemon of an older installation that still has the arguments keeps them until the installer runs again, and `cringle config` says that an argument wins. **First start:** when the file does not exist the daemon makes it from the old `CRINGLE_BIND`, `CRINGLE_COMPONENTS`, `CRINGLE_DAEMON_PORT`, `CRINGLE_MANAGEMENT_PORT`, `CRINGLE_WEB_PORT` and `CRINGLE_REPOSITORY_PORT` variables and the arguments it was started with, once; the variables are not read again. The store holds no secrets.
+
+Change a setting, from this machine or through the management server (the daemon restarts what the key affects; a change of the daemon itself is saved and the answer says to restart it):
 
 ```bash
-sudo cringle setup                        # asks; an empty answer keeps the value
-sudo cringle setup --bind all --web-port 9443
-cringle setup --show                      # the current values
+cringle config list [machine]                       # machine defaults to local
+cringle config set [machine] management.web.port 9443
+cringle config unset [machine] management.web.url   # the default is in effect again
+sudo cringle setup --bind all --web-port 9443       # this machine, without a management server; asks without options
 ```
 
-The values are `CRINGLE_BIND`, `CRINGLE_COMPONENTS` (`management,repository`, `management`, `repository` or `none`), `CRINGLE_DAEMON_PORT`, `CRINGLE_MANAGEMENT_PORT`, `CRINGLE_WEB_PORT` and `CRINGLE_REPOSITORY_PORT`, and the command line of the daemon that follows from them, `CRINGLE_DAEMON_ARGS` (the unit and the Windows service start the daemon with it; the installer and `cringle setup` write it, do not edit it), in `/etc/cringle/cringle.env` (Windows: `<env>` elements of the service file `cringle-daemon.xml`). A later installation keeps them unless an option gives a new value. `--bind all` opens the daemon, its router, the engines (their management API), the management server (gRPC and web interface) and the repository to the network (`management-server.md`); the installed services accept `loopback` and `all` only, because the programs of one machine connect to each other through `127.0.0.1`. A program started by hand (`management-server --bind <address>`) also takes one address. What an engine tells the router about itself is still `127.0.0.1`: reaching engines of other machines through the router is a different topic (M6).
+**Ports below 1024** (a web interface on 443 or 80): the unit of the installer gives the service user `AmbientCapabilities=CAP_NET_BIND_SERVICE`, which the programs the daemon starts inherit, so `cringle setup --web-port 443` works without root. An installation from before has to run the installer again (or add that line in a drop-in, `systemctl edit cringle-daemon`). The web interface speaks HTTPS only: for a certificate of a known authority put a reverse proxy in front of it (`reverse_proxy https://127.0.0.1:8443` with `tls_insecure_skip_verify` in Caddy) and set `management.web.url` to the address of the proxy. A port that another program holds (`ss -ltnp`) fails the same way; the management server then ends with a line that says so, not a stack trace.
+
+**When a program does not stay up.** The daemon logs `management ended with exit code 1` and starts it again (after 1, 2, 4 ... up to 30 seconds). The reason is the last lines the program wrote to its error output: the daemon repeats them in its own log (`journalctl -u cringle-daemon`, `<home>/logs/daemon-main.log`: `management said: ...`); the whole output is in `<home>/daemon/logs/management.err.log` and `management.out.log` (also `repository.*`).
+
+The installer options (`--bind`, `--components`, `--port`, `--web-port`, `--web-url`, `--repository-port`, `--daemon-port`; Windows: `-Bind` ...) and its questions write the same keys. Rights: reading needs `READ`, changing `ADMINISTER`, for the machine or for the function `config` (`users.md`). `bind` and the other settings of one machine do not reach other machines: every daemon has its own store.
 
 After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
 

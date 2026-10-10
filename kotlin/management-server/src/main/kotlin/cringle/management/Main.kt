@@ -21,6 +21,22 @@ private const val USAGE =
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
+    try {
+        runManagementServer(args)
+    } catch (e: java.io.IOException) {
+        // a port that cannot be opened is the usual reason: say it in a line instead of a stack trace
+        System.err.println("error: the management server cannot start: ${e.message}")
+        if (e is java.net.BindException || e.message?.contains("bind", ignoreCase = true) == true) {
+            System.err.println(
+                "the ports are the gRPC port (--port) and the web port (--web-port): another program may use one of them, and a port below 1024 needs root " +
+                    "or, for the installed service, the capability CAP_NET_BIND_SERVICE (docs/daemon-service.md)",
+            )
+        }
+        exitProcess(1)
+    }
+}
+
+private fun runManagementServer(args: Array<String>) {
     var home: Path? = null
     var port = 0
     var repository: String? = null

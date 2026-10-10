@@ -48,7 +48,7 @@ class WebShellTest : ServiceTestBase() {
         assertEquals(listOf("Machines", "Engines", "Fabrics", "Deployments", "Debugger"), entriesOf(page, "Operate"))
         assertEquals(listOf("Logs", "Metrics", "Data warehouse"), entriesOf(page, "Observe"))
         assertEquals(listOf("Drafts"), entriesOf(page, "Build"))
-        assertEquals(setOf("Users", "Groups", "Invites", "Registries", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
+        assertEquals(setOf("Users", "Groups", "Invites", "Registries", "Configuration", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
         assertEquals(1, Regex("aria-current=\"page\"").findAll(page).count())
         assertTrue(page.contains("<a href=\"/machines\" aria-current=\"page\">Machines</a>"), page)
         // the editors belong to the drafts, a detail page to its list
@@ -61,7 +61,7 @@ class WebShellTest : ServiceTestBase() {
     fun aViewerSeesOnlyWhatHeMayOpen() {
         web()
         val page = viewer.get("/").body()
-        assertEquals(setOf("Trust", "Packages"), entriesOf(page, "Administer").toSet(), "no user management for a viewer")
+        assertEquals(setOf("Configuration", "Trust", "Packages"), entriesOf(page, "Administer").toSet(), "no user management for a viewer")
         assertTrue(page.contains("viewer"))
         val forbidden = viewer.get("/users")
         assertEquals(403, forbidden.statusCode())

@@ -72,6 +72,10 @@ Retention is entered as hours and bytes; empty means no limit.
 
 Only with `--auth`; every route needs `MANAGE_USERS`, and the navigation entries are shown only to users that have it. The functions of `cringle user|group|token`: `GET /users` (users with roles, groups, tokens), `POST /users` (name, roles, groups), `POST /users/{id}/delete` (the last administrator cannot be deleted), `POST /users/{id}/tokens` (label, lifetime in hours; the value is shown **once** in the answer and not kept), `POST /tokens/{id}/revoke`, `GET /groups`, `POST /groups`. A token is rotated by creating a new one and revoking the old one. Changing the groups or roles of an existing user or group is not possible in the CLI either and comes with its own issue.
 
+## Page: configuration (#317)
+
+Reading needs `READ`, changing `ADMINISTER`, both for the machine or for the function `config`. `GET /config/{machine}` (and `/list`, which the page polls) shows the settings of the daemon of a machine: key, value in an edit form (`POST /config/{machine}/{key}`, field `value`), the default, whether it is set or an argument of the daemon wins, what a change restarts, and *Reset* (`POST /config/{machine}/{key}/unset`). The answer is a `flash`: what was restarted, or that the daemon has to be restarted itself. Without the right the values are shown without forms. A line of the settings file that cannot be used is shown above the table. See `daemon-service.md`.
+
 ## Page: registries of other sites (#295)
 
 Only with `--auth`, every route needs `MANAGE_USERS` (or the `users` function). `GET /registries` and `GET /registries/list` show the trusted registries (name, key fingerprint, roles, scoped roles) and the public key of this registry; `POST /registries` (name, PEM key or certificate, roles) trusts one, `POST /registries/{name}/delete` stops trusting it, `POST /registries/{name}/grant|revoke` give and take scoped roles, `POST /registries/token` (user, known-there-as, hours) issues a federated token, shown once. See `trust.md`.
@@ -184,6 +188,10 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle registry grant` | `POST /registries/r1/grant` |
 | `cringle registry revoke` | `POST /registries/r1/revoke` |
 | `cringle registry issue-token` | `POST /registries/token` |
+| `cringle config list` | `GET /config/m1/list` |
+| `cringle config get` | `GET /config/m1` |
+| `cringle config set` | `POST /config/m1/bind` |
+| `cringle config unset` | `POST /config/m1/bind/unset` |
 
 Without a page:
 
@@ -249,7 +257,7 @@ A new token (Users page) is shown, once and sticky in `#flash`, as the value, as
 
 ### Invite links (#303)
 
-*Invites* (Administer) creates the link and its QR code as a sticky `flash`, like a new token; the list holds only the state (open, used by, expired, revoked) and *Revoke*. The public pages `GET|POST /invite/{secret}` need no session (and no CSRF token, which only applies to routes with a permission). Checked in headless Chromium with Playwright: the link opens the form, redeeming shows the token, login link and QR code, the login link signs in a fresh context, and the invite link in `#flash` is still there after the 5 s refresh. See `docs/users.md`.
+*Invites* (Administer) creates the link and its QR code as a sticky `flash`, like a new token; the list holds only the state (open, used by, expired, revoked) and *Revoke*. The public pages `GET|POST /invite/{secret}` need no session (and no CSRF token, which only applies to routes with a permission). Redeeming signs the new user in at once: the answer is a redirect to the start page with the session cookie (a user without the right to read gets a welcome page), no second QR code. The token that the redeeming makes lives 10 minutes and is never shown. Checked in headless Chromium with Playwright (before this change): the link opens the form, and the invite link in `#flash` is still there after the 5 s refresh. See `docs/users.md`.
 
 ## Page: remote debugger (#323)
 
