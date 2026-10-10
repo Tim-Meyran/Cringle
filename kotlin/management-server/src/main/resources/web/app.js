@@ -149,6 +149,7 @@ document.addEventListener('htmx:responseError', function (event) {
     });
   });
 
+  var rejecting = false;
   // the server decides whether a connection is allowed
   editor.on('connectionCreated', function (c) {
     var from = blockData(c.output_id), to = blockData(c.input_id);
@@ -161,13 +162,18 @@ document.addEventListener('htmx:responseError', function (event) {
       .then(function (verdict) {
         if (verdict.ok) {
           say('Connected as a ' + verdict.type + ' tether.', false);
+          window.cringleEditorSnapshot();
         } else {
+          rejecting = true;
           editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
+          rejecting = false;
           say('Not connected: ' + verdict.message, true);
         }
       })
       .catch(function () {
+        rejecting = true;
         editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
+        rejecting = false;
         say('Not connected: the server could not be asked.', true);
       });
   });
@@ -210,11 +216,11 @@ document.addEventListener('htmx:responseError', function (event) {
     var o = options[key] || (options[key] = { delivery: 'DROP', record: false });
     var delivery = document.createElement('select');
     ['DROP', 'BUFFER'].forEach(function (v) { var opt = document.createElement('option'); opt.textContent = v; opt.selected = o.delivery === v; delivery.append(opt); });
-    delivery.addEventListener('change', function () { o.delivery = delivery.value; });
+    delivery.addEventListener('change', function () { o.delivery = delivery.value; changed(); });
     var record = document.createElement('input');
     record.type = 'checkbox';
     record.checked = !!o.record;
-    record.addEventListener('change', function () { o.record = record.checked; });
+    record.addEventListener('change', function () { o.record = record.checked; changed(); });
     var title = document.createElement('p');
     title.textContent = key;
     panel.replaceChildren(title, field('Delivery', delivery), field('Record in the data warehouse', record));
@@ -222,18 +228,79 @@ document.addEventListener('htmx:responseError', function (event) {
 
   // saving: the server turns the graph into the blueprint and checks it
   var save = document.getElementById('save-blueprint');
-  if (save) {
-    save.addEventListener('click', function () {
-      htmx.ajax('POST', host.dataset.saveUrl, {
-        source: host, target: '#result', swap: 'morph:innerHTML',
-        values: {
-          graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
-          provides: document.getElementById('provides').value, roles: document.getElementById('roles').value,
-          version: document.getElementById('version').value, revision: document.getElementById('revision').value,
-        },
+  var saving = false;
+  var autosaveTimer = null;
+  var lastSaved = JSON.stringify(editor.export()) + JSON.stringify(options);
+  function values() {
+    return {
+      graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
+      provides: document.getElementById('provides').value, roles: document.getElementById('roles').value,
+      version: document.getElementById('version').value, revision: document.getElementById('revision').value,
+    };
+  }
+  function saveNow() {
+    if (!save || saving) return Promise.resolve();
+    saving = true;
+    var state = JSON.stringify(editor.export()) + JSON.stringify(options);
+    return htmx.ajax('POST', host.dataset.saveUrl, { source: host, target: '#result', swap: 'morph:innerHTML', values: values() })
+      .then(function () { lastSaved = state; })
+      .finally(function () { saving = false; });
+  }
+  if (save) save.addEventListener('click', saveNow);
+
+  // autosave 2 s after the last change, only when something differs from what was saved
+  var autosave = document.getElementById('autosave');
+  function changed() {
+    if (!autosave || !autosave.checked) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(function () {
+      if (JSON.stringify(editor.export()) + JSON.stringify(options) !== lastSaved) saveNow();
+    }, 2000);
+  }
+  ['version', 'roles', 'provides'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  editor.on('nodeDataChanged', function () { changed(); });
+
+  // publishing: save first, then publish the saved draft
+  var publish = document.getElementById('publish-blueprint');
+  if (publish) {
+    publish.addEventListener('click', function () {
+      clearTimeout(autosaveTimer);
+      saveNow().then(function () {
+        var box = document.getElementById('result');
+        if (box.querySelector('.error')) return;
+        return htmx.ajax('POST', host.dataset.publishUrl, { source: host, target: '#result', swap: 'innerHTML' });
       });
     });
   }
+
+  // undo and redo from a stack of exports of the graph
+  var history = [JSON.stringify(editor.export())], at = 0, snapTimer = null;
+  function snapshot() {
+    var now = JSON.stringify(editor.export());
+    if (now === history[at]) return;
+    history = history.slice(0, at + 1);
+    history.push(now);
+    if (history.length > 50) history.shift();
+    at = history.length - 1;
+    changed();
+  }
+  function later() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshot, 300); }
+  function restore(state) {
+    editor.clear();
+    editor.import(JSON.parse(state));
+    showHint();
+    panel.replaceChildren();
+    changed();
+  }
+  ['nodeCreated', 'nodeRemoved', 'nodeMoved', 'nodeDataChanged'].forEach(function (name) { editor.on(name, later); });
+  editor.on('connectionRemoved', function () { if (!rejecting) later(); });
+  document.getElementById('undo').addEventListener('click', function () { snapshot(); if (at > 0) restore(history[--at]); });
+  document.getElementById('redo').addEventListener('click', function () { if (at < history.length - 1) restore(history[++at]); });
+  document.getElementById('zoom-in').addEventListener('click', function () { editor.zoom_in(); });
+  document.getElementById('zoom-out').addEventListener('click', function () { editor.zoom_out(); });
+  document.getElementById('zoom-fit').addEventListener('click', function () { editor.zoom_reset(); });
+  editor.on('connectionCreated', function () { /* the verdict of the server decides, see above */ });
+  window.cringleEditorSnapshot = snapshot; // the verdict handler snapshots an accepted connection
 })();
 
 // A fingerprint (code.fp, data-copy) is shown shortened; a click copies the whole value.
