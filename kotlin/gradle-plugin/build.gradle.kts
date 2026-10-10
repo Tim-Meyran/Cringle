@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 plugins {
-    `kotlin-dsl`
+    // The root build applies the Kotlin plugin (the version of the catalog) to every module. `kotlin-dsl` would apply the Kotlin of Gradle
+    // (2.0.21) a second time and warn "Unsupported Kotlin plugin version"; the plugin code uses the Gradle API only, which
+    // `java-gradle-plugin` provides. The plugin code configures tasks with `Action` lambdas that have the task as receiver (what
+    // `kotlin-dsl` set up with the same compiler plugin).
     `java-gradle-plugin`
+    id("org.jetbrains.kotlin.plugin.sam.with.receiver")
     // `java-gradle-plugin` creates the publications (the plugin JAR and one marker per plugin id) but leaves applying
     // `maven-publish` to the build, so the version, the group and the folder of the publications are set here.
     `maven-publish`
@@ -50,8 +54,17 @@ publishing.repositories.maven {
     url = rootProject.layout.buildDirectory.dir("cringle-test-maven-local").get().asFile.toURI()
 }
 
+samWithReceiver {
+    annotation("org.gradle.api.HasImplicitReceiver")
+}
+
 kotlin {
     explicitApi()
+    // Gradle runs the plugin with its own Kotlin runtime (2.0.x for Gradle 8.12): do not use the newer language and library API of this build.
+    compilerOptions {
+        languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+    }
 }
 
 // The sample resolves contract, schema and packaging from the Maven repository that the root build publishes them
