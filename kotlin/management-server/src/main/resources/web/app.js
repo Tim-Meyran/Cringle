@@ -214,16 +214,48 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.on('connectionSelected', function (c) {
     var key = edgeKey(c);
     var o = options[key] || (options[key] = { delivery: 'DROP', record: false });
+    function number(label, holder, name, hint) {
+      var input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.placeholder = hint || 'default';
+      input.value = holder[name] === undefined ? '' : holder[name];
+      input.addEventListener('input', function () {
+        if (input.value === '') delete holder[name]; else holder[name] = parseInt(input.value, 10);
+        changed();
+      });
+      return field(label, input);
+    }
     var delivery = document.createElement('select');
     ['DROP', 'BUFFER'].forEach(function (v) { var opt = document.createElement('option'); opt.textContent = v; opt.selected = o.delivery === v; delivery.append(opt); });
-    delivery.addEventListener('change', function () { o.delivery = delivery.value; changed(); });
     var record = document.createElement('input');
     record.type = 'checkbox';
     record.checked = !!o.record;
     record.addEventListener('change', function () { o.record = record.checked; changed(); });
     var title = document.createElement('p');
     title.textContent = key;
-    panel.replaceChildren(title, field('Delivery', delivery), field('Record in the data warehouse', record));
+    var retryBox = document.createElement('div');
+    function drawRetry() {
+      if (o.delivery !== 'BUFFER') { delete o.retry; retryBox.replaceChildren(); return; }
+      var r = o.retry || {};
+      var backoff = document.createElement('select');
+      ['', 'FIXED', 'EXPONENTIAL'].forEach(function (v) { var opt = document.createElement('option'); opt.value = v; opt.textContent = v || 'default (FIXED)'; opt.selected = (r.backoff || '') === v; backoff.append(opt); });
+      backoff.addEventListener('change', function () { if (backoff.value === '') delete r.backoff; else r.backoff = backoff.value; store(); });
+      function store() { if (Object.keys(r).length === 0) delete o.retry; else o.retry = r; changed(); }
+      var group = document.createElement('fieldset');
+      var legend = document.createElement('legend');
+      legend.textContent = 'Retry';
+      var wrap = function (label, name, hint) {
+        var f = number(label, r, name, hint);
+        f.addEventListener('input', store);
+        return f;
+      };
+      group.append(legend, wrap('Maximum attempts', 'maxAttempts', 'unlimited'), wrap('Delay in ms', 'backoffMs', '50'), field('Growth of the delay', backoff), wrap('Longest delay in ms', 'maxBackoffMs', '5000'));
+      retryBox.replaceChildren(group);
+    }
+    delivery.addEventListener('change', function () { o.delivery = delivery.value; drawRetry(); changed(); });
+    drawRetry();
+    panel.replaceChildren(title, field('Delivery', delivery), field('Record in the data warehouse', record), number('Buffer capacity', o, 'bufferCapacity'), number('Request timeout in ms', o, 'requestTimeoutMs'), retryBox);
   });
 
   // saving: the server turns the graph into the blueprint and checks it

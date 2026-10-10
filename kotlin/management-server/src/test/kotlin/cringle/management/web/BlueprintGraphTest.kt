@@ -8,7 +8,10 @@ import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
 import cringle.contract.TetherType
 import cringle.packaging.Blueprint
+import cringle.packaging.Backoff
 import cringle.packaging.BlueprintBlock
+import cringle.contract.IsolationLevel
+import cringle.packaging.RetryConfig
 import cringle.packaging.DeliveryPolicy
 import cringle.packaging.Endpoint
 import cringle.packaging.ManifestJson
@@ -18,6 +21,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -40,7 +45,7 @@ class BlueprintGraphTest {
     private fun roundTrip(blueprint: Blueprint): Blueprint {
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
         val kept = blueprint.tethers.filterNot { BlueprintGraph.drawable(it) }
-        return BlueprintGraph.toBlueprint(blueprint.name, graph, BlueprintGraph.options(blueprint), kept, blueprint.provides, blueprint.assertions, ::definition)
+        return BlueprintGraph.toBlueprint(blueprint.name, graph, BlueprintGraph.options(blueprint), kept, blueprint.provides, blueprint.assertions, definition = ::definition)
     }
 
     @Test
@@ -61,6 +66,43 @@ class BlueprintGraphTest {
         )
         assertEquals(blueprint, roundTrip(blueprint))
         assertEquals(ManifestJson.encode(blueprint), ManifestJson.encode(roundTrip(blueprint)))
+    }
+
+    @Test
+    fun tetherOptionsAreWrittenAndComeBack() {
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("c", "p/sink")),
+            listOf(
+                TetherDef(
+                    TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in"), delivery = DeliveryPolicy.BUFFER, bufferCapacity = 64,
+                    requestTimeout = java.time.Duration.ofMillis(2500), retry = RetryConfig(5, 100, Backoff.EXPONENTIAL, 4000),
+                ),
+            ),
+        )
+        assertEquals(blueprint, roundTrip(blueprint))
+        val options = BlueprintGraph.options(blueprint).getValue("a.out>c.in").jsonObject
+        assertEquals("64", options.getValue("bufferCapacity").jsonPrimitive.content)
+        assertEquals("EXPONENTIAL", options.getValue("retry").jsonObject.getValue("backoff").jsonPrimitive.content)
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
+        assertThrows<GraphException> {
+            BlueprintGraph.toBlueprint("app", graph, JsonObject(mapOf("a.out>c.in" to JsonObject(mapOf("bufferCapacity" to JsonPrimitive("many"))))), emptyList(), emptyList(), definition = ::definition)
+        }
+    }
+
+    @Test
+    fun retentionIsolationAndVarArgCountsSurviveASave() {
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src", isolation = IsolationLevel.PROCESS, varArgCounts = mapOf("out" to 2)), BlueprintBlock("c", "p/sink")),
+            listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in"), record = RecordConfig(java.time.Duration.ofDays(7), 1_000_000L))),
+        )
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
+        val saved = BlueprintGraph.toBlueprint("app", graph, BlueprintGraph.options(blueprint), emptyList(), emptyList(), previousBlocks = blueprint.blocks, definition = ::definition)
+        assertEquals(blueprint, saved)
+        // without the previous blocks the defaults come back (a new block has no history)
+        val fresh = BlueprintGraph.toBlueprint("app", graph, BlueprintGraph.options(blueprint), emptyList(), emptyList(), definition = ::definition)
+        assertEquals(IsolationLevel.SHARED, fresh.blocks.first().isolation)
     }
 
     @Test
@@ -86,7 +128,7 @@ class BlueprintGraphTest {
 
     @Test
     fun aMalformedOrImpossibleGraphIsRefused() {
-        assertThrows<GraphException> { BlueprintGraph.toBlueprint("x", JsonObject(emptyMap()), JsonObject(emptyMap()), emptyList(), emptyList(), emptyList(), ::definition) }
+        assertThrows<GraphException> { BlueprintGraph.toBlueprint("x", JsonObject(emptyMap()), JsonObject(emptyMap()), emptyList(), emptyList(), emptyList(), definition = ::definition) }
         val blueprint = Blueprint("app", listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("c", "p/sink")), listOf(TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in"))))
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
         assertThrows<GraphException> { BlueprintGraph.toBlueprint("app", graph, JsonObject(emptyMap()), emptyList(), emptyList()) { null } }
