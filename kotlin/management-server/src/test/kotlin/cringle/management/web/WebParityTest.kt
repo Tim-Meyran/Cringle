@@ -33,7 +33,7 @@ class WebParityTest {
         "deploy" to "POST /deployments", "rollback" to "POST /deployments/p/rollback", "undeploy" to "POST /deployments/p/undeploy",
         "bind" to "POST /bindings", "unbind" to "POST /bindings/p/s/unbind", "bindings" to "GET /deployments/list",
         "logs" to "GET /logs/list", "metrics" to "GET /metrics/list",
-        "dwh list" to "GET /dwh/list", "dwh query" to "GET /dwh/records", "dwh record" to "POST /dwh/recording", "dwh retention" to "POST /dwh/retention",
+        "dwh list" to "GET /dwh/list", "dwh query" to "GET /dwh/records", "dwh record" to "POST /dwh/recording", "debug break" to "POST /debug/break", "debug state" to "GET /debug/list", "debug resume" to "POST /debug/resume", "dwh retention" to "POST /dwh/retention",
         "router add" to "POST /trust/routers", "router remove" to "POST /trust/routers/remove", "router list" to "GET /trust",
         "trust list" to "GET /trust/list", "trust add" to "POST /trust/probe", "trust add-component" to "POST /trust/components", "trust revoke" to "POST /trust/revoke",
         "repo publish" to "POST /packages/upload", "repo list" to "GET /packages", "repo versions" to "GET /packages/list", "repo trust" to "POST /packages/p/trust",

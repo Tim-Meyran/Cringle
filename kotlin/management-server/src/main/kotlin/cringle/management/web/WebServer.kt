@@ -81,6 +81,7 @@ public class WebServer(
         ConfigPages(core).register(this)
         ConnectPages(core, grpcPort).register(this)
         DeploymentPages(core).register(this)
+        DebugPages(core).register(this)
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
         val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
