@@ -121,6 +121,13 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
 
     private fun json(value: JsonObject): WebResponse = WebResponse(200, value.toString().toByteArray(), "application/json")
 
+    /** The counts of the VarArg ports of a node as the browser sends them (`{"port": 2}`); a malformed value counts as none. */
+    private fun counts(text: String?): Map<String, Int> = try {
+        (Json.parseToJsonElement(text ?: "{}") as? JsonObject).orEmpty().mapNotNull { (k, v) -> (v as? JsonPrimitive)?.content?.toIntOrNull()?.let { k to it } }.toMap()
+    } catch (e: kotlinx.serialization.SerializationException) {
+        emptyMap()
+    }
+
     private suspend fun check(form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
         val snapshot = try {
@@ -132,13 +139,20 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val toType = form["toBlock"].orEmpty()
         val from = snapshot.block(fromType) ?: return no("unknown block '$fromType'")
         val to = snapshot.block(toType) ?: return no("unknown block '$toType'")
-        val out = BlueprintGraph.outputs(from).getOrNull((form["fromOutput"]?.toIntOrNull() ?: 0) - 1) ?: return no("'$fromType' has no such output")
-        val input = BlueprintGraph.inputs(to).getOrNull((form["toInput"]?.toIntOrNull() ?: 0) - 1) ?: return no("'$toType' has no such input")
-        if (out.varArg || input.varArg) return no("VarArg ports cannot be connected in the editor yet")
+        val fromCounts = BlueprintGraph.countsFor(from, counts(form["fromCounts"]))
+        val toCounts = BlueprintGraph.countsFor(to, counts(form["toCounts"]))
+        val outSlot = BlueprintGraph.slots(from, cringle.contract.PortDirection.OUT, fromCounts).getOrNull((form["fromOutput"]?.toIntOrNull() ?: 0) - 1) ?: return no("'$fromType' has no such output")
+        val inSlot = BlueprintGraph.slots(to, cringle.contract.PortDirection.IN, toCounts).getOrNull((form["toInput"]?.toIntOrNull() ?: 0) - 1) ?: return no("'$toType' has no such input")
+        val out = outSlot.port
+        val input = inSlot.port
         val type = BlueprintGraph.commonType(out, input)
             ?: return no("'${out.name}' (${out.tetherTypes.joinToString()}) and '${input.name}' (${input.tetherTypes.joinToString()}) share no tether type")
         // the verdict of the same validator that the package build and the deploy use, for this one tether only
-        val probe = Blueprint("probe", listOf(BlueprintBlock("a", fromType), BlueprintBlock("b", toType)), listOf(TetherDef(type, Endpoint("a", out.name), Endpoint("b", input.name))))
+        val probe = Blueprint(
+            "probe",
+            listOf(BlueprintBlock("a", fromType, varArgCounts = fromCounts), BlueprintBlock("b", toType, varArgCounts = toCounts)),
+            listOf(TetherDef(type, Endpoint("a", out.name, outSlot.index), Endpoint("b", input.name, inSlot.index))),
+        )
         val problems = PackageValidator.validateBlueprint(probe, snapshot::block, snapshot.registry, "probe").filter { it.path.contains("$.tethers[") }
         if (problems.isNotEmpty()) return no(problems.joinToString("; ") { it.message })
         return buildJsonObject { put("ok", true); put("type", type.name) }
@@ -182,8 +196,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     add(
                         buildJsonObject {
                             put("block", "${plugin.manifest.name}/${b.name}")
-                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { JsonPrimitive(it.name) }))
-                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { JsonPrimitive(it.name) }))
+                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
+                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
                             put("title", b.name)
                             put("varArg", b.ports.any { it.varArg })
                             put("config", b.configSchema?.let { "${it.namespace}/${it.name}" }.orEmpty())

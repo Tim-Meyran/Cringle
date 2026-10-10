@@ -85,14 +85,38 @@ document.addEventListener('htmx:responseError', function (event) {
     box.replaceChildren(p);
   }
   function blockData(id) { return editor.getNodeFromId(id).data; }
-  function portName(blockType, kind, index) {
-    var p = byBlock[blockType];
-    return p ? p[kind][index - 1] : '?';
+  // the ports of a node as it draws them: a VarArg port once per slot (name[0], name[1], ...), in the order of the definition
+  function slots(blockType, kind, counts) {
+    var p = byBlock[blockType], out = [];
+    ((p && p[kind]) || []).forEach(function (port) {
+      if (port.varArg) {
+        var n = Math.max(1, (counts && counts[port.name]) || 1);
+        for (var i = 0; i < n; i++) out.push({ port: port.name, index: i, label: port.name + '[' + i + ']' });
+      } else {
+        out.push({ port: port.name, index: null, label: port.name });
+      }
+    });
+    return out;
+  }
+  function defaultCounts(blockType) {
+    var counts = {};
+    ((byBlock[blockType] || {}).inputs || []).concat((byBlock[blockType] || {}).outputs || []).forEach(function (port) { if (port.varArg) counts[port.name] = 1; });
+    return counts;
+  }
+  function nodeHtml(data) {
+    var ins = slots(data.block, 'inputs', data.varArgCounts), outs = slots(data.block, 'outputs', data.varArgCounts);
+    var label = function (l) { return l.label; };
+    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small><small class="ports">in: ' + esc(ins.map(label).join(', ')) +
+      ' | out: ' + esc(outs.map(label).join(', ')) + '</small>';
+  }
+  function slotLabel(data, kind, className) {
+    var n = parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10);
+    var slot = slots(data.block, kind, data.varArgCounts)[n - 1];
+    return slot ? slot.label : '?';
   }
   function edgeKey(c) {
     var from = blockData(c.output_id), to = blockData(c.input_id);
-    return from.id + '.' + portName(from.block, 'outputs', parseInt(c.output_class.replace('output_', ''), 10)) + '>' +
-      to.id + '.' + portName(to.block, 'inputs', parseInt(c.input_class.replace('input_', ''), 10));
+    return from.id + '.' + slotLabel(from, 'outputs', c.output_class) + '>' + to.id + '.' + slotLabel(to, 'inputs', c.input_class);
   }
   function uniqueId(base) {
     var ids = {};
@@ -140,22 +164,23 @@ document.addEventListener('htmx:responseError', function (event) {
     button.addEventListener('click', function () {
       var p = byBlock[button.dataset.block];
       if (!p) return;
-      if (p.varArg) { say('Blocks with VarArg ports cannot be used in the editor yet.', true); return; }
       var id = uniqueId(p.title);
-      var data = { id: id, block: p.block, config: {} };
-      var html = '<div class="node-title">' + esc(id) + '</div><small>' + esc(p.block) + '</small><small class="ports">in: ' + esc(p.inputs.join(', ')) + ' | out: ' + esc(p.outputs.join(', ')) + '</small>';
+      var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block) };
       var count = Object.keys(editor.export().drawflow.Home.data).length;
-      editor.addNode(p.block, p.inputs.length, p.outputs.length, 40 + 220 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, html);
+      editor.addNode(p.block, slots(p.block, 'inputs', data.varArgCounts).length, slots(p.block, 'outputs', data.varArgCounts).length,
+        40 + 220 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, nodeHtml(data));
     });
   });
 
   var rejecting = false;
   // the server decides whether a connection is allowed
+  var rebuilding = false;
   editor.on('connectionCreated', function (c) {
+    if (rebuilding) return;
     var from = blockData(c.output_id), to = blockData(c.input_id);
     var body = new URLSearchParams({
-      fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''),
-      toBlock: to.block, toInput: c.input_class.replace('input_', ''),
+      fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
+      toBlock: to.block, toInput: c.input_class.replace('input_', ''), toCounts: JSON.stringify(to.varArgCounts || {}),
     });
     fetch(host.dataset.checkUrl, { method: 'POST', headers: { 'X-CSRF-Token': csrf(), 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
       .then(function (r) { return r.json(); })
@@ -208,8 +233,62 @@ document.addEventListener('htmx:responseError', function (event) {
         config.classList.add('invalid');
       }
     });
-    panel.replaceChildren(field('Block id', idInput), field('Configuration (JSON)', config));
+    var isolation = document.createElement('select');
+    ['SHARED', 'PROCESS'].forEach(function (v) { var opt = document.createElement('option'); opt.textContent = v; opt.selected = (data.isolation || 'SHARED') === v; isolation.append(opt); });
+    isolation.addEventListener('change', function () { data.isolation = isolation.value; editor.updateNodeDataFromId(id, data); changed(); });
+    var parts = [field('Block id', idInput), field('Isolation', isolation)];
+    Object.keys(data.varArgCounts || {}).forEach(function (port) {
+      var n = document.createElement('input');
+      n.type = 'number';
+      n.min = '1';
+      n.value = data.varArgCounts[port];
+      n.addEventListener('change', function () {
+        var next = Math.max(1, parseInt(n.value, 10) || 1);
+        n.value = next;
+        var oldCounts = Object.assign({}, data.varArgCounts);
+        data.varArgCounts[port] = next;
+        rebuildNode(id, data, oldCounts);
+      });
+      parts.push(field('Slots of ' + port, n));
+    });
+    parts.push(field('Configuration (JSON)', config));
+    panel.replaceChildren.apply(panel, parts);
   });
+
+  // a new number of slots changes the ports of a node: it is drawn again and keeps the connections whose slot still exists
+  function rebuildNode(oldId, data, oldCounts) {
+    var node = editor.getNodeFromId(oldId);
+    var before = { ins: slots(data.block, 'inputs', oldCounts), outs: slots(data.block, 'outputs', oldCounts) };
+    var links = [];
+    Object.keys(node.outputs).forEach(function (cls) {
+      node.outputs[cls].connections.forEach(function (c) { links.push({ side: 'out', slot: cls, other: c.node, otherClass: c.output }); });
+    });
+    Object.keys(node.inputs).forEach(function (cls) {
+      node.inputs[cls].connections.forEach(function (c) { links.push({ side: 'in', slot: cls, other: c.node, otherClass: c.input }); });
+    });
+    var x = node.pos_x, y = node.pos_y;
+    var oldLabels = { out: {}, in: {} };
+    Object.keys(node.outputs).forEach(function (cls, i) { oldLabels.out[cls] = (before.outs[i] || {}).label; });
+    Object.keys(node.inputs).forEach(function (cls, i) { oldLabels.in[cls] = (before.ins[i] || {}).label; });
+    rebuilding = true;
+    editor.removeNodeId('node-' + oldId);
+    var inSlots = slots(data.block, 'inputs', data.varArgCounts), outSlots = slots(data.block, 'outputs', data.varArgCounts);
+    var created = editor.addNode(data.block, inSlots.length, outSlots.length, x, y, 'cringle-block', data, nodeHtml(data));
+    links.forEach(function (l) {
+      var label = oldLabels[l.side][l.slot];
+      if (l.side === 'out') {
+        var k = outSlots.findIndex(function (s2) { return s2.label === label; });
+        if (k >= 0) editor.addConnection(created, l.other, 'output_' + (k + 1), l.otherClass);
+      } else {
+        var m = inSlots.findIndex(function (s2) { return s2.label === label; });
+        if (m >= 0) editor.addConnection(l.other, created, l.otherClass, 'input_' + (m + 1));
+      }
+    });
+    rebuilding = false;
+    panel.replaceChildren();
+    showHint();
+    later();
+  }
   editor.on('nodeUnselected', function () { panel.replaceChildren(); });
   editor.on('connectionSelected', function (c) {
     var key = edgeKey(c);
