@@ -15,6 +15,9 @@
 #   -Components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
 #                       user logins), repository (the package repository), both separated by a comma, or none. Default: both.
 #   -DaemonOnly         the same as -Components none
+#   -CringleHost <name> the name or address under which other Cringle machines reach this one: in a Tailscale network its Tailscale name or
+#                       address. The Connect page of the web interface builds its addresses from it (default: not set)
+#   -RouterPort <n>     port of the router of the daemon (default 7450)
 #   -WebUrl <url>       the public address of the web interface for login links and QR codes, https://host:port (default: the address of the request)
 #   -NoAsk              do not ask: on the first installation, in a console, the script asks for every value that no option gives
 #                       (the components, the ports, the address) before it asks for administrative rights; without a console it
@@ -47,6 +50,8 @@ param(
     [switch]$DaemonOnly,
     [string]$Components,
     [string]$WebUrl,
+    [string]$CringleHost,
+    [string]$RouterPort,
     [switch]$NoAsk,
     [string]$Bind,
     [string]$Port,
@@ -77,11 +82,11 @@ $LatestApi = 'https://api.github.com/repos/Tim-Meyran/Cringle/releases/latest'
 $WinSwUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe'
 $WinSwSha256 = 'b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f'
 # the settings of the services: the key-value store of the daemon, <data>\config\cringle.conf (docs/daemon-service.md; `cringle config` and `cringle setup` change it)
-$SettingDefaults = [ordered]@{ 'bind' = 'loopback'; 'components' = 'management,repository'; 'daemon.port' = '7400'; 'management.port' = '7500'; 'management.web.port' = '8443'; 'management.web.url' = ''; 'repository.port' = '7600' }
+$SettingDefaults = [ordered]@{ 'bind' = 'loopback'; 'components' = 'management,repository'; 'daemon.port' = '7400'; 'cringle.host' = ''; 'router.port' = '7450'; 'management.port' = '7500'; 'management.web.port' = '8443'; 'management.web.url' = ''; 'repository.port' = '7600' }
 # the names of the settings in the service file of an older installation (<env> elements)
 $LegacyNames = @{ 'bind' = 'CRINGLE_BIND'; 'components' = 'CRINGLE_COMPONENTS'; 'daemon.port' = 'CRINGLE_DAEMON_PORT'; 'management.port' = 'CRINGLE_MANAGEMENT_PORT'; 'management.web.port' = 'CRINGLE_WEB_PORT'; 'repository.port' = 'CRINGLE_REPOSITORY_PORT' }
 if ($DaemonOnly -and -not $Components) { $Components = 'none' }
-$SettingGiven = @{ 'components' = $Components; 'bind' = $Bind; 'daemon.port' = $DaemonPort; 'management.port' = $Port; 'management.web.port' = $WebPort; 'management.web.url' = $WebUrl; 'repository.port' = $RepositoryPort }
+$SettingGiven = @{ 'components' = $Components; 'bind' = $Bind; 'daemon.port' = $DaemonPort; 'cringle.host' = $CringleHost; 'router.port' = $RouterPort; 'management.port' = $Port; 'management.web.port' = $WebPort; 'management.web.url' = $WebUrl; 'repository.port' = $RepositoryPort }
 # the daemon takes its settings from its store: the service has no arguments
 $DaemonArguments = ''
 $Services = @(
@@ -317,6 +322,8 @@ function Assert-Settings {
             $SettingGiven[$key] = ConvertTo-Components $value
         } elseif ($key -eq 'bind') {
             if ($value -notin @('loopback', 'all')) { throw "-Bind needs loopback or all, not '$value'" }
+        } elseif ($key -eq 'cringle.host') {
+            if ($value -notmatch '^([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$') { throw "-CringleHost needs a name or an address without scheme, port or path, not '$value'" }
         } elseif ($key -eq 'management.web.url') {
             if ($value -notmatch '^https://[^/ ?#@]+$') { throw "-WebUrl needs an address like https://host:port, not '$value'" }
         } elseif ($value -notmatch '^[0-9]{1,5}$' -or [int]$value -lt 1 -or [int]$value -gt 65535) {
@@ -332,7 +339,7 @@ function Write-Settings {
     $text = if (Test-Path -LiteralPath $SettingsFile) { [IO.File]::ReadAllText($SettingsFile) } else { "# Settings of the Cringle services of this machine. Change them with ``cringle config`` or the web interface, or here and restart the daemon.`n" }
     foreach ($key in $values.Keys) {
         $value = $values[$key]
-        if (-not $value -and $key -eq 'management.web.url') { continue }
+        if (-not $value -and ($key -eq 'management.web.url' -or $key -eq 'cringle.host')) { continue }
         $line = "$key=$value"
         $pattern = '(?m)^' + [regex]::Escape($key) + '=.*$'
         if ($text -match $pattern) { $text = [regex]::Replace($text, $pattern, { param($m) $line }) } else { $text = $text.TrimEnd("`r", "`n") + "`n" + $line + "`n" }
@@ -600,6 +607,20 @@ function Invoke-Questions {
         & $set 'repository.port' 'RepositoryPort' (Read-Port 'Port of the repository' $SettingDefaults['repository.port'])
     }
     if (-not $SettingGiven['daemon.port']) { & $set 'daemon.port' 'DaemonPort' (Read-Port 'Port of the daemon' $SettingDefaults['daemon.port']) }
+    if (-not $SettingGiven['cringle.host']) {
+        # in a Tailscale network the name or address of the machine there is the one the other machines use
+        $suggestion = ''
+        if (Get-Command tailscale -ErrorAction SilentlyContinue) { $suggestion = [string](@(& tailscale ip -4 2> $null) | Select-Object -First 1) }
+        for ($try = 0; $try -lt 3; $try++) {
+            $answer = Read-Answer 'Name or address under which other Cringle machines reach this one (Tailscale name or address; Enter: not set)' $suggestion
+            if (-not $answer -or $answer -match '^([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$') {
+                if ($answer) { & $set 'cringle.host' 'CringleHost' $answer }
+                break
+            }
+            Write-Host 'that is not a name or an address (no scheme, port or path)'
+            if ($try -eq 2) { throw 'no valid name given' }
+        }
+    }
     if (-not $SettingGiven['bind']) {
         $all = Read-Yes 'Listen on all network interfaces (no: only on this machine)?' 'no'
         & $set 'bind' 'Bind' $(if ($all) { 'all' } else { 'loopback' })
@@ -611,7 +632,7 @@ function Invoke-Questions {
 try {
     if ($Purge -and -not $Uninstall) { throw '-Purge works only together with -Uninstall' }
     Assert-Settings
-    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort -or $Components -or $WebUrl -or $NoAsk)) { throw '-Uninstall cannot be combined with -Bind, -Components, -WebUrl, -NoAsk or the port options' }
+    if ($Uninstall -and ($Bind -or $Port -or $WebPort -or $RepositoryPort -or $DaemonPort -or $Components -or $WebUrl -or $CringleHost -or $RouterPort -or $NoAsk)) { throw '-Uninstall cannot be combined with -Bind, -Components, -WebUrl, -NoAsk or the port options' }
     if ($Uninstall -and ($Version -or $WithManagement -or $DaemonOnly -or $Start -or $FromBuild)) { throw '-Uninstall cannot be combined with -Version, -DaemonOnly, -Start or -FromBuild' }
     if ($FromBuild -and $PSBoundParameters.ContainsKey('BaseUrl')) { throw '-FromBuild cannot be combined with -BaseUrl' }
     # before the elevation: the questions need the console of the person, the elevated run has none

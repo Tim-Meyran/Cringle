@@ -10,6 +10,9 @@
 #   --components <list>  what the daemon runs besides itself: management (the management server with the web interface and the
 #                        user logins), repository (the package repository), both separated by a comma, or none. Default: both.
 #   --daemon-only        the same as --components none
+#   --host <name>        the name or address under which other Cringle machines reach this one: in a Tailscale network its Tailscale name or
+#                        address. The Connect page of the web interface builds its addresses from it (default: not set)
+#   --router-port <n>    port of the router of the daemon (default 7450)
 #   --web-url <url>      the public address of the web interface for login links and QR codes, https://host:port (default: the address of the request)
 #   --no-ask             do not ask: on the first installation, in a terminal, the installer asks for every value that no option gives
 #                        (the components, the ports, the address); without a terminal it never asks and takes the options or the defaults
@@ -94,6 +97,8 @@ SET_WEB_PORT=""
 SET_REPOSITORY_PORT=""
 SET_COMPONENTS=""
 SET_WEB_URL=""
+SET_HOST=""
+SET_ROUTER_PORT=""
 NO_ASK=0
 
 # normalize_components <list>: "management,repository", "management", "repository" or "none" in this order; fails for anything else
@@ -200,6 +205,19 @@ ask_settings() {
             ;;
     esac
     [ -n "$SET_DAEMON_PORT" ] || { ask_port "Port of the daemon" "$DAEMON_PORT"; SET_DAEMON_PORT=$ANSWER; }
+    if [ -z "$SET_HOST" ]; then
+        # in a Tailscale network the name or address of the machine there is the one the other machines use
+        suggestion=""
+        if command -v tailscale > /dev/null 2>&1; then suggestion=$(tailscale ip -4 2> /dev/null | head -n 1 || true); fi
+        tries=0
+        while [ $tries -lt 3 ]; do
+            ask "Name or address under which other Cringle machines reach this one (Tailscale name or address; Enter: not set)" "$suggestion"
+            if [ -z "$ANSWER" ] || printf '%s' "$ANSWER" | grep -Eq '^([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$'; then SET_HOST=$ANSWER; break; fi
+            echo "that is not a name or an address (no scheme, port or path)" >&2
+            tries=$((tries + 1))
+        done
+        [ $tries -lt 3 ] || die "no valid name given"
+    fi
     if [ -z "$SET_BIND" ]; then
         if ask_yes "Listen on all network interfaces (no: only on this machine)?" no; then SET_BIND=all; else SET_BIND=loopback; fi
     fi
@@ -233,6 +251,8 @@ while [ $# -gt 0 ]; do
         --daemon-only) DAEMON_ONLY=1; shift ;;
         --components) SET_COMPONENTS=$(option_value "$@"); shift 2 ;;
         --web-url) SET_WEB_URL=$(option_value "$@"); shift 2 ;;
+        --host) SET_HOST=$(option_value "$@"); shift 2 ;;
+        --router-port) SET_ROUTER_PORT=$(option_value "$@"); shift 2 ;;
         --no-ask) NO_ASK=1; shift ;;
         --start) START=1; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
@@ -245,7 +265,10 @@ done
 if [ "$PURGE" -eq 1 ] && [ "$UNINSTALL" -eq 0 ]; then
     die "--purge works only together with --uninstall"
 fi
-for pair in "--port:$SET_MANAGEMENT_PORT" "--web-port:$SET_WEB_PORT" "--repository-port:$SET_REPOSITORY_PORT" "--daemon-port:$SET_DAEMON_PORT"; do
+if [ -n "$SET_HOST" ]; then
+    printf '%s' "$SET_HOST" | grep -Eq '^([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])$' || die "--host needs a name or an address without scheme, port or path, not '$SET_HOST'"
+fi
+for pair in "--port:$SET_MANAGEMENT_PORT" "--web-port:$SET_WEB_PORT" "--repository-port:$SET_REPOSITORY_PORT" "--daemon-port:$SET_DAEMON_PORT" "--router-port:$SET_ROUTER_PORT"; do
     value=${pair#*:}
     if [ -n "$value" ]; then
         printf '%s' "$value" | grep -Eq '^[0-9]{1,5}$' && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || die "${pair%%:*} needs a port (1 to 65535), not '$value'"
@@ -267,7 +290,7 @@ if [ -n "$SET_BIND" ]; then
         *) die "--bind needs loopback or all, not '$SET_BIND'" ;;
     esac
 fi
-if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT$SET_COMPONENTS$SET_WEB_URL" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ] || [ "$NO_ASK" -eq 1 ]; }; then
+if [ "$UNINSTALL" -eq 1 ] && { [ -n "$SET_BIND$SET_MANAGEMENT_PORT$SET_WEB_PORT$SET_REPOSITORY_PORT$SET_DAEMON_PORT$SET_COMPONENTS$SET_WEB_URL$SET_HOST$SET_ROUTER_PORT" ] || [ -n "$RELEASE" ] || [ "$WITH_MANAGEMENT" -eq 1 ] || [ "$DAEMON_ONLY" -eq 1 ] || [ "$START" -eq 1 ] || [ "$NO_ASK" -eq 1 ]; }; then
     die "--uninstall cannot be combined with --release, --components, --daemon-only, --bind, a port or --start"
 fi
 if [ -n "$RELEASE" ]; then
@@ -391,6 +414,9 @@ write_settings() {
     conf_put bind "$(resolve bind "$SET_BIND" CRINGLE_BIND loopback)"
     conf_put components "$(resolve components "$SET_COMPONENTS" CRINGLE_COMPONENTS "$(default_components)")"
     conf_put daemon.port "$(resolve daemon.port "$SET_DAEMON_PORT" CRINGLE_DAEMON_PORT "$DAEMON_PORT")"
+    host=$(resolve cringle.host "$SET_HOST" "" "")
+    if [ -n "$host" ]; then conf_put cringle.host "$host"; fi
+    conf_put router.port "$(resolve router.port "$SET_ROUTER_PORT" "" 7450)"
     conf_put management.port "$(resolve management.port "$SET_MANAGEMENT_PORT" CRINGLE_MANAGEMENT_PORT "$MANAGEMENT_PORT")"
     conf_put management.web.port "$(resolve management.web.port "$SET_WEB_PORT" CRINGLE_WEB_PORT "$WEB_PORT")"
     web_url=$(resolve management.web.url "$SET_WEB_URL" "" "")

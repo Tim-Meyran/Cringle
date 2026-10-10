@@ -131,7 +131,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         } else {
             h(
                 "<form class=\"form-row\" hx-post=\"/trust/probe\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}<button class=\"btn primary\">Show its key</button></form>",
-                field("Router address", raw("<input name=\"address\" placeholder=\"host:port\" required>")),
+                field("Router address", raw("<input name=\"address\" placeholder=\"host:port\" required>"), "the address of the router of the other server: it is on its Connect page (cringle.host:port)"),
             )
         }
         val componentForm = if (!admin) {

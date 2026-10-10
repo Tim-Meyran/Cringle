@@ -46,8 +46,8 @@ class SetupCommandTest {
     @Test
     fun withoutOptionsEachSettingIsAskedAndAnEmptyAnswerKeepsIt() {
         val file = file()
-        // the keys in the order of the catalog: bind, components, daemon.port, management.port, management.web.port, management.web.url, repository.port
-        val r = cli("all\nmanagement\n\n\n9443\n\n\n", "--config-file", file.toString(), "--no-restart")
+        // the keys in the order of the catalog: bind, cringle.host, components, daemon.port, router.mode, router.port, router.address, management.port, management.web.port, management.web.url, repository.port
+        val r = cli("all\n\nmanagement\n\n\n\n\n\n9443\n\n\n", "--config-file", file.toString(), "--no-restart")
         assertEquals(0, r.code, r.err)
         assertEquals("# Settings\nbind=all\ncomponents=management\nmanagement.web.port=9443\n", Files.readString(file))
     }
@@ -69,6 +69,16 @@ class SetupCommandTest {
         }
         assertEquals(text, Files.readString(file))
         assertEquals(2, cli("", "--config-file", dir.resolve("nowhere").resolve("cringle.conf").toString(), "--show").code)
+    }
+
+    @Test
+    fun theNameOfTheMachineAndThePortOfTheRouterAreSettings() {
+        val file = file()
+        assertEquals(0, cli("", "--config-file", file.toString(), "--host", "node1.tail.example", "--router-port", "7451", "--no-restart").code)
+        assertTrue(Files.readString(file).contains("cringle.host=node1.tail.example\n") && Files.readString(file).contains("router.port=7451\n"))
+        for (bad in listOf(listOf("--host", "node1:7500"), listOf("--host", "https://node1"), listOf("--router-port", "0"))) {
+            assertEquals(2, cli("", "--config-file", file.toString(), "--no-restart", *bad.toTypedArray()).code, bad.toString())
+        }
     }
 
     @Test

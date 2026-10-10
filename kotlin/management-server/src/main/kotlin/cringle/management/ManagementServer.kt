@@ -127,7 +127,7 @@ public class ManagementServer(
         .build()
 
     /** The web interface; `null` if no web port was given. Pages register their routes before [start]. */
-    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost, webUrl = webUrl) }
+    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost, webUrl = webUrl, grpcPort = { server.port }) }
 
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
     @Volatile

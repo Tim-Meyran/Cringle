@@ -54,7 +54,11 @@ The daemon alone (a machine that is not the central one of a site): add `--daemo
 |---|---|---|---|
 | `bind` | `loopback` | where the servers of the machine listen: `loopback` or `all` (every network interface) | the daemon |
 | `components` | `none` (the installers write `management,repository`) | what the daemon runs besides itself: `management`, `repository`, both, or `none` | the programs that start or stop |
+| `cringle.host` | empty | **the name or address under which other Cringle machines reach this machine**: in a Tailscale network its Tailscale name (`node1.tail1234.ts.net`) or address. Only a host name or an address, no scheme, port or path. The page *Connect* builds every address from it; it opens nothing and binds nothing | nothing |
 | `daemon.port` | `7400` | port of the daemon | the daemon |
+| `router.mode` | `local` | the router of the machine: `local` (the daemon runs one, in its own process), `remote` (it uses the one at `router.address`) or `none` | the daemon |
+| `router.port` | `7450` | port of the router that the daemon runs; a fixed port, so that other machines can add the address as a remote router (it used to be a free port that changed with every start) | the daemon |
+| `router.address` | empty | `host:port` of the router that this machine uses (`router.mode` remote) | the daemon |
 | `management.port` | `7500` | port of the management server (gRPC: CLI and daemons) | the management server |
 | `management.web.port` | `8443` | port of the web interface | the management server |
 | `management.web.url` | empty | public address for login links and QR codes (`https://host:port`); empty: the `Host` header of the request | the management server |
@@ -71,7 +75,11 @@ cringle config unset [machine] management.web.url   # the default is in effect a
 sudo cringle setup --bind all --web-port 9443       # this machine, without a management server; asks without options
 ```
 
-The installer options (`--bind`, `--components`, `--port`, `--web-port`, `--web-url`, `--repository-port`, `--daemon-port`; Windows: `-Bind` ...) and its questions write the same keys. Rights: reading needs `READ`, changing `ADMINISTER`, for the machine or for the function `config` (`users.md`). `bind` and the other settings of one machine do not reach other machines: every daemon has its own store.
+**The router.** The daemon of the installers runs a router (`router.mode local`) on `router.port` (7450). The arguments `--combined` and `--router host:port` of the daemon still work and win over the store. An installation with the first version of the settings file (#321) started the daemon without `--combined` and so without a router; with `router.mode` it has one again after the next start.
+
+**Where are the addresses?** The page *Connect* of the web interface lists, per machine, the daemon, the router, the management server, the web interface and the repository with their address (`cringle.host:port`), the key (the fingerprint, as the components show it in the handshake) and the command that uses them (`cringle login --server ... --fingerprint ...`, `cringle router add ... --fingerprint ...`). Set `cringle.host` first (`cringle config set <machine> cringle.host <name>`, the installer asks for it and offers the Tailscale address if `tailscale` is installed); without it the page takes the address the management server uses for the machine, for its own machine the address of the page, and says so. A machine that listens on the loopback interface only (`bind`) is marked: its addresses do not work from other machines.
+
+The installer options (`--bind`, `--host`, `--router-port`, `--components`, `--port`, `--web-port`, `--web-url`, `--repository-port`, `--daemon-port`; Windows: `-Bind` ...) and its questions write the same keys. Rights: reading needs `READ`, changing `ADMINISTER`, for the machine or for the function `config` (`users.md`). `bind` and the other settings of one machine do not reach other machines: every daemon has its own store.
 
 After the installation, in a new terminal (the `PATH` entry is only seen by new shells):
 

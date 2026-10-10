@@ -72,6 +72,11 @@ public fun main(args: Array<String>) {
     if (managementPort != null || repositoryPort != null) {
         overrides["components"] = listOfNotNull(managementPort?.let { "management" }, repositoryPort?.let { "repository" }).joinToString(",")
     }
+    if (combined) overrides["router.mode"] = "local"
+    router?.let {
+        overrides["router.mode"] = "remote"
+        overrides["router.address"] = it
+    }
     managementPort?.let { overrides["management.port"] = it.toString() }
     webPort?.let { overrides["management.web.port"] = it.toString() }
     repositoryPort?.let { overrides["repository.port"] = it.toString() }
@@ -86,8 +91,11 @@ public fun main(args: Array<String>) {
     } catch (e: IllegalArgumentException) {
         fail(e.message ?: "invalid bind")
     }
+    // the router (router.mode): this daemon runs one (the default), uses the one at router.address, or has none
+    val routerMode = overrides["router.mode"] ?: store.get("router.mode")
+    val remoteRouter = if (routerMode == "remote") (overrides["router.address"] ?: store.get("router.address")).ifEmpty { fail("router.mode is remote, but router.address is empty") } else null
     val daemon = Daemon(
-        homeDir, effectivePort, router, combined, trustLocal = LocalTrust.enabled(trustLocal), companions = Companions(managementPort, webPort, repositoryPort),
+        homeDir, effectivePort, remoteRouter, routerMode == "local", trustLocal = LocalTrust.enabled(trustLocal), companions = Companions(managementPort, webPort, repositoryPort),
         bindHost = effectiveBind, config = store, overrides = overrides,
     )
     Runtime.getRuntime().addShutdownHook(Thread({ daemon.close() }, "daemon-shutdown"))

@@ -44,6 +44,8 @@ public class WebServer(
     private val maxBodyBytes: Int = 1024 * 1024,
     /** The public address of the web interface for links and QR codes (`https://host[:port]`); `null` uses the `Host` header of the request. */
     webUrl: String? = null,
+    /** The port of the gRPC server of this management server, for the page *Connect*; `null` if it is not known. */
+    private val grpcPort: () -> Int? = { null },
 ) : AutoCloseable {
     private val log = LoggerFactory.getLogger("cringle.management.web")
     private val sessions = Sessions(users, clock, idleTimeout)
@@ -77,6 +79,7 @@ public class WebServer(
         registerFoundation()
         OverviewPages(core).register(this)
         ConfigPages(core).register(this)
+        ConnectPages(core, grpcPort).register(this)
         DeploymentPages(core).register(this)
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
