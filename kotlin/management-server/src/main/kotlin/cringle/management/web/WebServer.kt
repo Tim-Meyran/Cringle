@@ -279,8 +279,29 @@ public class WebServer(
         else -> "application/octet-stream"
     }
 
+    /**
+     * Reads what is left of the request body before the answer goes out. A route that refuses a request (403, 404, 405, a missing session) answers
+     * without reading its body; the server then closes the connection while the client still sends, and the client sees a reset or no answer at
+     * all ("header parser received no bytes"). The request is read up to [maxBodyBytes]; a larger one is answered with `Connection: close`.
+     */
+    private fun drainRequest(exchange: HttpExchange) {
+        try {
+            val buffer = ByteArray(8192)
+            var left = maxBodyBytes.toLong()
+            while (left > 0) {
+                val n = exchange.requestBody.read(buffer)
+                if (n < 0) return
+                left -= n
+            }
+            if (exchange.requestBody.read() >= 0) exchange.responseHeaders.set("Connection", "close")
+        } catch (e: java.io.IOException) {
+            // the body was read already (the stream is closed), or the client went away
+        }
+    }
+
     private fun send(exchange: HttpExchange, response: WebResponse, headOnly: Boolean) {
         val h = exchange.responseHeaders
+        drainRequest(exchange)
         h.set("Content-Type", response.contentType)
         h.set("X-Content-Type-Options", "nosniff")
         h.set("Referrer-Policy", "same-origin")
