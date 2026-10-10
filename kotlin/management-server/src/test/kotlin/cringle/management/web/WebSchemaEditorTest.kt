@@ -97,4 +97,14 @@ class WebSchemaEditorTest {
         assertEquals(404, admin.get("/schemas/nothing").statusCode())
         assertEquals(404, admin.get("/schemas/..").statusCode())
     }
+
+    @Test
+    fun aRefusedPostWithALargeBodyAnswersEveryTimeAndKeepsTheConnectionUsable() {
+        admin.post("/drafts", mapOf("kind" to "schema", "name" to "acme-orders"))
+        val big = "x".repeat(300_000)
+        repeat(40) { i ->
+            assertEquals(403, viewer.post("/schemas/acme-orders/save", mapOf("model" to big)).statusCode(), "request $i")
+            assertEquals(200, viewer.get("/schemas/acme-orders").statusCode(), "request $i after the refusal")
+        }
+    }
 }
