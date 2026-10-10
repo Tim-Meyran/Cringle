@@ -114,10 +114,27 @@ document.addEventListener('htmx:responseError', function (event) {
     var slot = slots(data.block, kind, data.varArgCounts)[n - 1];
     return slot ? slot.label : '?';
   }
+  function isExternal(data) { return data.kind === 'external'; }
+  function endName(data, kind, className) { return isExternal(data) ? data.id : data.id + '.' + slotLabel(data, kind, className); }
   function edgeKey(c) {
     var from = blockData(c.output_id), to = blockData(c.input_id);
-    return from.id + '.' + slotLabel(from, 'outputs', c.output_class) + '>' + to.id + '.' + slotLabel(to, 'inputs', c.input_class);
+    return endName(from, 'outputs', c.output_class) + '>' + endName(to, 'inputs', c.input_class);
   }
+  // an external end: a port on another engine or a service of another project, drawn as a node with one port
+  function externalHtml(data) {
+    var what = data.mode === 'service' ? 'service ' + (data.name || '') : 'remote ' + (data.fabric || '') + '/' + (data.block || '') + '.' + (data.port || '');
+    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(what) + '</small>';
+  }
+  function addExternal(kind) {
+    var send = kind !== 'remote-send';
+    var data = { kind: 'external', id: uniqueId('ext'), mode: kind === 'service' ? 'service' : 'remote', type: 'MESSAGE', send: send };
+    if (data.mode === 'service') data.name = ''; else { data.fingerprint = ''; data.fabric = ''; data.block = ''; data.port = ''; data.address = ''; data.index = ''; }
+    var count = Object.keys(editor.export().drawflow.Home.data).length;
+    editor.addNode('external', send ? 1 : 0, send ? 0 : 1, 40 + 220 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-external', data, externalHtml(data));
+  }
+  document.querySelectorAll('#externals button').forEach(function (button) {
+    button.addEventListener('click', function () { addExternal(button.dataset.external); });
+  });
   function uniqueId(base) {
     var ids = {};
     var nodes = editor.export().drawflow.Home.data;
@@ -179,9 +196,12 @@ document.addEventListener('htmx:responseError', function (event) {
     if (rebuilding) return;
     var from = blockData(c.output_id), to = blockData(c.input_id);
     var body = new URLSearchParams({
+      fromExternal: isExternal(from) ? from.type : undefined, toExternal: isExternal(to) ? to.type : undefined,
       fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
       toBlock: to.block, toInput: c.input_class.replace('input_', ''), toCounts: JSON.stringify(to.varArgCounts || {}),
     });
+    ['fromExternal', 'toExternal'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
+    ['fromBlock', 'toBlock'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
     fetch(host.dataset.checkUrl, { method: 'POST', headers: { 'X-CSRF-Token': csrf(), 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
       .then(function (r) { return r.json(); })
       .then(function (verdict) {
@@ -212,8 +232,36 @@ document.addEventListener('htmx:responseError', function (event) {
     wrap.append(l);
     return wrap;
   }
+  function showExternal(id, data) {
+    function text(label, name, placeholder) {
+      var input = document.createElement('input');
+      input.value = data[name] === undefined ? '' : data[name];
+      if (placeholder) input.placeholder = placeholder;
+      input.addEventListener('input', function () {
+        data[name] = input.value.trim();
+        editor.updateNodeDataFromId(id, data);
+        var content = document.querySelector('#node-' + id + ' .drawflow_content_node');
+        if (content) content.innerHTML = externalHtml(data);
+        changed();
+      });
+      return field(label, input);
+    }
+    var type = document.createElement('select');
+    ['MESSAGE', 'REQUEST_RESPONSE', 'STREAM', 'BYTE_STREAM'].forEach(function (v) { var opt = document.createElement('option'); opt.textContent = v; opt.selected = data.type === v; type.append(opt); });
+    type.addEventListener('change', function () { data.type = type.value; editor.updateNodeDataFromId(id, data); changed(); });
+    var parts = [field('Tether type', type)];
+    if (data.mode === 'service') {
+      parts.push(text('Name of the service', 'name', 'orders'));
+    } else {
+      parts.push(text('Key of the other engine (SHA-256)', 'fingerprint', '64 hex characters'), text('Fabric', 'fabric'), text('Block', 'block'), text('Port', 'port'),
+        text('Address (host:port)', 'address', 'found through the router'), text('Index (VarArg port)', 'index'));
+    }
+    panel.replaceChildren.apply(panel, parts);
+  }
+
   editor.on('nodeSelected', function (id) {
     var data = blockData(id);
+    if (isExternal(data)) { showExternal(id, data); return; }
     var idInput = document.createElement('input');
     idInput.value = data.id;
     idInput.addEventListener('input', function () {

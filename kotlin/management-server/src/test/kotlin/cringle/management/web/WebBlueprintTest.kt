@@ -154,6 +154,28 @@ class WebBlueprintTest {
     }
 
     @Test
+    fun anExternalEndIsCheckedAgainstTheLocalPort() {
+        fun check(vararg form: Pair<String, String>) = admin.post("/blueprints/flow-app/check", mapOf(*form)).body()
+        assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("fromBlock" to "acme-flow/src", "fromOutput" to "1", "toExternal" to "MESSAGE"))
+        assertTrue(check("fromBlock" to "acme-flow/src", "fromOutput" to "1", "toExternal" to "REQUEST_RESPONSE").contains("supports"))
+        assertTrue(check("fromBlock" to "acme-flow/src", "fromOutput" to "1", "toExternal" to "TCP").contains("not TCP"))
+        assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("fromExternal" to "MESSAGE", "toBlock" to "acme-flow/sink", "toInput" to "1"))
+        assertTrue(check("fromExternal" to "MESSAGE", "toExternal" to "MESSAGE").contains("two external ends"))
+        assertTrue(check("fromExternal" to "MESSAGE", "toBlock" to "acme-flow/src", "toInput" to "1").contains("no such input"))
+    }
+
+    @Test
+    fun invalidRemoteFieldsAreListedOnSave() {
+        val external = """"2": {"id": 2, "name": "external", "data": {"kind": "external", "id": "ext1", "mode": "remote", "type": "MESSAGE", "send": true, "fingerprint": "zz", "fabric": "other", "block": "b", "port": "in"},
+            "class": "cringle-external", "html": "", "typenode": false, "inputs": {"input_1": {"connections": [{"node": "1", "input": "output_1"}]}}, "outputs": {}, "pos_x": 300, "pos_y": 300}"""
+        val graph = graph(node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))), external)
+        val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to graph, "options" to "{}", "version" to "1.0.0", "roles" to "", "revision" to "1")).body()
+        assertTrue(saved.contains("Saved as revision 2") && saved.contains("has problems") && saved.contains("fingerprint"), saved)
+        val reloaded = admin.get("/blueprints/flow-app").body()
+        assertTrue(reloaded.contains("cringle-external"), reloaded)
+    }
+
+    @Test
     fun theServerDecidesWhetherTwoPortsMayBeConnected() {
         assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("acme-flow/src", 1, "acme-flow/sink", 1))
         val schema = check("acme-flow/src", 1, "acme-flow/numbers", 1)

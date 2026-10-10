@@ -67,7 +67,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 val name = req.params.getValue("name")
                 val snapshot = catalog.snapshot()
                 val previous = drafts.load("project", name)
-                val kept = previous?.let { blueprintOf(it) }?.tethers.orEmpty().filterNot { BlueprintGraph.drawable(it) }
+                val before = previous?.let { blueprintOf(it) }
+                val kept = before?.tethers.orEmpty().filterNot { BlueprintGraph.drawable(it) } + (before?.let { BlueprintGraph.unresolved(it, snapshot::block) }.orEmpty())
                 val graph = parse(req.form["graph"]).jsonObject
                 val blueprint = try {
                     BlueprintGraph.toBlueprint(name, graph, parse(req.form["options"]) as? JsonObject ?: JsonObject(emptyMap()), kept, parseProvides(req.form["provides"].orEmpty()), previous?.let { blueprintOf(it) }?.assertions.orEmpty(), previous?.let { blueprintOf(it) }?.blocks.orEmpty(), snapshot::block)
@@ -128,6 +129,26 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         emptyMap()
     }
 
+    /** A connection between a local port and an external end (another engine, a service): the local port has to support the tether type of the end. */
+    private fun checkExternal(snapshot: PluginCatalog.Snapshot, form: Map<String, String>): JsonObject {
+        fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
+        if (form["fromExternal"] != null && form["toExternal"] != null) return no("two external ends cannot be connected to each other")
+        val fromExternal = form["fromExternal"] != null
+        val typeName = form["fromExternal"] ?: form["toExternal"].orEmpty()
+        val type = TetherType.entries.firstOrNull { it.name == typeName } ?: return no("the external end has no tether type")
+        if (type !in setOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.STREAM, TetherType.BYTE_STREAM)) {
+            return no("a tether to another engine or to a service is MESSAGE, REQUEST_RESPONSE, STREAM or BYTE_STREAM, not $type")
+        }
+        val blockType = (if (fromExternal) form["toBlock"] else form["fromBlock"]).orEmpty()
+        val definition = snapshot.block(blockType) ?: return no("unknown block '$blockType'")
+        val direction = if (fromExternal) cringle.contract.PortDirection.IN else cringle.contract.PortDirection.OUT
+        val counts = BlueprintGraph.countsFor(definition, counts(if (fromExternal) form["toCounts"] else form["fromCounts"]))
+        val number = ((if (fromExternal) form["toInput"] else form["fromOutput"])?.toIntOrNull() ?: 0) - 1
+        val slot = BlueprintGraph.slots(definition, direction, counts).getOrNull(number) ?: return no("'$blockType' has no such ${if (fromExternal) "input" else "output"}")
+        if (type !in slot.port.tetherTypes) return no("'${slot.port.name}' supports ${slot.port.tetherTypes.joinToString()}, not $type")
+        return buildJsonObject { put("ok", true); put("type", type.name) }
+    }
+
     private suspend fun check(form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
         val snapshot = try {
@@ -135,6 +156,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         } catch (e: Exception) {
             return no(describe(e))
         }
+        if (form["fromExternal"] != null || form["toExternal"] != null) return checkExternal(snapshot, form)
         val fromType = form["fromBlock"].orEmpty()
         val toType = form["toBlock"].orEmpty()
         val from = snapshot.block(fromType) ?: return no("unknown block '$fromType'")
@@ -211,7 +233,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val roles = draft.content.jsonObject["roles"]?.jsonArray?.joinToString(", ") { it.jsonPrimitive.content }.orEmpty()
         val provides = blueprint.provides.joinToString("\n") { "${it.service}=${it.block}.${it.port}" + (it.type?.let { t -> ":$t" } ?: "") }
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)
-        val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) }
+        val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) } + BlueprintGraph.unresolved(blueprint, snapshot::block).size
         val paletteGroups = snapshot.plugins.filter { it.manifest.blocks.isNotEmpty() }.map { p ->
             html(
                 h("<h3>{}</h3>", p.manifest.name),
@@ -225,7 +247,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return html(
             pageHeader("Blueprint ${draft.name}", "Add blocks from the left, connect an output to an input; the server checks every connection.", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a><a class=\"btn\" href=\"/deployments\">Deployments</a>")),
-            if (kept > 0) h("<p class=\"info\">{} tethers (to other engines or services) are not drawn; they are kept as they are when you save.</p>", kept) else Html(""),
+            if (kept > 0) h("<p class=\"info\">{} tethers cannot be shown in the editor; they are kept as they are when you save.</p>", kept) else Html(""),
             raw("<div id=\"editor-bar\">"),
             field("Version", h("<input id=\"version\" value=\"{}\" size=\"10\">", draft.version)),
             field("Roles of the fabric", h("<input id=\"roles\" value=\"{}\" placeholder=\"role, role\" title=\"engines with all these roles run it\">", roles)),
@@ -242,6 +264,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             ),
             raw("<aside id=\"palette\"><h2>Blocks</h2>"),
             paletteBody,
+            raw(
+                "<div id=\"externals\"><h3>Other engines and services</h3>" +
+                    "<button type=\"button\" data-external=\"remote-receive\" title=\"A port on another engine that receives what a local port sends\">Remote end that receives</button>" +
+                    "<button type=\"button\" data-external=\"remote-send\" title=\"A port on another engine that sends to a local port\">Remote end that sends</button>" +
+                    "<button type=\"button\" data-external=\"service\" title=\"A service of another project that a local port calls\">Service</button></div>",
+            ),
             raw("</aside><div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
             raw("<aside id=\"properties\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside></div>"),
         )
