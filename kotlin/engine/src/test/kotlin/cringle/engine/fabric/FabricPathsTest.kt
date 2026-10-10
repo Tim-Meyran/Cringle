@@ -26,6 +26,14 @@ class FabricPathsTest {
     }
 
     @Test
+    fun sharedFolderIsBelowTheFabric() {
+        val paths = FabricPaths(engineDir, "shop-1")
+        assertEquals(engineDir.resolve("fabrics/shop-1/shared"), paths.shared)
+        paths.create(listOf("m1"))
+        assertTrue(Files.isDirectory(paths.shared))
+    }
+
+    @Test
     fun fabricIdMustStayBelowTheFabricDirectory() {
         for (id in listOf("..", "../evil", "a/../../evil", "shop-1/../../evil")) {
             val e = assertThrows<FabricException> { FabricPaths(engineDir, id) }

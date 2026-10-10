@@ -19,6 +19,29 @@
         "prefix": { "optional": "cringle.std/String" }
       }
     },
+    "TempDirConfig": {
+      "record": {
+        "prefix": { "optional": "cringle.std/String" }
+      }
+    },
+    "FileWriteConfig": {
+      "record": {
+        "name": { "optional": "cringle.std/String" },
+        "append": { "optional": "cringle.std/Boolean" }
+      }
+    },
+    "FileReadConfig": {
+      "record": {
+        "name": { "optional": "cringle.std/String" }
+      }
+    },
+    "FileWatchConfig": {
+      "record": {
+        "path": { "optional": "cringle.std/String" },
+        "intervalMs": { "optional": "cringle.std/Int" },
+        "reportExisting": { "optional": "cringle.std/Boolean" }
+      }
+    },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }

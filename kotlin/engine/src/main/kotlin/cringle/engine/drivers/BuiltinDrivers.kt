@@ -54,6 +54,7 @@ public class BuiltinDrivers(
                 instances[id] = when (id) {
                     BuiltinDriverTypes.LOGGING.id -> services.logging.driverFor(fabricId, blockId.value, paths.blockLogs(blockId.value))
                     BuiltinDriverTypes.FILESYSTEM.id -> FilesystemSandbox(paths.blockWorking(blockId.value))
+                    BuiltinDriverTypes.FILESYSTEM_FABRIC.id -> FilesystemSandbox(paths.shared, BuiltinDriverTypes.FILESYSTEM_FABRIC)
                     BuiltinDriverTypes.TCP.id -> services.tcp.driverFor(fabricId, blockId.value).also { tcp += it }
                     BuiltinDriverTypes.SERIAL.id -> services.serial.driverFor(fabricId, blockId.value).also { serial += it }
                     BuiltinDriverTypes.DWH.id -> cringle.engine.dwh.BlockDwhDriver(services.dwh, fabricId, blockId.value)

@@ -18,8 +18,7 @@ import kotlinx.coroutines.withContext
  * A [FilesystemDriver] confined to [root]. A path is accepted only if, after resolving `.`/`..` and symbolic links of
  * everything that already exists, it is still inside the root. Checking happens on every call.
  */
-public class FilesystemSandbox(private val root: Path) : FilesystemDriver {
-    override val type: DriverType = BuiltinDriverTypes.FILESYSTEM
+public class FilesystemSandbox(private val root: Path, override val type: DriverType = BuiltinDriverTypes.FILESYSTEM) : FilesystemDriver {
 
     private fun resolve(path: String): Path {
         if (path.contains('\u0000') || path.contains('\\') || path.startsWith("/") || Regex("^[A-Za-z]:").containsMatchIn(path)) {
@@ -82,6 +81,16 @@ public class FilesystemSandbox(private val root: Path) : FilesystemDriver {
     override suspend fun exists(path: String): Boolean = io(path) { Files.exists(it) }
 
     override suspend fun delete(path: String): Boolean = io(path) { Files.deleteIfExists(it) }
+
+    override suspend fun deleteRecursively(path: String): Boolean = io(path) { target ->
+        if (target == root.toRealPath() || !Files.exists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            false
+        } else {
+            // a link inside the tree is removed as a link, never followed
+            Files.walk(target).use { stream -> stream.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } }
+            true
+        }
+    }
 
     override suspend fun createDirectories(path: String) {
         io(path) { Files.createDirectories(it) }
