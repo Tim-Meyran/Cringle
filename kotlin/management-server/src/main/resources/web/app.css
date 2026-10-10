@@ -208,11 +208,12 @@ ul.errors { color: var(--danger); }
 #list { min-height: 2rem; }
 
 /* the blueprint editor */
-#blueprint-editor { display: grid; grid-template-columns: 200px minmax(0, 1fr) 300px; gap: var(--space-3); min-height: 30rem; margin-bottom: var(--space-3); }
+#blueprint-editor { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; gap: var(--space-3); height: calc(100vh - 21rem); min-height: 28rem; margin-bottom: var(--space-3); }
 #blueprint-editor aside { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); overflow: auto; }
 #blueprint-editor aside h2 { margin: 0 0 var(--space-3); font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
 #palette button { display: flex; width: 100%; margin-bottom: var(--space-2); justify-content: flex-start; }
-#drawflow { height: 30rem; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
+#canvas { position: relative; min-height: 0; }
+#drawflow { height: 100%; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
 #drawflow .drawflow-node { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); width: 200px; padding: var(--space-3); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 #drawflow .drawflow-node:hover { border-color: #46505f; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 #drawflow .drawflow-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0, 0, 0, 0.35); }
@@ -225,7 +226,18 @@ ul.errors { color: var(--danger); }
 #drawflow .connection .main-path { stroke: var(--text-faint); stroke-width: 2px; }
 #drawflow .connection .main-path:hover, #drawflow .connection .main-path.selected { stroke: var(--accent); }
 textarea.invalid { border-color: var(--danger); }
-#blueprint-meta { margin-top: var(--space-3); display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: flex-start; }
+#editor-bar { display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--space-3); padding: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+#editor-bar .field { margin: 0; }
+#editor-bar #result { flex: 1 1 16rem; min-width: 0; }
+#editor-bar #result p { margin: 0; }
+#services-box summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2) 0; }
+#services-box[open] { flex-basis: 100%; }
+#palette h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+#palette .empty { color: var(--text-muted); }
+#palette input[type=search] { width: 100%; }
+#palette button[hidden], #palette h3[hidden] { display: none; }
+#canvas-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; padding: var(--space-5); text-align: center; color: var(--text-faint); pointer-events: none; }
+#canvas-hint[hidden] { display: none; }
 
 /* below 900 px the sidebar becomes a bar on top */
 @media (max-width: 900px) {
@@ -239,7 +251,8 @@ textarea.invalid { border-color: var(--danger); }
   .build { display: none; }
   main { padding: var(--space-5) var(--space-4) 48px; }
   .page-header { flex-direction: column; }
-  #blueprint-editor { grid-template-columns: minmax(0, 1fr); }
+  #blueprint-editor { grid-template-columns: minmax(0, 1fr); height: auto; }
+  #drawflow { height: 30rem; }
   main > table, #list > table { display: block; overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

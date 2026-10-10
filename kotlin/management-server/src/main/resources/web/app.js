@@ -107,6 +107,34 @@ document.addEventListener('htmx:responseError', function (event) {
     if (el) el.textContent = text;
   }
 
+  // the hint on an empty canvas
+  var hint = document.getElementById('canvas-hint');
+  function showHint() {
+    if (hint) hint.hidden = Object.keys(editor.export().drawflow.Home.data).length > 0;
+  }
+  editor.on('nodeCreated', showHint);
+  editor.on('nodeRemoved', showHint);
+  showHint();
+
+  // the search field of the palette filters the buttons and the plugin headings
+  var search = document.getElementById('palette-search');
+  if (search) {
+    search.addEventListener('input', function () {
+      var q = search.value.trim().toLowerCase();
+      var heading = null, any = false;
+      Array.prototype.forEach.call(document.getElementById('palette').children, function (el) {
+        if (el.tagName === 'H3') {
+          if (heading) heading.hidden = !any;
+          heading = el; any = false;
+        } else if (el.tagName === 'BUTTON') {
+          el.hidden = q !== '' && el.dataset.block.toLowerCase().indexOf(q) < 0;
+          if (!el.hidden) any = true;
+        }
+      });
+      if (heading) heading.hidden = !any;
+    });
+  }
+
   // adding a block from the palette
   document.querySelectorAll('#palette button').forEach(function (button) {
     button.addEventListener('click', function () {
