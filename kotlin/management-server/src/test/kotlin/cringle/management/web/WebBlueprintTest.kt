@@ -123,6 +123,23 @@ class WebBlueprintTest {
     }
 
     @Test
+    fun theEditorHasTheOperationButtons() {
+        val page = admin.get("/blueprints/flow-app").body()
+        for (id in listOf("undo", "redo", "zoom-in", "zoom-out", "zoom-fit", "autosave", "publish-blueprint", "data-publish-url")) assertTrue(page.contains(id), id)
+        val readOnly = viewer.get("/blueprints/flow-app").body()
+        assertTrue(readOnly.contains("id=\"undo\"") && !readOnly.contains("publish-blueprint") && !readOnly.contains("id=\"autosave\""), "a viewer cannot save or publish")
+    }
+
+    @Test
+    fun publishFromTheEditorAnswersWithAResultAndNeedsOperate() {
+        val connected = graph(node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))), node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))))
+        assertTrue(admin.post("/blueprints/flow-app/save", mapOf("graph" to connected, "options" to "{}", "version" to "1.0.0", "roles" to "", "revision" to "1")).body().contains("The blueprint is valid"))
+        val done = admin.post("/blueprints/flow-app/publish").body()
+        assertTrue(done.contains("Published flow-app 1.0.0") && done.contains("/deployments") && !done.contains("<table"), done)
+        assertEquals(403, viewer.post("/blueprints/flow-app/publish").statusCode())
+    }
+
+    @Test
     fun theServerDecidesWhetherTwoPortsMayBeConnected() {
         assertEquals("""{"ok":true,"type":"MESSAGE"}""", check("acme-flow/src", 1, "acme-flow/sink", 1))
         val schema = check("acme-flow/src", 1, "acme-flow/numbers", 1)
