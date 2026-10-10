@@ -48,6 +48,40 @@ class BuiltinDriversTest {
     private fun set(d: BuiltinDrivers, fabric: String, block: String, vararg ids: String): DriverSet =
         d.factoryFor(fabric, FabricPaths(dir.resolve("engine"), fabric)).driversFor(BlockId(block), ids.toList())
 
+    // ---- filesystem-fabric ----
+
+    @Test
+    fun aBlockThatRequiresFilesystemFabricGetsTheSharedFolder(): Unit = runBlocking {
+        drivers().use { d ->
+            val a = set(d, "f1", "a", "filesystem-fabric")[FilesystemDriver::class]
+            val b = set(d, "f1", "b", "filesystem-fabric")[FilesystemDriver::class]
+            val other = set(d, "f2", "a", "filesystem-fabric")[FilesystemDriver::class]
+            val own = set(d, "f1", "c", "filesystem")[FilesystemDriver::class]
+            a.writeText("dir/x.txt", "from a")
+            assertEquals("from a", b.readText("dir/x.txt"), "the blocks of one fabric share the folder")
+            assertFalse(other.exists("dir/x.txt"), "another fabric has its own")
+            assertFalse(own.exists("dir/x.txt"), "the driver filesystem stays the folder of the block")
+            assertEquals(cringle.contract.BuiltinDriverTypes.FILESYSTEM_FABRIC, a.type)
+            assertThrows<FilesystemAccessException> { a.readText("../working/c/x.txt") }
+            assertTrue(Files.exists(dir.resolve("engine/fabrics/f1/shared/dir/x.txt")))
+        }
+    }
+
+    @Test
+    fun deleteRecursivelyRemovesTreesAndStaysInsideTheRoot(): Unit = runBlocking {
+        drivers().use { d ->
+            val fs = set(d, "f1", "a", "filesystem-fabric")[FilesystemDriver::class]
+            fs.writeText("t/a/1.txt", "1")
+            fs.writeText("t/b.txt", "2")
+            assertTrue(fs.deleteRecursively("t"))
+            assertFalse(fs.exists("t"))
+            assertFalse(fs.deleteRecursively("t"), "nothing to delete")
+            assertFalse(fs.deleteRecursively(""), "the root itself stays")
+            assertTrue(Files.isDirectory(dir.resolve("engine/fabrics/f1/shared")))
+            assertThrows<FilesystemAccessException> { fs.deleteRecursively("../logs") }
+        }
+    }
+
     // ---- logging ----
 
     @Test

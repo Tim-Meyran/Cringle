@@ -14,6 +14,9 @@ public object BuiltinDriverTypes {
     /** [FilesystemDriver]. */
     public val FILESYSTEM: DriverType = DriverType("filesystem", IsolationLevel.SHARED)
 
+    /** [FilesystemDriver] on the folder that all blocks of one fabric share (`<fabric>/shared`); the blocks of the standard library use it. */
+    public val FILESYSTEM_FABRIC: DriverType = DriverType("filesystem-fabric", IsolationLevel.SHARED)
+
     /** [TcpDriver]. */
     public val TCP: DriverType = DriverType("tcp", IsolationLevel.SHARED)
 
@@ -27,7 +30,7 @@ public object BuiltinDriverTypes {
     public val USER_MANAGEMENT: DriverType = DriverType("user-management", IsolationLevel.SHARED)
 
     /** The types every engine ships, by id. */
-    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, TCP, SERIAL, DWH).associateBy { it.id }
+    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, FILESYSTEM_FABRIC, TCP, SERIAL, DWH).associateBy { it.id }
 }
 
 /** Severity of a log entry. */
@@ -86,6 +89,9 @@ public interface FilesystemDriver : Driver {
 
     /** Deletes a file or an empty directory; returns whether something was deleted. */
     public suspend fun delete(path: String): Boolean
+
+    /** Deletes a file, or a directory with everything in it; returns whether something was deleted. */
+    public suspend fun deleteRecursively(path: String): Boolean
 
     /** Creates a directory and its parents. */
     public suspend fun createDirectories(path: String)

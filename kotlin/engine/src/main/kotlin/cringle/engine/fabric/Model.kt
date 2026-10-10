@@ -192,6 +192,9 @@ public class FabricPaths(engineDir: Path, fabricId: String, private val dataBase
     /** Log directory of the fabric. */
     public val logs: Path = root.resolve("logs")
 
+    /** The folder that all blocks of the fabric share through the driver `filesystem-fabric`; it goes away with the fabric. */
+    public val shared: Path = root.resolve("shared")
+
     /** Working directory of one block. */
     public fun blockWorking(blockId: String): Path = contained(working, working.resolve(blockId))
 
@@ -208,6 +211,7 @@ public class FabricPaths(engineDir: Path, fabricId: String, private val dataBase
     public fun create(blockIds: List<String>) {
         Files.createDirectories(working)
         Files.createDirectories(logs)
+        Files.createDirectories(shared)
         for (id in blockIds) {
             Files.createDirectories(blockWorking(id))
             Files.createDirectories(blockLogs(id))
