@@ -15,7 +15,7 @@ The type of a tether is fixed in the blueprint and never changes at runtime.
 | `TCP` | raw bytes over a real TCP connection on loopback | `openByteStream` | `ByteStreamOpened` |
 | `SERIAL` | raw bytes over a serial connection to a device | `openByteStream` | `ByteStreamOpened` |
 
-A tether connects an `OUT` port to an `IN` port. Both ports must support the tether type. The `OUT` end's handle initiates traffic; the `IN` end's handle rejects all operations with `IllegalStateException`. An operation of the wrong type throws `IllegalStateException`. An endpoint can be part of one tether only. VarArg ports are wired per index; their size is fixed at start.
+A tether connects an `OUT` port to an `IN` port. Both ports must support the tether type. The `OUT` end's handle initiates traffic; the `IN` end's handle rejects all operations with `IllegalStateException`. An operation of the wrong type throws `IllegalStateException`. An `IN` endpoint can be part of one tether only. An `OUT` endpoint can be part of **several tethers if all of them are `MESSAGE` tethers** (fan-out): a `send` goes to every one of them in the order of the blueprint, and each tether keeps its own delivery policy, buffer and options. A tether that cannot take the message does not stop the others (the first failure is thrown after all were tried), and a full `BUFFER` suspends the sender, so one slow receiver slows the others. For every other tether type an `OUT` endpoint belongs to one tether only, because a response or a stream has one counterpart; a `MESSAGE` tether and a tether of another type cannot start at the same endpoint. VarArg ports are wired per index; their size is fixed at start.
 
 ### TCP tethers
 

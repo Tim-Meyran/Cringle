@@ -115,8 +115,6 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                 "app",
                 listOf(
                     block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
-                    block("tick", "flow.fan-out-int"),
-                    block("total", "flow.fan-out-number"),
                     block("c1", "math.constant", config("value" to 2.5)),
                     block("c2", "math.constant", config("value" to 4.0)),
                     block("c3", "math.constant", config("value" to 6.5)),
@@ -128,16 +126,14 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                     block("l2", "flow.log", config("prefix" to "sum: ")),
                 ),
                 listOf(
-                    // an output port has one tether: the fan-out blocks copy a value to several blocks
-                    tether("t", "tick", "tick", "in"),
-                    tether("tick", "a", "c1", "trigger"),
-                    tether("tick", "b", "c2", "trigger"),
-                    tether("tick", "c", "c3", "trigger"),
+                    // an output port can start several tethers: the tick goes to three blocks, the sum to two
+                    tether("t", "tick", "c1", "trigger"),
+                    tether("t", "tick", "c2", "trigger"),
+                    tether("t", "tick", "c3", "trigger"),
                     tether("c1", "out", "add", "a"),
                     tether("c2", "out", "add", "b"),
-                    tether("add", "out", "total", "in"),
-                    tether("total", "a", "cmp", "a"),
-                    tether("total", "b", "sum", "in"),
+                    tether("add", "out", "cmp", "a"),
+                    tether("add", "out", "sum", "in"),
                     tether("c3", "out", "cmp", "b"),
                     tether("cmp", "out", "verdict", "in"),
                     tether("verdict", "out", "l1", "in"),

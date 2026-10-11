@@ -17,7 +17,6 @@ import cringle.stdblocks.file.FileWatch
 import cringle.stdblocks.file.FileWrite
 import cringle.stdblocks.file.TempDir
 import cringle.stdblocks.flow.Constant
-import cringle.stdblocks.flow.FLOW_ENTRIES
 import cringle.stdblocks.flow.Log
 import cringle.stdblocks.logic.LOGIC_ENTRIES
 import cringle.stdblocks.math.MATH_ENTRIES
@@ -40,7 +39,7 @@ private val CORE_ENTRIES: List<Entry> = listOf(
     entry("file.watch", listOf(outPort("created"), outPort("removed")), "FileWatchConfig", FILES) { FileWatch(it[FilesystemDriver::class]) },
 )
 
-private val ENTRIES: List<Entry> = CORE_ENTRIES + FLOW_ENTRIES + TEXT_ENTRIES + MATH_ENTRIES + LOGIC_ENTRIES
+private val ENTRIES: List<Entry> = CORE_ENTRIES + TEXT_ENTRIES + MATH_ENTRIES + LOGIC_ENTRIES
 
 /**
  * The blocks of the plugin `cringle-std` (`docs/standard-blocks.md`). Names are `<theme>.<name>` in lower case. Values have fixed types: counters and
@@ -60,7 +59,7 @@ public class StdBlockProvider : BlockProvider {
          * The version of the plugin. A version of a package never changes in a repository: raise it whenever a block changes.
          * The schema of the configurations is `/cringle/stdblocks/schema.json` on the class path.
          */
-        public const val VERSION: String = "1.2.0"
+        public const val VERSION: String = "1.3.0"
 
         /** The namespace of the configuration schemas. */
         public const val NAMESPACE: String = "cringle.stdblocks"

@@ -61,3 +61,7 @@ The check of chapter 26 is in [acceptance-1.0.md](acceptance-1.0.md). Proposals 
 - **Health check of drivers:** `Driver` has no health call; failover between service instances exists. Proposal: `Driver.health()` after 1.0.0.
 - **Federation:** manual trust of registries only; discovery is left for later.
 - **Isolated blocks (#18):** deferred; an untrusted plugin makes the fabric fail closed. Decide the milestone.
+
+## Tethers from one OUT port (#358): proposal for `docs/Architecture.md` and `docs/decisions.md`
+
+Owner decision: an `OUT` port can start several tethers when all of them are `MESSAGE` tethers (fan-out); `spec/tether.md` says so and the engine does it. The sentence in the tether chapter of `Architecture.md` ("an endpoint belongs to one tether") should become: "An `IN` endpoint belongs to one tether. An `OUT` endpoint can start several `MESSAGE` tethers; for the other tether types it belongs to one tether."

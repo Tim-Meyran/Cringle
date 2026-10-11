@@ -164,6 +164,19 @@ class BlueprintGraphTest {
     }
 
     @Test
+    fun anOutPortWithSeveralTethersComesBackUnchanged() {
+        val blueprint = Blueprint(
+            "app",
+            listOf(BlueprintBlock("a", "p/src"), BlueprintBlock("c", "p/sink"), BlueprintBlock("d", "p/sink")),
+            listOf(
+                TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("c", "in")),
+                TetherDef(TetherType.MESSAGE, Endpoint("a", "out"), Endpoint("d", "in"), delivery = DeliveryPolicy.BUFFER),
+            ),
+        )
+        assertEquals(blueprint, roundTrip(blueprint))
+    }
+
+    @Test
     fun aTetherToAPortThatNoLongerExistsIsKeptNotLost() {
         val gone = TetherDef(TetherType.MESSAGE, Endpoint("a", "gone"), null, service = "orders")
         val blueprint = Blueprint("app", listOf(BlueprintBlock("a", "p/src")), listOf(gone))
