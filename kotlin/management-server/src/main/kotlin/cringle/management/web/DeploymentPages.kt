@@ -260,11 +260,14 @@ internal class DeploymentPages(private val core: ManagementCore) {
                     if (!session.canFor(Permission.OPERATE, core.access.fabric(machine, p.fabric))) {
                         Html("")
                     } else {
-                        h(
-                            "<details class=\"popover\"><summary>Retention</summary><form class=\"popover-body\" hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\">{}{}<button class=\"btn primary small\">Save retention</button></form></details>",
-                            p.fabric, kind, p.name,
-                            field("Max age (hours)", raw("<input name=\"maxAgeHours\" placeholder=\"no limit\">")),
-                            field("Max size (bytes)", raw("<input name=\"maxBytes\" placeholder=\"no limit\">")),
+                        rowDialog(
+                            "retention-${p.fabric}-$kind-${p.name}", "Retention", "Retention of ${p.name}", "How long and how much of this partition is kept; empty means no limit.",
+                            h(
+                                "<form class=\"form-row\" hx-post=\"/dwh/retention\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\"><input type=\"hidden\" name=\"fabric\" value=\"{}\"><input type=\"hidden\" name=\"kind\" value=\"{}\"><input type=\"hidden\" name=\"name\" value=\"{}\">{}{}<button class=\"btn primary\">Save retention</button></form>",
+                                p.fabric, kind, p.name,
+                                field("Max age (hours)", raw("<input name=\"maxAgeHours\" placeholder=\"no limit\">")),
+                                field("Max size (bytes)", raw("<input name=\"maxBytes\" placeholder=\"no limit\">")),
+                            ),
                         )
                     },
                 ),

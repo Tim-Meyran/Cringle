@@ -35,7 +35,7 @@ class WebShellTest : ServiceTestBase() {
     private fun groupsOf(page: String): List<String> = Regex("""<p class="nav-title">([^<]+)</p>""").findAll(page).map { it.groupValues[1] }.toList()
 
     private fun entriesOf(page: String, group: String): List<String> {
-        val block = page.substringAfter("<p class=\"nav-title\">$group</p>").substringBefore("</div>")
+        val block = page.substringAfter("<p class=\"nav-title\">$group</p>").substringBefore("<p class=\"nav-title\">").substringBefore("</nav>")
         return Regex("""<a href="[^"]+"[^>]*>([^<]+)</a>""").findAll(block).map { it.groupValues[1] }.toList()
     }
 

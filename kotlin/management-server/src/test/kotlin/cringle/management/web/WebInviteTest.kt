@@ -61,7 +61,7 @@ class WebInviteTest {
         val path = createInvite()
         // the polled list never holds the link or the code
         val list = admin.get("/invites/list").body()
-        assertFalse(list.contains(path.substringAfterLast('/')) || list.contains("<svg"))
+        assertFalse(list.contains(path.substringAfterLast('/')) || list.contains("<svg class=\"qr\""))
         assertTrue(list.contains("open") && list.contains("operator@machine:m1"), list)
 
         val visitor = anonymous()

@@ -61,7 +61,7 @@ class WebSchemaEditorTest {
 
         // the editor page carries the form data of the draft
         val page = admin.get("/schemas/acme-orders").body()
-        assertTrue(page.contains("x-data") && page.contains("standard-types"), page)
+        assertTrue(page.contains("x-data") && page.contains("schema-types"), page)
 
         // an invalid document is shown with its path and can be saved as work in progress, but not published
         val badModel = model.replace("\"Order\"", "\"order\"")

@@ -25,7 +25,7 @@ internal class DashboardPage(private val core: ManagementCore) {
         for (f in fabrics.filter { it.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_FAILED || it.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED || (it.desiredRunning && it.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_STOPPED) }) {
             attention += h("<li>{}<span>Fabric <strong>{}</strong> is {}{}</span><a href=\"/fabrics/{}/{}/{}\">Details</a></li>", badge("fabric", Tone.BAD), f.info.fabricId.value, f.info.state.pretty().replace('_', ' '), if (f.info.failure.isEmpty()) "" else ": ${f.info.failure}", f.machine, f.engineId, f.info.fabricId.value)
         }
-        fun card(label: String, value: Int, detail: String, href: String) = h("<a class=\"card\" href=\"{}\"><span class=\"card-label\">{}</span><span class=\"card-value\">{}</span><span class=\"card-detail\">{}</span></a>", href, label, value, detail)
+        fun card(label: String, value: Int, detail: String, href: String) = h("<a class=\"card\" href=\"{}\">{}<span class=\"card-label\">{}</span><span class=\"card-value\">{}</span><span class=\"card-detail\">{}</span></a>", href, Icons.forEntry(if (label == "Projects") "Deployments" else label), label, value, detail)
         return html(
             pageHeader("Dashboard", "The installation at a glance."),
             raw("<section class=\"cards\" aria-label=\"Summary\">"),

@@ -99,13 +99,39 @@ internal fun dataTable(headers: List<String>, rows: List<Html>, empty: Html): Ht
 /** The cell of a row with its buttons (right aligned); what the user may not use is not rendered, an empty cell stays empty. */
 internal fun actionsCell(vararg buttons: Html): Html = h("<td class=\"actions\"><div class=\"row-actions\">{}</div></td>", buttons.toList())
 
-/** A panel with a heading, an optional hint and a form: the place to create something. Not rendered (empty) if there is no [form]. */
-internal fun formPanel(title: String, hint: String, form: Html): Html =
-    if (form.value.isEmpty()) {
-        Html("")
-    } else {
-        h("<section class=\"panel\"><h2>{}</h2>{}{}</section>", title, if (hint.isEmpty()) Html("") else h("<p class=\"hint\">{}</p>", hint), form)
-    }
+private fun slug(text: String): String = text.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
+/**
+ * The dialog of a workflow (create a user, add a machine, deploy a project, ...): a button that opens it (the buttons of a page are laid out in a
+ * row above its list) and the modal `<dialog>` with [title], the [hint], the [form] and a *Cancel* button before its primary button. `app.js` opens
+ * and closes it: a request from the dialog that fails keeps the dialog open and shows the error in it; one that works closes it and the result goes
+ * into `#flash`. Not rendered (empty) if there is no [form].
+ */
+internal fun formPanel(title: String, hint: String, form: Html): Html {
+    if (form.value.isEmpty()) return Html("")
+    val id = "dlg-" + slug(title)
+    val at = form.value.lastIndexOf("<button class=\"btn primary")
+    val withCancel = if (at < 0) form else Html(form.value.substring(0, at) + "<button type=\"button\" class=\"btn\" data-close>Cancel</button>" + form.value.substring(at))
+    return html(
+        h("<button type=\"button\" class=\"btn primary dialog-trigger\" data-dialog=\"{}\">{}{}</button>", id, Icons.svg("plus", 16), title),
+        dialog(id, title, hint, withCancel, wide = false),
+    )
+}
+
+/**
+ * A small button with [label] in a row of a table that opens a dialog with [body] (the tokens of a user, the tags of an engine): [key] is
+ * what makes the id of the dialog unique on the page.
+ */
+internal fun rowDialog(key: String, label: String, title: String, hint: String, body: Html): Html {
+    val id = "dlg-" + slug(key)
+    return html(h("<button type=\"button\" class=\"btn small\" data-dialog=\"{}\">{}</button>", id, label), dialog(id, title, hint, body, wide = true))
+}
+
+private fun dialog(id: String, title: String, hint: String, body: Html, wide: Boolean): Html = h(
+    "<dialog id=\"{}\" class=\"dialog{}\" aria-labelledby=\"{}-title\"><div class=\"dialog-head\"><h2 id=\"{}-title\">{}</h2><button type=\"button\" class=\"icon-btn\" data-close aria-label=\"Close\">{}</button></div>" +
+        "<div class=\"dialog-body\">{}<div class=\"dialog-error\" data-dialog-error aria-live=\"polite\" hidden></div>{}</div></dialog>",
+    id, if (wide) " wide" else "", id, id, title, Icons.svg("x", 18), if (hint.isEmpty()) Html("") else h("<p class=\"hint\">{}</p>", hint), body,
+)
 
 /** A labelled input for a form: the label above the control, [control] is the element. */
 internal fun field(label: String, control: Html, hint: String = ""): Html =

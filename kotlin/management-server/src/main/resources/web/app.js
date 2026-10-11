@@ -7,7 +7,7 @@ window.cringleIdle = function () {
   if (document.querySelector('.htmx-request:not(#list)')) return false; // a request of the user is running
   var active = document.activeElement;
   if (active && list.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return false;
-  if (list.querySelector('details[open]')) return false;
+  if (list.querySelector('details[open]') || document.querySelector('dialog[open]')) return false;
   var fields = list.querySelectorAll('input, textarea, select');
   for (var i = 0; i < fields.length; i++) {
     var f = fields[i];
@@ -68,6 +68,10 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.start();
   var graph = JSON.parse(host.dataset.graph);
   if (Object.keys(graph.drawflow.Home.data).length > 0) editor.import(graph);
+  // the palette, the toolbar and the properties float above the canvas: start with the graph clear of the palette and the toolbar
+  editor.canvas_x = 280;
+  editor.canvas_y = 90;
+  editor.zoom_refresh();
 
   function csrf() {
     try { return JSON.parse(document.body.getAttribute('hx-headers'))['X-CSRF-Token']; } catch (e) { return ''; }
@@ -432,11 +436,14 @@ document.addEventListener('htmx:responseError', function (event) {
   var publish = document.getElementById('publish-blueprint');
   if (publish) {
     publish.addEventListener('click', function () {
-      clearTimeout(autosaveTimer);
-      saveNow().then(function () {
-        var box = document.getElementById('result');
-        if (box.querySelector('.error')) return;
-        return htmx.ajax('POST', host.dataset.publishUrl, { source: host, target: '#result', swap: 'innerHTML' });
+      var version = document.getElementById('version');
+      window.cringleConfirm('Publish the blueprint?', 'The draft is saved, checked, and published as a package' + (version && version.value ? ' (version ' + version.value + ')' : '') + ' in the repository. Deploy it from the page Deployments.', 'Publish', false, function () {
+        clearTimeout(autosaveTimer);
+        saveNow().then(function () {
+          var box = document.getElementById('result');
+          if (box.querySelector('.error')) return;
+          return htmx.ajax('POST', host.dataset.publishUrl, { source: host, target: '#result', swap: 'innerHTML' });
+        });
       });
     });
   }
@@ -466,7 +473,7 @@ document.addEventListener('htmx:responseError', function (event) {
   document.getElementById('redo').addEventListener('click', function () { if (at < history.length - 1) restore(history[++at]); });
   document.getElementById('zoom-in').addEventListener('click', function () { editor.zoom_in(); });
   document.getElementById('zoom-out').addEventListener('click', function () { editor.zoom_out(); });
-  document.getElementById('zoom-fit').addEventListener('click', function () { editor.zoom_reset(); });
+  document.getElementById('zoom-fit').addEventListener('click', function () { editor.zoom_reset(); editor.canvas_x = 280; editor.canvas_y = 90; editor.zoom_refresh(); });
   editor.on('connectionCreated', function () { /* the verdict of the server decides, see above */ });
   window.cringleEditorSnapshot = snapshot; // the verdict handler snapshots an accepted connection
 })();
@@ -496,3 +503,144 @@ document.addEventListener('click', function (event) {
   form.insertBefore(notice, form.querySelector('label'));
   form.querySelector('button').focus();
 })();
+
+// Dialogs (formPanel and rowDialog in PageSupport.kt): a button with data-dialog="<id>" opens the modal <dialog>, data-close closes it, a click on the
+// backdrop too. A request that starts in a dialog and fails shows its error in the dialog (which stays open with what was typed); one that works
+// closes the dialog, and the result is in #flash as always.
+(function () {
+  function openDialog(dialog) {
+    if (dialog.open) return;
+    var error = dialog.querySelector('[data-dialog-error]');
+    if (error) { error.hidden = true; error.textContent = ''; }
+    if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+    var first = dialog.querySelector('input:not([type=hidden]):not([type=checkbox]), select, textarea');
+    if (first) first.focus();
+  }
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    var opener = target.closest('[data-dialog]');
+    if (opener) {
+      var dialog = document.getElementById(opener.getAttribute('data-dialog'));
+      if (dialog) openDialog(dialog);
+      return;
+    }
+    var closer = target.closest('[data-close]');
+    if (closer) {
+      var own = closer.closest('dialog');
+      if (own) own.close();
+      return;
+    }
+    // the backdrop is part of the dialog: a click on the dialog itself (not on its content) is a click outside
+    if (target.tagName === 'DIALOG' && target.classList.contains('dialog')) target.close();
+  });
+  // a closed dialog forgets what was typed (the list may refresh again then)
+  document.addEventListener('close', function (event) {
+    if (event.target.tagName === 'DIALOG') event.target.querySelectorAll('form').forEach(function (f) { f.reset(); });
+  }, true);
+  document.addEventListener('htmx:beforeSwap', function (event) {
+    var request = event.detail.requestConfig;
+    var dialog = request && request.elt && request.elt.closest ? request.elt.closest('dialog.dialog') : null;
+    if (!dialog) return;
+    var doc = new DOMParser().parseFromString(event.detail.serverResponse || '', 'text/html');
+    var problem = doc.querySelector('.notice.error, p.error');
+    if (problem) {
+      problem.querySelectorAll('button').forEach(function (b) { b.remove(); });
+      var box = dialog.querySelector('[data-dialog-error]');
+      if (box) { box.textContent = problem.textContent.trim(); box.hidden = false; }
+      event.detail.shouldSwap = false;
+      return;
+    }
+    if (event.detail.xhr.status < 400) dialog.close();
+  });
+  // the questions of hx-confirm: a dialog of our own instead of the one of the browser
+  var confirmDialog = null;
+  function ensureConfirm() {
+    if (confirmDialog) return confirmDialog;
+    confirmDialog = document.createElement('dialog');
+    confirmDialog.className = 'dialog small';
+    confirmDialog.innerHTML = '<div class="dialog-head"><h2 data-confirm-title>Are you sure?</h2></div><div class="dialog-body"><p data-confirm-message></p>' +
+      '<div class="dialog-actions"><button type="button" class="btn" data-confirm-cancel>Cancel</button><button type="button" class="btn primary" data-confirm-ok>Confirm</button></div></div>';
+    document.body.append(confirmDialog);
+    return confirmDialog;
+  }
+  // asks [message] in the dialog and calls [onYes] if the user confirms; [danger] colors the button
+  window.cringleConfirm = function (title, message, label, danger, onYes) {
+    var d = ensureConfirm();
+    d.querySelector('[data-confirm-message]').textContent = message;
+    d.querySelector('[data-confirm-title]').textContent = title;
+    var ok = d.querySelector('[data-confirm-ok]'), cancel = d.querySelector('[data-confirm-cancel]');
+    ok.textContent = label;
+    ok.className = 'btn ' + (danger ? 'danger-solid' : 'primary');
+    function done(yes) {
+      ok.onclick = null; cancel.onclick = null; d.onclose = null;
+      if (d.open) d.close();
+      if (yes) onYes();
+    }
+    ok.onclick = function () { done(true); };
+    cancel.onclick = function () { done(false); };
+    d.onclose = function () { done(false); };
+    d.showModal();
+    ok.focus();
+  };
+  document.addEventListener('htmx:confirm', function (event) {
+    if (!event.detail.question) return;
+    event.preventDefault();
+    var label = (event.detail.elt && event.detail.elt.textContent ? event.detail.elt.textContent.trim() : '') || 'Confirm';
+    var short = label.length < 24;
+    window.cringleConfirm(short ? label + '?' : 'Are you sure?', event.detail.question, short ? label : 'Confirm', /delete|revoke|remove|undeploy|untrust|stop/i.test(label), function () { event.detail.issueRequest(true); });
+  });
+})();
+
+// The form of the schema editor (SchemaPages.editor): Alpine holds the model {namespace, version, types: [{name, kind, fields, values}]}; the server turns it
+// into the schema document and checks it (SchemaForm). `open` (is the card unfolded) is only for the page, the server ignores it.
+window.schemaEditor = function (model) {
+  var standard = ['cringle.std/String', 'cringle.std/Boolean', 'cringle.std/Int', 'cringle.std/Double', 'cringle.std/Bytes', 'cringle.std/Timestamp', 'cringle.std/Empty', 'cringle.std/Error'];
+  var name = /^[A-Z][A-Za-z0-9]*$/;
+  return Object.assign(model, {
+    newName: '', newKind: 'record', newError: '',
+    init: function () {
+      this.types.forEach(function (t) { t.open = false; });
+      if (this.types.length <= 2) this.types.forEach(function (t) { t.open = true; });
+    },
+    changed: function () { this.$dispatch('cringle-changed'); },
+    validName: function (n) { return name.test(n); },
+    typeOptions: function () {
+      var ns = (this.namespace || '').trim();
+      var own = this.types.filter(function (t) { return t.name; }).map(function (t) { return ns ? ns + '/' + t.name : t.name; });
+      return standard.concat(own.filter(function (o, i) { return own.indexOf(o) === i; }));
+    },
+    summary: function (t) {
+      if (t.kind === 'enum') { var n = this.valueList(t).length; return n + (n === 1 ? ' value' : ' values'); }
+      return t.fields.length + (t.fields.length === 1 ? ' field' : ' fields');
+    },
+    valueList: function (t) { return (t.values || '').split(',').map(function (v) { return v.trim(); }).filter(function (v) { return v; }); },
+    addValue: function (t, event) {
+      var input = event.target, v = (input.value || '').replace(/,/g, '').trim();
+      input.value = '';
+      if (!v) return;
+      var list = this.valueList(t);
+      if (list.indexOf(v) < 0) list.push(v);
+      t.values = list.join(', ');
+      this.changed();
+    },
+    removeValue: function (t, i) { var list = this.valueList(t); list.splice(i, 1); t.values = list.join(', '); this.changed(); },
+    addField: function (t) { t.fields.push({ name: '', type: 'cringle.std/String', wrap: '' }); this.changed(); },
+    removeField: function (t, i) { t.fields.splice(i, 1); this.changed(); },
+    removeType: function (i) { this.types.splice(i, 1); this.changed(); },
+    openNew: function () {
+      this.newName = ''; this.newKind = 'record'; this.newError = '';
+      this.$refs.newType.showModal();
+      var input = this.$refs.newName;
+      setTimeout(function () { input.focus(); }, 0);
+    },
+    createType: function () {
+      var n = (this.newName || '').trim();
+      if (!name.test(n)) { this.newError = 'The name starts with a capital letter and has letters and digits only.'; return; }
+      if (this.types.some(function (t) { return t.name === n; })) { this.newError = 'There is a type ' + n + ' already.'; return; }
+      this.types.push({ name: n, kind: this.newKind, fields: this.newKind === 'record' ? [{ name: '', type: 'cringle.std/String', wrap: '' }] : [], values: '', open: true });
+      this.$refs.newType.close();
+      this.changed();
+    },
+  });
+};
