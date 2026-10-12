@@ -500,3 +500,6 @@ dialog.dialog::backdrop { background: rgba(6, 8, 12, 0.66); -webkit-backdrop-fil
 #editor-bar { gap: var(--space-2); }
 #editor-bar .btn, #editor-bar details > summary { min-height: 30px; padding: 3px 10px; }
 #editor-bar .field input { min-height: 30px; }
+#properties .config-form { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
+#properties details summary { cursor: pointer; color: var(--text-muted); padding: var(--space-1) 0; }
+#properties .config-form textarea.invalid, #properties details textarea.invalid { border-color: var(--danger); }

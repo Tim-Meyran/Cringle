@@ -243,6 +243,74 @@ document.addEventListener('htmx:responseError', function (event) {
     wrap.append(l);
     return wrap;
   }
+  // one field of the configuration form: [f] is {name, kind, optional, values}; an empty optional field is absent from the configuration
+  function configField(f, id, data, jsonArea) {
+    function store(value) {
+      data.config = data.config || {};
+      if (value === undefined) delete data.config[f.name]; else data.config[f.name] = value;
+      editor.updateNodeDataFromId(id, data);
+      jsonArea.value = JSON.stringify(data.config, null, 2);
+      jsonArea.classList.remove('invalid');
+      changed();
+    }
+    var current = (data.config || {})[f.name];
+    var control;
+    if (f.kind === 'boolean') {
+      control = document.createElement('select');
+      [['', f.optional ? '(not set)' : 'false'], ['true', 'true'], ['false', 'false']].forEach(function (pair) {
+        if (pair[0] === 'false' && !f.optional) return;
+        var opt = document.createElement('option');
+        opt.value = pair[0];
+        opt.textContent = pair[1];
+        opt.selected = (current === undefined ? '' : String(current)) === pair[0];
+        control.append(opt);
+      });
+      control.addEventListener('change', function () { store(control.value === '' ? (f.optional ? undefined : false) : control.value === 'true'); });
+    } else if (f.kind === 'enum') {
+      control = document.createElement('select');
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = f.optional ? '(not set)' : '(choose)';
+      control.append(none);
+      (f.values || []).forEach(function (v) {
+        var opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        opt.selected = current === v;
+        control.append(opt);
+      });
+      control.addEventListener('change', function () { store(control.value === '' ? undefined : control.value); });
+    } else if (f.kind === 'json') {
+      control = document.createElement('textarea');
+      control.rows = 3;
+      control.value = current === undefined ? '' : JSON.stringify(current);
+      control.addEventListener('input', function () {
+        if (control.value.trim() === '') { control.classList.remove('invalid'); store(undefined); return; }
+        try {
+          var parsed = JSON.parse(control.value);
+          control.classList.remove('invalid');
+          store(parsed);
+        } catch (e) {
+          control.classList.add('invalid');
+        }
+      });
+    } else {
+      control = document.createElement('input');
+      if (f.kind === 'int' || f.kind === 'double') {
+        control.type = 'number';
+        control.step = f.kind === 'int' ? '1' : 'any';
+      }
+      control.value = current === undefined ? '' : current;
+      control.addEventListener('input', function () {
+        if (control.value === '') { store(undefined); return; }
+        if (f.kind === 'int') store(parseInt(control.value, 10));
+        else if (f.kind === 'double') store(parseFloat(control.value));
+        else store(control.value);
+      });
+    }
+    return field(f.name + (f.optional ? '' : ' *'), control);
+  }
+
   function showExternal(id, data) {
     function text(label, name, placeholder) {
       var input = document.createElement('input');
@@ -288,6 +356,7 @@ document.addEventListener('htmx:responseError', function (event) {
         data.config = JSON.parse(config.value || '{}');
         config.classList.remove('invalid');
         editor.updateNodeDataFromId(id, data);
+        changed();
       } catch (e) {
         config.classList.add('invalid');
       }
@@ -310,7 +379,21 @@ document.addEventListener('htmx:responseError', function (event) {
       });
       parts.push(field('Slots of ' + port, n));
     });
-    parts.push(field('Configuration (JSON)', config));
+    // a form for the fields of the configuration type of the block; the JSON below stays and shows the same
+    var fields = (byBlock[data.block] || {}).configFields || [];
+    if (fields.length > 0) {
+      var form = document.createElement('div');
+      form.className = 'config-form';
+      fields.forEach(function (f) { form.append(configField(f, id, data, config)); });
+      parts.push(form);
+      var folded = document.createElement('details');
+      var summary = document.createElement('summary');
+      summary.textContent = 'Configuration as JSON';
+      folded.append(summary, config);
+      parts.push(folded);
+    } else {
+      parts.push(field('Configuration (JSON)', config));
+    }
     panel.replaceChildren.apply(panel, parts);
   });
 

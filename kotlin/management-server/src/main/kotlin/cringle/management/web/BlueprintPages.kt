@@ -298,6 +298,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                             put("title", b.name)
                             put("varArg", b.ports.any { it.varArg })
                             put("config", b.configSchema?.let { "${it.namespace}/${it.name}" }.orEmpty())
+                            put("configFields", ConfigFields.of(b, snapshot.registry))
                         },
                     )
                 }
