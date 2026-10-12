@@ -170,6 +170,35 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("any: 1", "any: \"hello\"")
     }
 
+    @Test
+    fun aJsonDocumentIsParsedAndAFieldIsLogged() {
+        // a text with a JSON document is parsed, the name is taken from it and written as a JSON text; the Base64 of the name is logged as well
+        deployStd(
+            "std-json",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("c", "flow.constant", config("value" to "{\"user\": {\"name\": \"Ada\"}}")),
+                    block("p", "data.json-parse"),
+                    block("g", "data.json-get", config("path" to "user.name")),
+                    block("s", "data.as-string"),
+                    block("e", "data.base64-encode"),
+                    block("l", "flow.log", config("prefix" to "b64: ")),
+                ),
+                listOf(
+                    tether("t", "tick", "c", "trigger"),
+                    tether("c", "out", "p", "in"),
+                    tether("p", "out", "g", "in"),
+                    tether("g", "found", "s", "in"),
+                    tether("s", "out", "e", "in"),
+                    tether("e", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("b64: QWRh")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

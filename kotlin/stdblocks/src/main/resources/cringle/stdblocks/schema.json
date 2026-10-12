@@ -79,6 +79,7 @@
     "DebounceConfig": { "record": { "quietMs": "cringle.std/Int" } },
     "ThrottleConfig": { "record": { "intervalMs": "cringle.std/Int" } },
     "BufferConfig": { "record": { "size": { "optional": "cringle.std/Int" } } },
+    "PathConfig": { "record": { "path": "cringle.std/String" } },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }
