@@ -144,6 +144,32 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("calc: true", "sum: 6.5")
     }
 
+    @Test
+    fun aGenericPipelineRunsThroughAnyBlocks() {
+        // an Int from the timer and a String from the constant both go into a port of the type Any, are delayed and written as JSON
+        deployStd(
+            "std-any",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("c", "flow.constant", config("value" to "hello")),
+                    block("m", "flow.merge"),
+                    block("d", "flow.delay", config("delayMs" to 50)),
+                    block("l", "flow.log-any", config("prefix" to "any: ")),
+                ),
+                listOf(
+                    tether("t", "tick", "m", "a"),
+                    tether("t", "tick", "c", "trigger"),
+                    tether("c", "out", "m", "b"),
+                    tether("m", "out", "d", "in"),
+                    tether("d", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("any: 1", "any: \"hello\"")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

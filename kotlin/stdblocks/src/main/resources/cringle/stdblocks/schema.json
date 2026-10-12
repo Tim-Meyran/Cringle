@@ -75,6 +75,10 @@
     },
     "CompareOperator": { "enum": ["EQ", "NE", "LT", "LE", "GT", "GE"] },
     "CompareConfig": { "record": { "operator": { "optional": "CompareOperator" } } },
+    "DelayConfig": { "record": { "delayMs": "cringle.std/Int" } },
+    "DebounceConfig": { "record": { "quietMs": "cringle.std/Int" } },
+    "ThrottleConfig": { "record": { "intervalMs": "cringle.std/Int" } },
+    "BufferConfig": { "record": { "size": { "optional": "cringle.std/Int" } } },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }

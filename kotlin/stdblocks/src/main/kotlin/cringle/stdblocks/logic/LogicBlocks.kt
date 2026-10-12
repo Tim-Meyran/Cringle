@@ -3,6 +3,7 @@
 package cringle.stdblocks.logic
 
 import cringle.contract.SchemaRef
+import cringle.stdblocks.ANY
 import cringle.stdblocks.BOOLEAN
 import cringle.stdblocks.DOUBLE
 import cringle.stdblocks.Entry
@@ -68,4 +69,6 @@ internal val LOGIC_ENTRIES: List<Entry> = listOf(
     branch("logic.if-number", DOUBLE),
     filter("logic.filter", STRING),
     filter("logic.filter-number", DOUBLE),
+    branch("logic.if-any", ANY),
+    filter("logic.filter-any", ANY),
 )
