@@ -33,6 +33,27 @@ Verbindliche Entscheidungen während der Entwicklung. Sie ergänzen `Architectur
 - **Serial ist ein Tether-Typ, Filesystem ein Driver** (Issue #75). Das Blueprint-Format des Serial-Tethers ist noch festzulegen.
 - Tethers öffnen vor dem Start der Blöcke; Nachrichten an einen noch nicht laufenden Block folgen der `delivery`-Policy des Tethers (`DROP` verwirft und loggt, `BUFFER` stellt zu, sobald der Block läuft).
 
+- **Ein OUT-Port kann mehrere Tethers starten, wenn alle `MESSAGE`-Tethers sind** (Fan-out, Issue #358, `spec/tether.md`). Eine Nachricht geht an jeden Tether in der Reihenfolge des Blueprints; jeder Tether behält Delivery-Policy, Puffer und Optionen; ein Tether, der sie nicht annimmt, hält die anderen nicht auf; ein voller `BUFFER` hält den Sender an. Ein IN-Endpunkt gehört zu einem Tether; Request/Response, Stream, Byte-Stream, TCP und Serial bleiben bei einem Tether je OUT-Endpunkt.
+- **Tethers zwischen Engines sind immer mutual TLS** mit den Identitäten der Engines. Eine Wahl des Verfahrens im Blueprint gibt es nicht (ersetzt „optionale Verschlüsselung mit Verfahrenswahl“ in den Kapiteln 10.5, M5 und 26).
+
+## Schemas
+
+- **`cringle.std/Any`** (Issue #363, `spec/schema.md`): ein JSON-Wert beliebigen Typs außer `null`. Jeder Typ ist an `Any` zuweisbar, `Any` nur an `Any`; ein getypter Port nimmt einen `Any`-Wert nie ohne eine Umwandlung, die ihn prüft. Zahlen in einem `Any`-Wert unterscheiden nicht mehr zwischen `Int` und `Double`.
+
+## Standardbibliothek
+
+- **Das Plugin `cringle-std`** (Issues #349 bis #366, `docs/standard-blocks.md`) liefert Blocks für Zeit, Fluss, Text, Mathematik, Logik, Dateien und Daten. Es ist **ein** Plugin, steckt im ManagementServer, wird bei jedem Start im Repository veröffentlicht (einmal je Version) und als `trusted` markiert; eine spätere Entscheidung des Betreibers bleibt. Blocknamen sind `<thema>.<name>`.
+- **Feste Typen plus `Any`:** Mathematik arbeitet auf `Double`, Text auf `String`, Bedingungen auf `Boolean`; Wandlerblöcke verbinden sie, allgemeine Blocks (Delay, Buffer, Merge, Filter, JSON) arbeiten auf `Any`, `data.as-*` prüft und wandelt zurück.
+- **Der Driver `filesystem-fabric`** gibt allen Blocks einer Fabric denselben Ordner `<fabric>/shared`; der Driver `filesystem` bleibt der Arbeitsordner des einzelnen Blocks.
+
+## WebUI
+
+- **Technik:** serverseitig gerendertes HTML mit htmx, Alpine.js und Drawflow, ohne Build-Schritt (Issues #207 bis #214), statt Svelte 5 mit SvelteFlow (ersetzt die Zeilen in Kapitel M8 und 26). Der Blueprint-Editor bearbeitet ein Blueprint je Projekt-Entwurf mit mehreren Fabrics (Instanzen, Rollen, Labels), Tether-Optionen, VarArg-Ports, Isolation, `remote`- und `service`-Tethers, einem Formular für die Konfiguration, Rückgängig und Autosave.
+
+## Windows-Dienst
+
+- Der Dienst des Daemons startet **`java` selbst** (nicht `cringle-daemon.bat`), weil WinSW den Dienst mit Strg+C beendet und eine Batch-Datei darauf mit „Batchvorgang abbrechen (J/N)?“ wartet (Issue #347). Ein bestehender Dienst behält die alte Datei bis zur nächsten Installation.
+
 ## Blueprints, Dependencies und Deploy
 
 - **Blueprints sind JSON, Cringle hat keine eigene DSL.** Ein späterer Blueprint-Editor liest und schreibt dasselbe Format.

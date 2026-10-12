@@ -51,21 +51,15 @@ Propose them to the owner for `decisions.md`; do not change them without asking.
 - Isolated (untrusted) blocks and the local IPC tether are deferred (M9).
 - The GitHub workflow `CI` is disabled (billing). The local build replaces it; an agent states the results of `./gradlew build` and of `integrationTest` in the pull request; `./gradlew build integrationTest` is the full verification (two suites, #133).
 
-## M9 acceptance (#234): decisions for the owner
+## M9 acceptance (#234): decisions (now in decisions.md unless marked open)
 
 The check of chapter 26 is in [acceptance-1.0.md](acceptance-1.0.md). Proposals for `decisions.md` and `Architecture.md`, not changed by an agent:
 
-- **WebUI technology:** htmx, Alpine.js and Drawflow instead of Svelte 5 with SvelteFlow (already decided in #151); change the sentence in chapter 26.
-- **Encryption of tethers:** tethers between engines are always mutual TLS; there is no choice of method. Either change the sentence of chapter 26 or ask for a per-tether option.
-- **User name and password:** not there, tokens only (also as login and invite links). Decide whether it comes after 1.0.0.
-- **Health check of drivers:** `Driver` has no health call; failover between service instances exists. Proposal: `Driver.health()` after 1.0.0.
-- **Federation:** manual trust of registries only; discovery is left for later.
-- **Isolated blocks (#18):** deferred; an untrusted plugin makes the fabric fail closed. Decide the milestone.
+- **WebUI technology:** decided and in `decisions.md` and `Architecture.md` (htmx, Alpine.js, Drawflow).
+- **Encryption of tethers:** decided: always mutual TLS, no choice of method (`decisions.md`, `Architecture.md`).
+- **User name and password (open):** not there, tokens only (also as login and invite links). Decide whether it comes after 1.0.0.
+- **Health check of drivers (open):** `Driver` has no health call; failover between service instances exists. Proposal: `Driver.health()` after 1.0.0.
+- **Federation (open):** manual trust of registries only; discovery is left for later.
+- **Isolated blocks (#18, open):** deferred; an untrusted plugin makes the fabric fail closed. Decide the milestone.
 
-## Tethers from one OUT port (#358): proposal for `docs/Architecture.md` and `docs/decisions.md`
-
-Owner decision: an `OUT` port can start several tethers when all of them are `MESSAGE` tethers (fan-out); `spec/tether.md` says so and the engine does it. The sentence in the tether chapter of `Architecture.md` ("an endpoint belongs to one tether") should become: "An `IN` endpoint belongs to one tether. An `OUT` endpoint can start several `MESSAGE` tethers; for the other tether types it belongs to one tether."
-
-## The type `cringle.std/Any` (#363): proposal for `docs/Architecture.md` and `docs/decisions.md`
-
-Owner decision: a standard type `cringle.std/Any` for generic blocks (`spec/schema.md` sections 4, 5 and 7). A value of every type is assignable to `Any`; `Any` is assignable to `Any` only, so a typed port never takes an `Any` value without a conversion that checks it. `null` stays invalid, also nested; numbers in an `Any` value lose the difference between `Int` and `Double`. The chapter on schemas of `Architecture.md` should list `Any` among the standard types and state the assignability rule.
+The decisions about fan-out of `MESSAGE` tethers (#358), the type `cringle.std/Any` (#363), the standard library `cringle-std`, the WebUI technology, the TLS of tethers and the Windows service are in [decisions.md](decisions.md).

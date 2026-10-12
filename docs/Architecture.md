@@ -458,7 +458,7 @@ Die genaue Driver-Schnittstelle und die Lifecycle-Details sind [Offen]. Der Scop
 
 - Schemas beschreiben pro Project und Plugin, welche komplexen Datentypen im Blueprint zur Verfügung stehen. Diese Typen werden über Tethers übertragen.
 - Schemas können über die WebUI oder über Konfigurationsdateien erstellt und bearbeitet werden.
-- Es gibt Cringle-Standardschemas.
+- Es gibt Cringle-Standardschemas, darunter `cringle.std/Any` (jeder Typ ist an `Any` zuweisbar, `Any` nur an `Any`; siehe decisions.md und `spec/schema.md`).
 - Schemas werden über eindeutige Namespace-IDs aufgelöst, auch über Plugin- und Projektgrenzen hinweg. Damit können Blocks aus unterschiedlicher Herkunft denselben Typ meinen.
 - Abwärtskompatibilität ist nicht zwingend. Eine Schema-Änderung kann ein Redeploy erfordern. Das ist eine bewusste Entscheidung zugunsten von Einfachheit.
 - Schemas werden zur Laufzeit geprüft.
@@ -820,7 +820,7 @@ Ziel: Alle Komponenten kommunizieren abgesichert.
 - mTLS auf allen Komponenten-Strecken
 - Remote Router hinzufügen, Engines fremder Router cachen
 - Authentifizierung: Nutzer per Token oder Username/Passwort, Maschinen per Zertifikat
-- Optionale Verschlüsselung der Tether-Übertragung über dieselbe Infrastruktur, Verfahrenswahl im Blueprint
+- Verschlüsselung der Tether-Übertragung zwischen Engines über dieselbe Infrastruktur (immer mTLS, keine Verfahrenswahl, siehe decisions.md)
 
 Fertig, wenn: zwei Maschinen sich gegenseitig vertrauen und ein Tether zwischen ihren Engines verschlüsselt läuft.
 
@@ -861,7 +861,7 @@ M8 – WebUI und Blueprint-Editor (0.9.0)
 
 Ziel: Blueprints werden visuell gebaut, die Plattform wird grafisch bedient.
 
-- WebUI in Svelte 5 mit SvelteFlow
+- WebUI mit htmx, Alpine.js und Drawflow (siehe decisions.md)
 - REST-Schnittstelle des ManagementServers für die WebUI
 - Visueller Blueprint-Editor mit Blocks, Ports und Tethers
 - Kompatibilitätsprüfung beim Verbinden anhand von Tether-Typ und Schema
@@ -918,7 +918,7 @@ Kommunikation
 - Tether-Typen: lokal, IPC, TCP, Serial, Filesystem
 - Backpressure- und Retry-Konfiguration
 - Tethers über Engine- und Projektgrenzen hinweg
-- Optionale Verschlüsselung über die Zertifikatsinfrastruktur mit Verfahrenswahl
+- Verschlüsselung über die Zertifikatsinfrastruktur (immer mTLS, keine Verfahrenswahl, siehe decisions.md)
 
 Modell und Typen
 
@@ -1000,7 +1000,7 @@ Bedienung
 
 - ManagementServer mit gRPC und REST
 - CLI für die einfachen Operationen
-- WebUI in Svelte 5 mit SvelteFlow
+- WebUI mit htmx, Alpine.js und Drawflow (siehe decisions.md)
 - Visueller Blueprint-Editor mit Kompatibilitätsprüfung
 - Deployment-Verwaltung in der WebUI
 - Schema-Editor
