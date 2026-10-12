@@ -51,6 +51,8 @@ class WebBlueprintTest {
             .block(block("numbers", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), int)))
             .block(block("util.up", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
             .block(block("util.down", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
+            .block(BlockDefinition("configured", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)), emptyList(), SchemaRef("acme.flow", "FlowConfig")))
+            .schema("flow.json", """{"namespace":"acme.flow","types":{"FlowConfig":{"record":{"label":"cringle.std/String","limit":{"optional":"cringle.std/Int"}}}}}""")
             .build(Files.createDirectories(dir.resolve("plugins")))
         val repo = PackageRepository(dir.resolve("repo"))
         repo.publish(plugin.file)
@@ -91,6 +93,13 @@ class WebBlueprintTest {
         val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to graph(), "options" to "{}", "version" to "1.0.0", "roles" to "", "revision" to "1")).body()
         assertTrue(saved.contains("Saved as revision 2") && saved.contains("has no block yet"), saved)
         assertFalse(saved.contains("The blueprint is valid"), saved)
+    }
+
+    @Test
+    fun theDataOfThePaletteCarriesTheConfigurationFields() {
+        val page = admin.get("/blueprints/flow-app").body()
+        assertTrue(page.contains("&quot;configFields&quot;:[{&quot;name&quot;:&quot;label&quot;,&quot;kind&quot;:&quot;string&quot;,&quot;optional&quot;:false},{&quot;name&quot;:&quot;limit&quot;,&quot;kind&quot;:&quot;int&quot;,&quot;optional&quot;:true}]"), page.take(3000))
+        assertTrue(page.contains("&quot;configFields&quot;:[]"), "a block without a configuration has no fields")
     }
 
     @Test
