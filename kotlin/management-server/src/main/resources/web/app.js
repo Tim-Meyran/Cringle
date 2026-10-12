@@ -134,7 +134,7 @@ document.addEventListener('htmx:responseError', function (event) {
     var data = { kind: 'external', id: uniqueId('ext'), mode: kind === 'service' ? 'service' : 'remote', type: 'MESSAGE', send: send };
     if (data.mode === 'service') data.name = ''; else { data.fingerprint = ''; data.fabric = ''; data.block = ''; data.port = ''; data.address = ''; data.index = ''; }
     var count = Object.keys(editor.export().drawflow.Home.data).length;
-    editor.addNode('external', send ? 1 : 0, send ? 0 : 1, 40 + 220 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-external', data, externalHtml(data));
+    editor.addNode('external', send ? 1 : 0, send ? 0 : 1, 40 + 280 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-external', data, externalHtml(data));
   }
   document.querySelectorAll('#externals button').forEach(function (button) {
     button.addEventListener('click', function () { addExternal(button.dataset.external); });
@@ -161,22 +161,29 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.on('nodeRemoved', showHint);
   showHint();
 
-  // the search field of the palette filters the buttons and the plugin headings
+  // the search field of the palette shows the matching blocks, opens the themes that have one and hides the themes and plugins that have none
   var search = document.getElementById('palette-search');
   if (search) {
     search.addEventListener('input', function () {
       var q = search.value.trim().toLowerCase();
-      var heading = null, any = false;
-      Array.prototype.forEach.call(document.getElementById('palette').children, function (el) {
-        if (el.tagName === 'H3') {
-          if (heading) heading.hidden = !any;
-          heading = el; any = false;
-        } else if (el.tagName === 'BUTTON') {
-          el.hidden = q !== '' && el.dataset.block.toLowerCase().indexOf(q) < 0;
-          if (!el.hidden) any = true;
-        }
+      function filter(buttons) {
+        var any = false;
+        buttons.forEach(function (b) {
+          b.hidden = q !== '' && b.dataset.block.toLowerCase().indexOf(q) < 0;
+          if (!b.hidden) any = true;
+        });
+        return any;
+      }
+      document.querySelectorAll('#palette section.plugin').forEach(function (section) {
+        var anyInPlugin = filter(Array.prototype.filter.call(section.children, function (el) { return el.tagName === 'BUTTON'; }));
+        section.querySelectorAll('details.theme').forEach(function (theme) {
+          var any = filter(Array.prototype.slice.call(theme.querySelectorAll('button[data-block]')));
+          theme.hidden = !any;
+          theme.open = q !== '' && any;
+          if (any) anyInPlugin = true;
+        });
+        section.hidden = !anyInPlugin;
       });
-      if (heading) heading.hidden = !any;
     });
   }
 
@@ -189,7 +196,7 @@ document.addEventListener('htmx:responseError', function (event) {
       var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block) };
       var count = Object.keys(editor.export().drawflow.Home.data).length;
       editor.addNode(p.block, slots(p.block, 'inputs', data.varArgCounts).length, slots(p.block, 'outputs', data.varArgCounts).length,
-        40 + 220 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, nodeHtml(data));
+        40 + 280 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, nodeHtml(data));
     });
   });
 

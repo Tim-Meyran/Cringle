@@ -49,6 +49,8 @@ class WebBlueprintTest {
             .block(block("fan", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string, varArg = true)))
             .block(block("sink", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
             .block(block("numbers", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), int)))
+            .block(block("util.up", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
+            .block(block("util.down", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
             .build(Files.createDirectories(dir.resolve("plugins")))
         val repo = PackageRepository(dir.resolve("repo"))
         repo.publish(plugin.file)
@@ -89,6 +91,16 @@ class WebBlueprintTest {
         val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to graph(), "options" to "{}", "version" to "1.0.0", "roles" to "", "revision" to "1")).body()
         assertTrue(saved.contains("Saved as revision 2") && saved.contains("has no block yet"), saved)
         assertFalse(saved.contains("The blueprint is valid"), saved)
+    }
+
+    @Test
+    fun thePaletteIsGroupedByPluginAndTheme() {
+        val page = admin.get("/blueprints/flow-app").body()
+        assertTrue(page.contains("<section class=\"plugin\"><h3>acme-flow</h3>"), page)
+        assertTrue(page.contains("<details class=\"theme\"><summary>util <span class=\"count\">2</span></summary>"), page)
+        assertTrue(page.contains("data-block=\"acme-flow/util.up\"") && page.contains("data-block=\"acme-flow/util.down\""), page)
+        // a block without a theme stands outside the folded groups
+        assertTrue(page.indexOf("data-block=\"acme-flow/src\"") < page.indexOf("<details class=\"theme\">") || page.indexOf("data-block=\"acme-flow/src\"") > page.indexOf("</details>"), page)
     }
 
     @Test
