@@ -319,9 +319,19 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val graph = BlueprintGraph.toGraph(blueprint, positions, snapshot::block)
         val kept = blueprint.tethers.count { !BlueprintGraph.drawable(it) } + BlueprintGraph.unresolved(blueprint, snapshot::block).size
         val paletteGroups = snapshot.plugins.filter { it.manifest.blocks.isNotEmpty() }.map { p ->
+            // the blocks of a plugin are folded by the theme before the first dot of their name (`time.timer-trigger`: `time`)
+            fun button(b: BlockDefinition) = h("<button type=\"button\" data-block=\"{}/{}\" title=\"{}/{}\">{}</button>", p.manifest.name, b.name, p.manifest.name, b.name, b.name)
             html(
+                raw("<section class=\"plugin\">"),
                 h("<h3>{}</h3>", p.manifest.name),
-                p.manifest.blocks.map { b -> h("<button type=\"button\" data-block=\"{}/{}\" title=\"{}/{}\">{}</button>", p.manifest.name, b.name, p.manifest.name, b.name, b.name) },
+                p.manifest.blocks.groupBy { it.name.substringBefore('.', "") }.map { (theme, blocks) ->
+                    if (theme.isEmpty()) {
+                        html(blocks.map { button(it) })
+                    } else {
+                        html(h("<details class=\"theme\"><summary>{} <span class=\"count\">{}</span></summary>", theme, blocks.size), blocks.map { button(it) }, raw("</details>"))
+                    }
+                },
+                raw("</section>"),
             )
         }
         val paletteBody = if (paletteGroups.isEmpty()) {

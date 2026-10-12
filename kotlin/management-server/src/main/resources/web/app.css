@@ -226,7 +226,11 @@ textarea.invalid { border-color: var(--danger); }
 #palette h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
 #palette .empty { color: var(--text-muted); }
 #palette input[type=search] { width: 100%; }
-#palette button[hidden], #palette h3[hidden] { display: none; }
+#palette button[hidden], #palette h3[hidden], #palette details[hidden], #palette section[hidden] { display: none; }
+#palette details.theme { margin-bottom: var(--space-2); }
+#palette details.theme > summary { cursor: pointer; padding: var(--space-1) 0; color: var(--text-muted); }
+#palette details.theme .count { color: var(--text-faint); font-size: var(--text-xs); }
+#palette details.theme > button { margin-left: var(--space-3); width: calc(100% - var(--space-3)); }
 #canvas-hint[hidden] { display: none; }
 
 /* below 900 px the sidebar becomes a bar on top */
