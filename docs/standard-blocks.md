@@ -46,6 +46,19 @@ Two rules apply to all blocks with more than one input or output:
 | `logic.if-any`, `logic.filter-any` | as `logic.if`, `logic.filter` | – | For values of any type. |
 | `data.as-string`, `-number`, `-int`, `-boolean` | IN `in` (`Any`), OUT `out` (typed), `error` | – | The value as that type, or the reason on `error` when it is of another kind (`as-int` takes whole numbers only). |
 
+### JSON and Base64: `data.*`
+
+A JSON document is a value of the type `Any`: texts, numbers (a whole number that fits is an `Int`, every other one a `Double`), booleans, lists and objects; `null` is not a value. A **path** is written `user.name`, `items[0].id`, `[0][1]` or with a `$` in front (`$.a.b`).
+
+| Block | Ports | Configuration | What it does |
+|---|---|---|---|
+| `data.json-parse` | IN `in` (`String`), OUT `out` (`Any`), `error` | – | Parses the text strictly (no `null`, no duplicate key, no text after the document, nesting up to 100); `error` has the reason and the position. |
+| `data.json-stringify` | IN `in` (`Any`), OUT `out` (`String`) | – | The JSON text of the value. |
+| `data.json-get` | IN `in`, OUT `found`, `missing` (`Any`) | `path` | The value at the path on `found`; the input on `missing` when the path leads nowhere. |
+| `data.json-set` | IN `a` (the document), `b` (the value), OUT `out`, `error` | `path` | A copy of the latest document with the latest value at the path (`a` and `b` as for every block with two inputs); missing object keys are created, an index one past the end appends; `error` says why a path does not fit. The original stays as it was. |
+| `data.base64-encode`, `data.base64-decode` | IN `in`, OUT `out` (`error` for decode) | – | Base64 of the UTF-8 bytes of a text and back. |
+| `data.size` | IN `in` (`Any`), OUT `out` (`Int`), `error` | – | Characters of a text, entries of a list or an object. |
+
 ### Text, math and logic
 
 | Block | Ports | Configuration | What it does |
