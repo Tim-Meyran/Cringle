@@ -178,6 +178,10 @@ class DistributionTest {
         // the daemon API is mutual TLS: the daemon has to trust this test before it starts, as an operator enters a fingerprint
         val client = DistributionTestClient(temp.resolve("client-tls"))
         client.trustInDaemonHome(cringleHome)
+        // the daemon runs its router on the fixed router.port of its settings (7450); a machine with an installed daemon holds that port, so the test names a free one
+        val routerPort = java.net.ServerSocket(0).use { it.localPort }
+        Files.createDirectories(cringleHome.resolve("config"))
+        Files.writeString(cringleHome.resolve("config/cringle.conf"), "router.port=$routerPort" + System.lineSeparator())
         val builder = ProcessBuilder(script(home, "cringle-daemon").toString(), "--home", cringleHome.toString(), "--port", "0")
         builder.environment().remove("CRINGLE_JVM_OPTS")
         builder.environment()["JAVA_HOME"] = System.getProperty("java.home")
