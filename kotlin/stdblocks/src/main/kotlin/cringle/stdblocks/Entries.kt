@@ -17,6 +17,7 @@ internal val INT = SchemaRef("cringle.std", "Int")
 internal val DOUBLE = SchemaRef("cringle.std", "Double")
 internal val STRING = SchemaRef("cringle.std", "String")
 internal val BOOLEAN = SchemaRef("cringle.std", "Boolean")
+internal val ANY = SchemaRef("cringle.std", "Any")
 
 private val MESSAGE = setOf(TetherType.MESSAGE)
 

@@ -13,7 +13,7 @@ The management server carries the plugin (the jar of the module `kotlin/stdblock
 ## Rules of the library
 
 - **Block names** are `<theme>.<name>` in lower case: `time.timer-trigger`, `flow.log`. The themes are `time`, `flow`, `text`, `file`, `math` and `logic`.
-- **Fixed types.** A block works on one type: counters are `Int`, texts are `String`, conditions are `Boolean`, numbers `Double`. **Converter blocks** (`text.to-string`, `text.parse-int`, `math.int-to-double`, …) join them. There is no type that stands for any value; a block that only passes values on (delay, buffer, merge) therefore exists for `String` until that is decided (`docs/status.md`).
+- **Fixed types.** A block works on one type: counters are `Int`, texts are `String`, conditions are `Boolean`, numbers `Double`. **Converter blocks** (`text.to-string`, `text.parse-int`, `math.int-to-double`, …) join them. The type **`cringle.std/Any`** (`spec/schema.md`) stands for a value of any type: every typed port can feed an `Any` port, and the `data.as-*` blocks turn an `Any` value back into a typed one after checking it. Blocks that only pass values on (delay, buffer, merge, …) work on `Any`.
 - Every block has a configuration schema in the namespace `cringle.stdblocks` (`kotlin/stdblocks/src/main/resources/cringle/stdblocks/schema.json`) when it needs a configuration; the editor and the engine check it.
 - A block never reaches outside through anything but a driver: `flow.log` uses the logging driver, the `file` blocks the driver `filesystem-fabric` (below).
 
@@ -31,6 +31,20 @@ Two rules apply to all blocks with more than one input or output:
 - **Two inputs `a` and `b`** (`text.concat`, `math.add`, `logic.compare`, …): the block keeps the **latest value of each** and sends a result whenever one of them arrives, as soon as both have a value.
 - **An output port can start several `MESSAGE` tethers** (`spec/tether.md`): connect it to every block that needs the value; there are no copy blocks. A port that sends requests or streams has one tether.
 - A bad input (a text that is no number, a division by zero, no match) is sent on a port `error` or `nomatch` with the reason or the input; it never throws.
+
+### Flow and data (generic, on `Any`)
+
+| Block | Ports | Configuration | What it does |
+|---|---|---|---|
+| `flow.delay` | IN `in`, OUT `out` (`Any`) | `delayMs` (≥ 0) | Every value leaves after the delay, in order; values that still wait are dropped when the block stops. |
+| `flow.debounce` | IN `in`, OUT `out` | `quietMs` (≥ 1) | The last value after that long without a new one. |
+| `flow.buffer` | IN `in`, `flush` (`Int`), OUT `batch` | `size` (optional, ≥ 1) | Collects values and sends them as one list when `flush` arrives or `size` is reached; an empty buffer sends nothing. |
+| `flow.merge` | IN `a`, `b`, OUT `out` | – | Every value of either input passes. |
+| `flow.throttle` | IN `in`, OUT `out`, `dropped` | `intervalMs` (≥ 1) | At most one value per interval on `out`, the others on `dropped`. |
+| `flow.once` | IN `in`, `reset` (`Int`), OUT `out` | – | Only the first value passes; `reset` lets the next one pass. |
+| `flow.log-any` | IN `in` | `level`, `prefix` | Like `flow.log`, the value as JSON text. |
+| `logic.if-any`, `logic.filter-any` | as `logic.if`, `logic.filter` | – | For values of any type. |
+| `data.as-string`, `-number`, `-int`, `-boolean` | IN `in` (`Any`), OUT `out` (typed), `error` | – | The value as that type, or the reason on `error` when it is of another kind (`as-int` takes whole numbers only). |
 
 ### Text, math and logic
 
