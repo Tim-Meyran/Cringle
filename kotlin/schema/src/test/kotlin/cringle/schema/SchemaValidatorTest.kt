@@ -235,4 +235,13 @@ class SchemaValidatorTest {
         val found = SchemaValidator(local).validate(Json.parseToJsonElement("""{"f":1}"""), SchemaRef("a", "A"))
         assertEquals(listOf(ValidationError("$.f", "unknown type 'a/Missing'")), found)
     }
+
+    @Test
+    fun anyAcceptsEveryJsonValueButNull() {
+        val any = StandardSchemas.ANY
+        for (json in listOf(""""text"""", "42", "-1.5e3", "true", "false", "[]", "{}", """{"a":[1,"b",{"c":true}]}""", "[[1],[2,[3]]]")) assertValid(json, any)
+        assertEquals(listOf(ValidationError("$", "null is not a valid value")), errors("null", any))
+        assertEquals(listOf(ValidationError("$.a[1]", "null is not a valid value")), errors("""{"a":[1,null]}""", any))
+        assertEquals("$.k", errors("""{"k":1e999}""", any).single().path)
+    }
 }

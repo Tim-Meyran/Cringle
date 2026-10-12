@@ -85,6 +85,7 @@ Primitives are ordinary named types, so a port can refer to them like to any oth
 | `cringle.std/Double` | a finite binary64 number |
 | `cringle.std/Bytes` | bytes |
 | `cringle.std/Timestamp` | a point in time, UTC, millisecond precision |
+| `cringle.std/Any` | any JSON value except `null`, for blocks that work on values of every type |
 | `cringle.std/Empty` | a record without fields, for messages that carry no data |
 | `cringle.std/Error` | a record: `code: String`, `message: String`, `details: optional map of String` |
 
@@ -100,6 +101,7 @@ Values are JSON values.
 | `Double` | a JSON number that is finite as a binary64 value (`1e999` is invalid) |
 | `Bytes` | a string in base64 (RFC 4648 section 4, standard alphabet, **with** padding, no whitespace, no non-zero padding bits) |
 | `Timestamp` | a string `YYYY-MM-DDThh:mm:ss.mmmZ`: UTC (`Z`, no offsets), exactly three fractional digits, a valid calendar date and time (no `24:00`, no leap seconds) |
+| `Any` | any JSON value: a string, a number (finite), `true` or `false`, an array or an object whose elements are again any JSON value; `null` is invalid, also nested. A `Bytes` or `Timestamp` value is carried as its string; a number has no declared type any more, so `2.0` and `2` are the same number in the canonical form (section 6) and a receiver takes it as a number, not as an `Int` or a `Double` |
 | enum | a string, one of the declared values |
 | record | an object with exactly the declared fields; optional fields may be absent; unknown fields are errors |
 | `list` | an array |
@@ -122,6 +124,8 @@ Because valid `Bytes` and `Timestamp` values already have exactly one spelling, 
 ## 7. Assignability
 
 A value of type `A` may be used where type `B` is expected if and only if both references resolve and they are the **same namespace ID** (`A == B`). The check is nominal: two record types with identical fields but different IDs are **not** assignable to each other. Structural rules are deliberately not part of this version and can be added later without changing the meaning of the nominal rule.
+
+One exception: **a value of every type is assignable to `cringle.std/Any`**, and `cringle.std/Any` is assignable to `cringle.std/Any` only. A port of type `Any` takes anything; to use what it delivers as a specific type, a block has to convert it, which checks the value against that type (the standard library has such blocks). `Any` is therefore a one-way door: it never makes a typed port accept an `Any` value without a check.
 
 ## 8. Worked examples
 

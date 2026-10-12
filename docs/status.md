@@ -65,3 +65,7 @@ The check of chapter 26 is in [acceptance-1.0.md](acceptance-1.0.md). Proposals 
 ## Tethers from one OUT port (#358): proposal for `docs/Architecture.md` and `docs/decisions.md`
 
 Owner decision: an `OUT` port can start several tethers when all of them are `MESSAGE` tethers (fan-out); `spec/tether.md` says so and the engine does it. The sentence in the tether chapter of `Architecture.md` ("an endpoint belongs to one tether") should become: "An `IN` endpoint belongs to one tether. An `OUT` endpoint can start several `MESSAGE` tethers; for the other tether types it belongs to one tether."
+
+## The type `cringle.std/Any` (#363): proposal for `docs/Architecture.md` and `docs/decisions.md`
+
+Owner decision: a standard type `cringle.std/Any` for generic blocks (`spec/schema.md` sections 4, 5 and 7). A value of every type is assignable to `Any`; `Any` is assignable to `Any` only, so a typed port never takes an `Any` value without a conversion that checks it. `null` stays invalid, also nested; numbers in an `Any` value lose the difference between `Int` and `Double`. The chapter on schemas of `Architecture.md` should list `Any` among the standard types and state the assignability rule.

@@ -30,6 +30,9 @@ public object StandardSchemas {
     /** A point in time in UTC with millisecond precision. */
     public val TIMESTAMP: SchemaRef = SchemaRef(NAMESPACE, "Timestamp")
 
+    /** Any JSON value except `null`; every type is assignable to it, it is assignable to nothing else. */
+    public val ANY: SchemaRef = SchemaRef(NAMESPACE, "Any")
+
     /** A record without fields, for messages that carry no data. */
     public val EMPTY: SchemaRef = SchemaRef(NAMESPACE, "Empty")
 
@@ -47,6 +50,7 @@ public object StandardSchemas {
             "Double" to TypeDef.Primitive(PrimitiveKind.DOUBLE),
             "Bytes" to TypeDef.Primitive(PrimitiveKind.BYTES),
             "Timestamp" to TypeDef.Primitive(PrimitiveKind.TIMESTAMP),
+            "Any" to TypeDef.Primitive(PrimitiveKind.ANY),
             "Empty" to TypeDef.Record(emptyMap()),
             "Error" to TypeDef.Record(
                 linkedMapOf(

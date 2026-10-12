@@ -66,6 +66,7 @@ class TetherNetworkTest {
             PortDefinition("out", PortDirection.OUT, all, string),
             PortDefinition("outInt", PortDirection.OUT, setOf(TetherType.MESSAGE), int),
             PortDefinition("unused", PortDirection.OUT, setOf(TetherType.MESSAGE), string),
+            PortDefinition("outAny", PortDirection.OUT, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "Any")),
             PortDefinition("back", PortDirection.IN, setOf(TetherType.MESSAGE), string),
         ),
         emptyList(),
@@ -77,6 +78,7 @@ class TetherNetworkTest {
             PortDefinition("in", PortDirection.IN, all, string),
             PortDefinition("in2", PortDirection.IN, all, string),
             PortDefinition("inInt", PortDirection.IN, setOf(TetherType.MESSAGE), int),
+            PortDefinition("inAny", PortDirection.IN, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "Any")),
         ),
         emptyList(),
     )
@@ -308,6 +310,27 @@ class TetherNetworkTest {
             withTimeout(10.seconds) { both.await() }
             assertEquals(setOf("in=hi", "in2=hi"), received.toSet())
         }
+    }
+
+    @Test
+    fun aTypedOutPortCanFeedAnAnyInPort(): Unit = runBlocking {
+        val received = java.util.concurrent.CopyOnWriteArrayList<Any>()
+        val all = CompletableDeferred<Unit>()
+        val values = listOf<Any>("text", 42L, 2.5, true, mapOf("a" to listOf(1L, "b")), listOf("x", 2L))
+        setup(listOf(tether(TetherType.MESSAGE, "outAny", "inAny"))) { e ->
+            received += (e as TetherEvent.Message).value
+            if (received.size == values.size) all.complete(Unit)
+        }.use { s ->
+            for (v in values) s.out("outAny").send(v)
+            withTimeout(10.seconds) { all.await() }
+            assertEquals(values, received.toList())
+        }
+        // a typed port feeds an Any port; the other way round is refused when the tethers are wired
+        val defs = mapOf("s" to srcDef, "d" to dstDef)
+        val blocks = listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst"))
+        TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.MESSAGE, "out", "inAny"))), defs, config())
+        val e = assertThrows<TetherWiringException> { TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.MESSAGE, "outAny", "in"))), defs, config()) }
+        assertTrue(e.message!!.contains("not assignable"), e.message)
     }
 
     @Test

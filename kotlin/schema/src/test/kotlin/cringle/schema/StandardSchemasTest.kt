@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test
 
 class StandardSchemasTest {
     @Test
-    fun everyRegistryContainsTheEightStandardTypes() {
+    fun everyRegistryContainsTheNineStandardTypes() {
         val registry = SchemaRegistry()
         val expected = mapOf(
             StandardSchemas.STRING to PrimitiveKind.STRING,
@@ -20,13 +20,14 @@ class StandardSchemasTest {
             StandardSchemas.DOUBLE to PrimitiveKind.DOUBLE,
             StandardSchemas.BYTES to PrimitiveKind.BYTES,
             StandardSchemas.TIMESTAMP to PrimitiveKind.TIMESTAMP,
+            StandardSchemas.ANY to PrimitiveKind.ANY,
         )
         for ((ref, kind) in expected) assertEquals(TypeDef.Primitive(kind), registry.resolve(ref), "type $ref")
         assertEquals(TypeDef.Record(emptyMap()), registry.resolve(StandardSchemas.EMPTY))
         val error = registry.resolve(StandardSchemas.ERROR) as TypeDef.Record
         assertEquals(listOf("code", "message", "details"), error.fields.keys.toList())
         assertEquals(TypeExpr.Optional(TypeExpr.MapOf(TypeExpr.Ref(StandardSchemas.STRING))), error.fields.getValue("details"))
-        assertEquals(8, StandardSchemas.document.types.size)
+        assertEquals(9, StandardSchemas.document.types.size)
         assertEquals("cringle.std/String", StandardSchemas.STRING.toString())
         assertEquals(emptyList<SchemaProblem>(), registry.problems())
     }
@@ -51,6 +52,17 @@ class StandardSchemasTest {
         // structurally identical, but different namespace IDs
         assertFalse(isAssignable(a, b, registry))
         assertFalse(isAssignable(StandardSchemas.INT, StandardSchemas.DOUBLE, registry))
+    }
+
+    @Test
+    fun everyTypeIsAssignableToAnyButNotBack() {
+        val registry = SchemaRegistry()
+        registry.add(SchemaParser.parse("""{"namespace":"a","types":{"A":{"record":{"x":"cringle.std/Int"}},"E":{"enum":["X"]}}}""", "d"))
+        for (ref in listOf(StandardSchemas.STRING, StandardSchemas.INT, StandardSchemas.BYTES, StandardSchemas.EMPTY, StandardSchemas.ERROR, SchemaRef("a", "A"), SchemaRef("a", "E"), StandardSchemas.ANY)) {
+            assertTrue(isAssignable(ref, StandardSchemas.ANY, registry), "$ref to Any")
+        }
+        for (ref in listOf(StandardSchemas.STRING, StandardSchemas.INT, SchemaRef("a", "A"))) assertFalse(isAssignable(StandardSchemas.ANY, ref, registry), "Any to $ref")
+        assertFalse(isAssignable(SchemaRef("nope", "Ghost"), StandardSchemas.ANY, registry), "a type that does not resolve is not assignable to Any either")
     }
 
     @Test
