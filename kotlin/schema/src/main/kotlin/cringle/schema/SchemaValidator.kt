@@ -119,6 +119,7 @@ public class SchemaValidator(private val registry: SchemaRegistry) {
                     errors += ValidationError(path, "not valid base64 (standard alphabet, with padding)")
                 }
             }
+            PrimitiveKind.ANY -> validateAny(value, path, errors)
             PrimitiveKind.TIMESTAMP -> {
                 if (primitive == null || !primitive.isString) {
                     errors += kindError(path, "a timestamp string", value)
@@ -126,6 +127,17 @@ public class SchemaValidator(private val registry: SchemaRegistry) {
                     errors += ValidationError(path, "not a valid timestamp, expected YYYY-MM-DDThh:mm:ss.mmmZ (UTC, three fractional digits)")
                 }
             }
+        }
+    }
+
+    /** Any JSON value except `null`; numbers have to be finite. */
+    private fun validateAny(value: JsonElement, path: String, errors: MutableList<ValidationError>) {
+        when (value) {
+            is JsonNull -> errors += ValidationError(path, "null is not a valid value")
+            is JsonArray -> value.forEachIndexed { index, element -> validateAny(element, "$path[$index]", errors) }
+            is JsonObject -> for ((key, element) in value) validateAny(element, child(path, key), errors)
+            is JsonPrimitive ->
+                if (!value.isString && value.content != "true" && value.content != "false") validateDouble(value, value, path, errors)
         }
     }
 

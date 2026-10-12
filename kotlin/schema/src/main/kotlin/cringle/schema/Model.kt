@@ -42,6 +42,9 @@ public enum class PrimitiveKind {
 
     /** A point in time, written as `YYYY-MM-DDThh:mm:ss.mmmZ` (UTC, exactly three fractional digits). */
     TIMESTAMP,
+
+    /** Any JSON value except `null` (also nested): the type of generic blocks. */
+    ANY,
 }
 
 /** The definition of a named type. */

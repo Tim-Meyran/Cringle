@@ -125,4 +125,4 @@ public class SchemaRegistry {
  * without changing this signature.
  */
 public fun isAssignable(from: SchemaRef, to: SchemaRef, registry: SchemaRegistry): Boolean =
-    from == to && registry.resolve(from) != null
+    registry.resolve(from) != null && (from == to || to == StandardSchemas.ANY)

@@ -124,6 +124,34 @@ class PackageValidatorTest {
     }
 
     @Test
+    fun aTetherFromATypedPortToAnAnyPortIsValidButNotBack() {
+        val any = cringle.contract.SchemaRef("cringle.std", "Any")
+        val message = setOf(TetherType.MESSAGE)
+        val anySink = cringle.contract.BlockDefinition(
+            "any-sink", emptyList(),
+            listOf(
+                cringle.contract.PortDefinition("in", cringle.contract.PortDirection.IN, message, any),
+                cringle.contract.PortDefinition("out", cringle.contract.PortDirection.OUT, message, any),
+            ),
+            emptyList(),
+        )
+        val withAny = Fixtures.pluginPackage().let { it.copy(manifest = it.manifest.copy(blocks = it.manifest.blocks + anySink)) }
+        fun check(blueprint: Blueprint) = PackageValidator.validateProject(Fixtures.projectPackage(listOf(blueprint)), listOf(withAny))
+        val toAny = Fixtures.main.copy(
+            blocks = Fixtures.main.blocks + BlueprintBlock("any", "acme-orders/any-sink"),
+            tethers = listOf(Fixtures.main.tethers[0].copy(to = Endpoint("any", "in"))),
+        )
+        assertEquals(emptyList<PackageProblem>(), check(toAny))
+        // Any is assignable to Any only: a typed port takes no Any value without a conversion
+        val fromAny = Fixtures.main.copy(
+            blocks = Fixtures.main.blocks + BlueprintBlock("any", "acme-orders/any-sink"),
+            tethers = listOf(Fixtures.main.tethers[0].copy(from = Endpoint("any", "out"))),
+        )
+        val problem = check(fromAny).single()
+        assertTrue(problem.message.contains("cringle.std/Any") && problem.message.contains("not assignable"), problem.message)
+    }
+
+    @Test
     fun varArgRules() {
         val noCount = Fixtures.main.copy(
             blocks = Fixtures.main.blocks.map { if (it.id == "sink") it.copy(varArgCounts = emptyMap()) else it },
