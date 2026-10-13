@@ -80,6 +80,8 @@
     "ThrottleConfig": { "record": { "intervalMs": "cringle.std/Int" } },
     "BufferConfig": { "record": { "size": { "optional": "cringle.std/Int" } } },
     "PathConfig": { "record": { "path": "cringle.std/String" } },
+    "TextInputConfig": { "record": { "value": "cringle.std/String" } },
+    "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }

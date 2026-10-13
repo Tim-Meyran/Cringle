@@ -100,6 +100,7 @@ internal val FLOW_ENTRIES: List<Entry> = listOf(
             inPort("trigger", ANY),
             cringle.contract.PortDefinition("in", cringle.contract.PortDirection.IN, setOf(cringle.contract.TetherType.MESSAGE), ANY, varArg = true),
             cringle.contract.PortDefinition("out", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.MESSAGE), ANY, varArg = true),
+            cringle.contract.PortDefinition("request", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.REQUEST_RESPONSE), ANY, varArg = true),
             outPort("done", INT),
         ),
     ) { Trigger() },
