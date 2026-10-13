@@ -87,6 +87,39 @@ class TriggerBlockTest {
     }
 
     @Test
+    fun theTypedTriggersHaveTypedSlotPortsAndBehaveLikeTheGenericOne() = runTest {
+        val variants = mapOf(
+            "flow.trigger-string" to Triple(STRING, "text", "pulled"),
+            "flow.trigger-number" to Triple(DOUBLE, 2.5, 3.5),
+            "flow.trigger-int" to Triple(INT, 7L, 8L),
+            "flow.trigger-boolean" to Triple(BOOLEAN, true, false),
+        )
+        val neutral = mapOf("flow.trigger-string" to "", "flow.trigger-number" to 0.0, "flow.trigger-int" to 0L, "flow.trigger-boolean" to false)
+        for ((name, sample) in variants) {
+            val (type, held, pulled) = sample
+            val definition = StdBlockProvider().definitions.single { it.name == name }
+            for (port in listOf("in", "out", "request")) assertEquals(type, definition.ports.single { it.name == port }.schema, "$name $port")
+            assertEquals(ANY, definition.ports.single { it.name == "trigger" }.schema, "$name trigger")
+            assertEquals(INT, definition.ports.single { it.name == "done" }.schema, "$name done")
+            assertEquals(setOf(cringle.contract.TetherType.REQUEST_RESPONSE), definition.ports.single { it.name == "request" }.tetherTypes)
+
+            val h = BlockTestHarness.forProvider(StdBlockProvider(), name, TestDriverSet(), emptyMap(), mapOf("in" to 2, "request" to 2, "out" to 2))
+            h.runLifecycle {
+                val request = ports.slots("request")
+                request[0].requestHandler = notConnected
+                request[1].requestHandler = { pulled }
+                sendMessage("in", held, 0)
+                sendMessage("trigger", 1L)
+                assertEquals(listOf<Any>(held), ports.slots("out")[0].sentMessages, "$name: the held value")
+                assertEquals(listOf<Any>(pulled), ports.slots("out")[1].sentMessages, "$name: the pulled value")
+                assertEquals(listOf<Any>(1L), ports.tether("done").sentMessages)
+                // the request is of the type of the port: a neutral value, not the trigger signal (an Int that a text port would refuse)
+                assertEquals(listOf<Any>(neutral.getValue(name)), request[1].requests, name)
+            }
+        }
+    }
+
+    @Test
     fun aTriggerWithoutValuesStillSignalsDone() = runTest {
         val h = harness(1)
         h.runLifecycle {

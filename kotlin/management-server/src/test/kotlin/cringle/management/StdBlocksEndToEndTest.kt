@@ -296,6 +296,33 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("wrote: stored", "dwh: [{\"key\":\"greeting\",\"value\":\"stored\",\"timestamp\":\"", "\"tags\":{\"room\":\"a1\"}}]")
     }
 
+    @Test
+    fun aTypedTriggerFeedsTypedBlocks() {
+        // flow.trigger-string pulls a text input; its typed output goes straight into text.upper (a String port) and on into the log: with the generic trigger this
+        // connection is refused ("Any is not assignable to String")
+        fun pull(from: String, to: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(from, "request", 0), Endpoint(to, "get"))
+        deployStd(
+            "std-typed",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "ada")),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger-string", varArgCounts = mapOf("in" to 1, "request" to 1, "out" to 1)),
+                    block("up", "text.upper"),
+                    block("l", "flow.log", config("prefix" to "typed: ")),
+                ),
+                listOf(
+                    pull("trig", "name"),
+                    tether("t", "tick", "trig", "trigger"),
+                    TetherDef(TetherType.MESSAGE, Endpoint("trig", "out", 0), Endpoint("up", "in")),
+                    tether("up", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("typed: ADA")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
