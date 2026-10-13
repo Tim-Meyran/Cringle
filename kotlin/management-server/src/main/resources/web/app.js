@@ -258,9 +258,37 @@ document.addEventListener('htmx:responseError', function (event) {
   }
   // the server decides whether a connection is allowed
   var rebuilding = false;
+  // generics: a port of a type parameter that is not bound yet takes the type of the port it is connected to (an unbound `T` is `Any`, that connects to nothing typed)
+  function genericPort(data, kind, className) {
+    var slot = slots(data.block, kind, data.varArgCounts)[parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10) - 1];
+    if (!slot) return null;
+    var def = ((byBlock[data.block] || {})[kind] || []).filter(function (p) { return p.name === slot.port; })[0];
+    return { name: slot.port, parameter: def && def.typeParam };
+  }
+  function inferTypes(c, from, to) {
+    var done = [];
+    if (isExternal(from) || isExternal(to)) return done;
+    var out = genericPort(from, 'outputs', c.output_class), inn = genericPort(to, 'inputs', c.input_class);
+    var outType = portTypes(from.block, 'outputs', from.types)[out && out.name], inType = portTypes(to.block, 'inputs', to.types)[inn && inn.name];
+    var bind = function (id, data, port, type) {
+      if (!port || !port.parameter || (data.types || {})[port.parameter] || !type || type === 'cringle.std/Any') return;
+      data.types = Object.assign({}, data.types);
+      data.types[port.parameter] = type;
+      editor.updateNodeDataFromId(id, data);
+      labelNode(id);
+      done.push({ id: id, data: data, parameter: port.parameter });
+    };
+    bind(c.output_id, from, out, inType);
+    bind(c.input_id, to, inn, outType);
+    return done;
+  }
+  function undoInferred(done) {
+    done.forEach(function (d) { delete d.data.types[d.parameter]; editor.updateNodeDataFromId(d.id, d.data); labelNode(d.id); });
+  }
   editor.on('connectionCreated', function (c) {
     if (rebuilding) return;
     var from = blockData(c.output_id), to = blockData(c.input_id);
+    var inferred = inferTypes(c, from, to);
     var body = new URLSearchParams({
       fromExternal: isExternal(from) ? from.type : undefined, toExternal: isExternal(to) ? to.type : undefined,
       fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
@@ -273,9 +301,10 @@ document.addEventListener('htmx:responseError', function (event) {
       .then(function (r) { return r.json(); })
       .then(function (verdict) {
         if (verdict.ok) {
-          say('Connected as a ' + verdict.type + ' tether.', false);
+          say('Connected as a ' + verdict.type + ' tether.' + (inferred.length ? ' Type ' + inferred.map(function (d) { return d.parameter + ' = ' + typeName(d.data.types[d.parameter]); }).join(', ') + '.' : ''), false);
           window.cringleEditorSnapshot();
         } else {
+          undoInferred(inferred);
           rejecting = true;
           editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
           rejecting = false;
@@ -284,6 +313,7 @@ document.addEventListener('htmx:responseError', function (event) {
         }
       })
       .catch(function () {
+        undoInferred(inferred);
         rejecting = true;
         editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
         rejecting = false;
