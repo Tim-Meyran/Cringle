@@ -214,7 +214,7 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                     block("t2", "time.timer-trigger", config("intervalMs" to 10, "initialDelayMs" to 1500, "count" to 1)),
                     block("c1", "flow.constant", config("value" to "x")),
                     block("c2", "flow.constant", config("value" to "y")),
-                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "out" to 2)),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "request" to 2, "out" to 2)),
                     block("next", "flow.constant", config("value" to "after")),
                     block("l1", "flow.log-any", config("prefix" to "a: ")),
                     block("l2", "flow.log-any", config("prefix" to "b: ")),
@@ -234,6 +234,39 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
             ),
         )
         awaitLog("a: \"x\"", "b: \"y\"", "next: \"after\"")
+    }
+
+    @Test
+    fun aTriggerPullsTheValuesOfInputBlocks() {
+        // the trigger asks a text input and a number input for their values; the answers leave on the matching outputs, `done` starts the next step
+        fun indexed(from: String, port: String, fromIndex: Int?, to: String, input: String, toIndex: Int?) =
+            TetherDef(if (port == "request" || input == "get") TetherType.REQUEST_RESPONSE else TetherType.MESSAGE, Endpoint(from, port, fromIndex), Endpoint(to, input, toIndex))
+        deployStd(
+            "std-pull",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "Ada")),
+                    block("age", "input.number", config("value" to 36)),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "request" to 2, "out" to 2)),
+                    block("l1", "flow.log-any", config("prefix" to "name: ")),
+                    block("l2", "flow.log-any", config("prefix" to "age: ")),
+                    block("next", "flow.constant", config("value" to "go on")),
+                    block("l3", "flow.log-any", config("prefix" to "next: ")),
+                ),
+                listOf(
+                    indexed("trig", "request", 0, "name", "get", null),
+                    indexed("trig", "request", 1, "age", "get", null),
+                    tether("t", "tick", "trig", "trigger"),
+                    indexed("trig", "out", 0, "l1", "in", null),
+                    indexed("trig", "out", 1, "l2", "in", null),
+                    tether("trig", "done", "next", "trigger"),
+                    tether("next", "out", "l3", "in"),
+                ),
+            ),
+        )
+        awaitLog("name: \"Ada\"", "age: 36", "next: \"go on\"")
     }
 
     private suspend fun publishProject(file: Path) {

@@ -3,6 +3,8 @@
 package cringle.stdblocks
 
 import cringle.testkit.BlockTestHarness
+import cringle.testkit.InMemoryTether
+import cringle.testkit.TestBlockPorts
 import cringle.testkit.TestDriverSet
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -10,16 +12,20 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 class TriggerBlockTest {
-    private fun cringle.testkit.TestBlockPorts.outs(name: String) = varArgPort(name).map { it as cringle.testkit.InMemoryTether }
+    private fun TestBlockPorts.slots(name: String) = varArgPort(name).map { it as InMemoryTether }
 
-    private fun harness(inputs: Int, outputs: Int): BlockTestHarness =
-        BlockTestHarness.forProvider(StdBlockProvider(), "flow.trigger", TestDriverSet(), emptyMap(), mapOf("in" to inputs, "out" to outputs))
+    private fun harness(inputs: Int, requests: Int = inputs, outputs: Int = inputs): BlockTestHarness =
+        BlockTestHarness.forProvider(StdBlockProvider(), "flow.trigger", TestDriverSet(), emptyMap(), mapOf("in" to inputs, "request" to requests, "out" to outputs))
+
+    /** What the engine says for a request port that no tether is connected to. */
+    private val notConnected: suspend (Any) -> Any = { throw IllegalStateException("port 'request[0]' of block 'trig' is not connected in the blueprint") }
 
     @Test
     fun theTriggerReleasesTheHeldValuesOnTheMatchingOutputsAndSignalsDone() = runTest {
-        val h = harness(3, 3)
+        val h = harness(3)
         h.runLifecycle {
-            val out = ports.outs("out")
+            val out = ports.slots("out")
+            ports.slots("request").forEach { it.requestHandler = notConnected }
             // nothing is sent before a trigger, whatever arrives at the inputs
             sendMessage("in", "a", 0)
             sendMessage("in", 2L, 2)
@@ -41,18 +47,60 @@ class TriggerBlockTest {
     }
 
     @Test
-    fun aTriggerWithoutInputsStillSignalsDone() = runTest {
-        val h = harness(1, 1)
+    fun theTriggerPullsTheValuesOfConnectedRequestPortsAndHoldsTheRest() = runTest {
+        val h = harness(3)
         h.runLifecycle {
+            val request = ports.slots("request")
+            val out = ports.slots("out")
+            request[0].requestHandler = { "pulled text" }
+            request[1].requestHandler = notConnected
+            request[2].requestHandler = { 4.5 }
+            sendMessage("in", "held", 1)
+            sendMessage("in", "ignored, the pull wins", 0)
+            sendMessage("trigger", 7L)
+            assertEquals(listOf<Any>(7L), request[0].requests, "the trigger value is the request")
+            assertEquals(listOf<Any>("pulled text"), out[0].sentMessages)
+            assertEquals(listOf<Any>("held"), out[1].sentMessages, "a slot without a request tether sends its held value")
+            assertEquals(listOf<Any>(4.5), out[2].sentMessages)
+            // a pull asks again every time
+            request[0].requestHandler = { "second" }
+            sendMessage("trigger", 8L)
+            assertEquals(listOf<Any>("pulled text", "second"), out[0].sentMessages)
+            assertEquals(listOf<Any>(1L, 2L), ports.tether("done").sentMessages)
+            assertEquals(1, request[1].requests.size, "a request port that is not connected is asked once and then left alone")
+        }
+    }
+
+    @Test
+    fun aPullThatFailsDoesNotStopTheOtherSlotsOrDone() = runTest {
+        val h = harness(2)
+        h.init()
+        h.start()
+        val request = h.ports.slots("request")
+        val out = h.ports.slots("out")
+        request[0].requestHandler = { throw IllegalStateException("the input block does not answer") }
+        request[1].requestHandler = { "fine" }
+        val e = assertThrows<IllegalStateException> { h.sendMessage("trigger", 1L) }
+        assertEquals("the input block does not answer", e.message)
+        assertEquals(listOf<Any>("fine"), out[1].sentMessages)
+        assertEquals(listOf<Any>(1L), h.ports.tether("done").sentMessages)
+    }
+
+    @Test
+    fun aTriggerWithoutValuesStillSignalsDone() = runTest {
+        val h = harness(1)
+        h.runLifecycle {
+            ports.slots("request").single().requestHandler = notConnected
             sendMessage("trigger", 1L)
-            assertEquals(emptyList<Any>(), ports.outs("out").single().sentMessages)
+            assertEquals(emptyList<Any>(), ports.slots("out").single().sentMessages)
             assertEquals(listOf<Any>(1L), ports.tether("done").sentMessages)
         }
     }
 
     @Test
-    fun theTriggerRefusesDifferentNumbersOfInputsAndOutputs() = runTest {
-        val e = assertThrows<IllegalArgumentException> { harness(2, 3).init() }
-        assertEquals("the block has 2 inputs 'in' but 3 outputs 'out': the numbers have to be equal", e.message)
+    fun theTriggerRefusesDifferentNumbersOfInputsRequestsAndOutputs() = runTest {
+        val e = assertThrows<IllegalArgumentException> { harness(2, 2, 3).init() }
+        assertEquals("the block has 2 inputs 'in', 2 requests 'request' and 3 outputs 'out': the numbers have to be equal", e.message)
+        assertThrows<IllegalArgumentException> { harness(2, 1, 2).init() }
     }
 }
