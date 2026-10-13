@@ -48,6 +48,16 @@ Two rules apply to all blocks with more than one input or output:
 | `logic.if-any`, `logic.filter-any` | as `logic.if`, `logic.filter` | – | For values of any type. |
 | `data.as-string`, `-number`, `-int`, `-boolean` | IN `in` (`Any`), OUT `out` (typed), `error` | – | The value as that type, or the reason on `error` when it is of another kind (`as-int` takes whole numbers only). |
 
+### Log and data warehouse: `log.*`, `dwh.*`
+
+| Block | Ports | Configuration | What it does |
+|---|---|---|---|
+| `log.write` | IN `in` (`Any`), OUT `out` (`Any`) | `level` (`DEBUG`, `INFO` default, `WARN`, `ERROR`), `prefix`, `template` (`{}` takes the value) | Writes the value to the log of the fabric (`cringle logs`) with the **configured level**: a text as it is, any other value as JSON. The value goes on unchanged on `out`, so a log step can sit in the middle of a flow. `flow.log` and `flow.log-any` stay for the flows that exist. |
+| `dwh.write` | IN `in` (`Any`), OUT `out` (`Any`) | `key`, `tags` (optional, texts) | Writes the value as an entry of the own partition of the block in the data warehouse of the engine (`docs/observability.md`) and sends it on. What it stores is read through the CLI and the WebUI (`cringle dwh query`). |
+| `dwh.store` | IN `in`, `read` (`Any`), OUT `out`, `entries` (`Any`), `error` (`String`) | `key`, `tags`, `limit` (default 100), `lastMs` | Writes like `dwh.write` and **reads back**: every message at `read` sends the entries as a list on `entries`, oldest first (objects `{key, value, timestamp, tags}`; `lastMs` keeps the last n milliseconds); `error` says so when the driver cannot read. |
+
+**A block reads its own partition only** (the driver gives no access to the partition of another block), so reading and writing have to be in the same block: that is why there is one block `dwh.store` and no separate read block.
+
 ### JSON and Base64: `data.*`
 
 A JSON document is a value of the type `Any`: texts, numbers (a whole number that fits is an `Int`, every other one a `Double`), booleans, lists and objects; `null` is not a value. A **path** is written `user.name`, `items[0].id`, `[0][1]` or with a `$` in front (`$.a.b`).

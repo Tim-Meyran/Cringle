@@ -113,6 +113,14 @@ class BlocksTest {
     fun everyDefinitionHasABlockAndAValidSchemaReference() {
         val provider = StdBlockProvider()
         val drivers = TestDriverSet().add(LoggingDriver::class, RecordingLog())
+            .add(
+            cringle.contract.DwhDriver::class,
+            object : cringle.contract.DwhDriver {
+                override val type: DriverType get() = BuiltinDriverTypes.DWH
+
+                override suspend fun write(entry: cringle.contract.DwhEntry) {}
+            },
+        )
             .add(cringle.contract.FilesystemDriver::class, cringle.engine.drivers.FilesystemSandbox(java.nio.file.Files.createTempDirectory("std-blocks-test")))
         for (definition in provider.definitions) provider.createBlock(definition.name, drivers)
         assertThrows<IllegalArgumentException> { provider.createBlock("nothing", drivers) }
