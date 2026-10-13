@@ -15,9 +15,14 @@ import kotlinx.coroutines.CancellationException
  * (nothing, if there is none). After the values it sends a new trigger signal on `done`: the number of triggers so far (an `Int`, like the tick of a
  * timer), so that the next step of a flow can be started by it. The numbers of `in`, `request` and `out` have to be equal.
  *
+ * An output (`out[i]`, `done`) that nothing is connected to is skipped, not an error.
+ *
+ * The request carries the trigger value; a request and its answer are checked against the type of the port, so a typed variant sends a neutral value of its type
+ * (`requestPayload`: an empty text, 0, `false`), which the input blocks ignore.
+ *
  * A slot that cannot be pulled (the answer fails or times out) does not stop the others; the first failure is thrown after all slots and `done`.
  */
-internal class Trigger : Block {
+internal class Trigger(private val requestPayload: (Any) -> Any = { it }) : Block {
     private lateinit var requests: List<Tether>
     private lateinit var outputs: List<Tether>
     private lateinit var done: Tether
@@ -45,16 +50,25 @@ internal class Trigger : Block {
                 var failure: Exception? = null
                 for (i in held.indices) {
                     try {
-                        (pull(i, event.value) ?: held[i])?.let { outputs[i].send(it) }
+                        (pull(i, event.value) ?: held[i])?.let { sendIfConnected(outputs[i], it) }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         if (failure == null) failure = e else failure.addSuppressed(e)
                     }
                 }
-                done.send(++count)
+                sendIfConnected(done, ++count)
                 failure?.let { throw it }
             }
+        }
+    }
+
+    /** An output that no tether is connected to is not an error here: `done` and the slots are optional parts of a flow. */
+    private suspend fun sendIfConnected(tether: Tether, value: Any) {
+        try {
+            tether.send(value)
+        } catch (e: IllegalStateException) {
+            if (e.message?.contains("is not connected") != true) throw e
         }
     }
 
@@ -62,7 +76,7 @@ internal class Trigger : Block {
     private suspend fun pull(i: Int, trigger: Any): Any? {
         if (notPullable[i]) return null
         return try {
-            requests[i].request(trigger)
+            requests[i].request(requestPayload(trigger))
         } catch (e: IllegalStateException) {
             if (e.message?.contains("is not connected") != true) throw e
             notPullable[i] = true
