@@ -201,6 +201,12 @@ document.addEventListener('htmx:responseError', function (event) {
   });
 
   var rejecting = false;
+  // the blocks of a refused connection are marked for a few seconds
+  function flashNodes(numbers) {
+    var els = numbers.map(function (n) { return document.getElementById('node-' + n); }).filter(Boolean);
+    els.forEach(function (el) { el.classList.add('node-error'); });
+    setTimeout(function () { els.forEach(function (el) { el.classList.remove('node-error'); }); }, 4000);
+  }
   // the server decides whether a connection is allowed
   var rebuilding = false;
   editor.on('connectionCreated', function (c) {
@@ -224,6 +230,7 @@ document.addEventListener('htmx:responseError', function (event) {
           editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
           rejecting = false;
           say('Not connected: ' + verdict.message, true);
+          flashNodes([c.output_id, c.input_id]);
         }
       })
       .catch(function () {
@@ -504,10 +511,63 @@ document.addEventListener('htmx:responseError', function (event) {
     saving = true;
     var state = stateKey();
     return htmx.ajax('POST', host.dataset.saveUrl, { source: host, target: '#result', swap: 'morph:innerHTML', values: values() })
-      .then(function () { lastSaved = state; })
+      .then(function () { lastSaved = state; markProblems(); })
       .finally(function () { saving = false; });
   }
   if (save) save.addEventListener('click', saveNow);
+
+  // blocks with a problem: marked with the class node-error; a click on a problem selects the block and shows it in the middle of the canvas
+  function nodeNumber(blockId) {
+    var nodes = editor.export().drawflow.Home.data;
+    var keys = Object.keys(nodes);
+    for (var i = 0; i < keys.length; i++) if (nodes[keys[i]].data.id === blockId) return keys[i];
+    return null;
+  }
+  function clearErrors() {
+    document.querySelectorAll('#drawflow .node-error').forEach(function (el) { el.classList.remove('node-error'); });
+  }
+  function markErrors(blockIds) {
+    blockIds.forEach(function (blockId) {
+      var number = nodeNumber(blockId);
+      var el = number && document.getElementById('node-' + number);
+      if (el) el.classList.add('node-error');
+    });
+  }
+  function markProblems() {
+    clearErrors();
+    var first = null;
+    document.querySelectorAll('#problems button.problem').forEach(function (b) {
+      var ids = b.dataset.blocks.split(',');
+      markErrors(ids);
+      if (first === null) first = ids[0];
+    });
+    if (first !== null) focusBlock(first, false);
+  }
+  function focusBlock(blockId, select) {
+    var number = nodeNumber(blockId);
+    if (!number) return;
+    var node = editor.getNodeFromId(number);
+    var zoom = editor.zoom || 1;
+    editor.canvas_x = editor.container.clientWidth / 2 - (node.pos_x + 100) * zoom;
+    editor.canvas_y = editor.container.clientHeight / 2 - (node.pos_y + 40) * zoom;
+    editor.precanvas.style.transform = 'translate(' + editor.canvas_x + 'px, ' + editor.canvas_y + 'px) scale(' + zoom + ')';
+    if (select) {
+      document.querySelectorAll('#drawflow .drawflow-node.selected').forEach(function (el) { el.classList.remove('selected'); });
+      var el = document.getElementById('node-' + number);
+      if (el) el.classList.add('selected');
+      editor.dispatch('nodeSelected', number);
+    }
+  }
+  var resultBox = document.getElementById('result');
+  if (resultBox) {
+    resultBox.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('button.problem');
+      if (!button) return;
+      var ids = button.dataset.blocks.split(',');
+      markErrors(ids);
+      focusBlock(ids[0], true);
+    });
+  }
 
   // autosave 2 s after the last change, only when something differs from what was saved
   var autosave = document.getElementById('autosave');

@@ -65,6 +65,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             var saved: Draft? = null
             var problems: List<PackageProblem> = emptyList()
             var blocks = 0
+            var checked: Blueprint? = null
             val error = attempt {
                 val name = req.params.getValue("name")
                 val snapshot = catalog.snapshot()
@@ -78,12 +79,13 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, e.message ?: "invalid graph")
                 }
                 blocks = blueprint.blocks.size
+                checked = blueprint
                 problems = PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/$name.json")
                 val fabrics = req.form["fabrics"]?.let { parseFabrics(it) } ?: req.form["roles"]?.let { listOf(FabricLine(1, roles(it), emptyMap())) } ?: previous?.let { fabricsOf(it) } ?: listOf(FabricLine(1, emptyList(), emptyMap()))
                 val schemas = req.form["schemas"]?.let { names(it) } ?: previous?.let { schemasOf(it) }.orEmpty()
                 saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas), req.form["revision"]?.toLongOrNull())
             }
-            fragment(result(error, saved, problems, blocks))
+            fragment(result(error, saved, problems, blocks, checked))
         }
     }
 
@@ -380,10 +382,25 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         )
     }
 
-    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>, blocks: Int): Html = html(
+    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>, blocks: Int, blueprint: Blueprint?): Html = html(
         notice(error),
         if (saved != null) html(info("Saved as revision ${saved.revision}."), h("<input type=\"hidden\" id=\"revision\" value=\"{}\" hx-swap-oob=\"true\">", saved.revision)) else Html(""),
         if (error == null && problems.isEmpty()) info(if (blocks == 0) "The blueprint has no block yet; add one to be able to publish it." else "The blueprint is valid.") else Html(""),
-        if (problems.isNotEmpty()) html(raw("<p class=\"error\">The blueprint has problems:</p><ul>"), problems.map { h("<li><code>{}</code> {}</li>", it.path, it.message) }, raw("</ul>")) else Html(""),
+        if (problems.isNotEmpty()) {
+            val described = if (blueprint != null) BlueprintProblems.describe(problems, blueprint) else problems.map { DescribedProblem(it.message, emptyList(), it.path) }
+            html(
+                raw("<p class=\"error\">The blueprint has problems (click one to go to the block):</p><ul id=\"problems\">"),
+                described.map {
+                    if (it.blocks.isEmpty()) {
+                        h("<li><code>{}</code> {}</li>", it.path, it.text)
+                    } else {
+                        h("<li><button type=\"button\" class=\"problem\" data-blocks=\"{}\">{}</button></li>", it.blocks.joinToString(","), it.text)
+                    }
+                },
+                raw("</ul>"),
+            )
+        } else {
+            raw("<span id=\"problems-none\"></span>")
+        },
     )
 }
