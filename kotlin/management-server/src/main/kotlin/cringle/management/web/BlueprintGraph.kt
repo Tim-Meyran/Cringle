@@ -64,8 +64,7 @@ internal object BlueprintGraph {
 
     /** The content of a node: the block id, the block, and the names of its ports (Drawflow draws the ports as dots without labels). */
     fun nodeHtml(id: String, block: String, ins: List<Slot>, outs: List<Slot>): String =
-        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small><small class=\"ports\">in: " + esc(ins.joinToString(", ") { it.label }) +
-            " | out: " + esc(outs.joinToString(", ") { it.label }) + "</small>"
+        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small>"
 
     /** True for a tether to a port on another engine or to a service: one local end and an external end (`remote` or `service`). */
     fun external(t: TetherDef): Boolean = (t.remote != null || t.service != null) && (t.from != null) != (t.to != null)

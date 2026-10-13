@@ -218,7 +218,13 @@ ul.errors { color: var(--danger); }
 #drawflow .drawflow-node .ports { color: var(--text-faint); }
 #drawflow .drawflow-node .input, #drawflow .drawflow-node .output { width: 14px; height: 14px; background: var(--surface-3); border: 2px solid var(--accent); }
 #drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
-#drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs { width: 0; }
+#drawflow .drawflow-node { align-items: flex-start; }
+#drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs { width: 0; margin-top: 46px; }
+#drawflow .drawflow-node .outputs { margin-left: auto; }
+#drawflow .drawflow-node .drawflow_content_node { position: absolute; top: var(--space-3); left: var(--space-3); right: var(--space-3); width: auto; }
+#drawflow .drawflow-node .port-label { position: absolute; top: 50%; transform: translateY(-50%); font-size: 11px; line-height: 1; color: var(--text-muted); white-space: nowrap; pointer-events: none; }
+#drawflow .drawflow-node .input .port-label { left: 20px; }
+#drawflow .drawflow-node .output .port-label { right: 20px; }
 #drawflow .connection .main-path { stroke: var(--text-faint); stroke-width: 2px; }
 #drawflow .connection .main-path:hover, #drawflow .connection .main-path.selected { stroke: var(--accent); }
 textarea.invalid { border-color: var(--danger); }

@@ -68,6 +68,7 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.start();
   var graph = JSON.parse(host.dataset.graph);
   if (Object.keys(graph.drawflow.Home.data).length > 0) editor.import(graph);
+  setTimeout(function () { labelAll(); }, 0);
   // the palette, the toolbar and the properties float above the canvas: start with the graph clear of the palette and the toolbar
   editor.canvas_x = 280;
   editor.canvas_y = 90;
@@ -108,10 +109,49 @@ document.addEventListener('htmx:responseError', function (event) {
     return counts;
   }
   function nodeHtml(data) {
-    var ins = slots(data.block, 'inputs', data.varArgCounts), outs = slots(data.block, 'outputs', data.varArgCounts);
-    var label = function (l) { return l.label; };
-    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small><small class="ports">in: ' + esc(ins.map(label).join(', ')) +
-      ' | out: ' + esc(outs.map(label).join(', ')) + '</small>';
+    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small>';
+  }
+  // every port of a node gets its label beside the dot (the tooltip adds the type); a node is as high as its ports need
+  function portTypes(blockType, kind) {
+    var types = {};
+    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { types[port.name] = port.schema; });
+    return types;
+  }
+  function labelPorts(list, ports, types) {
+    Array.prototype.forEach.call(ports, function (port, i) {
+      var old = port.querySelector('.port-label');
+      if (old) old.remove();
+      var slot = list[i];
+      var text = slot ? slot.label : 'port ' + (i + 1);
+      var span = document.createElement('span');
+      span.className = 'port-label';
+      span.textContent = text;
+      port.append(span);
+      var type = slot && types ? types[slot.port] : null;
+      port.title = type ? text + ' (' + type + ')' : text;
+    });
+  }
+  function labelNode(number) {
+    var el = document.getElementById('node-' + number);
+    if (!el) return;
+    var data = editor.getNodeFromId(number).data;
+    var ins, outs, inTypes = null, outTypes = null;
+    if (data.kind === 'external') {
+      var name = data.mode === 'service' ? 'service' : (data.send ? 'to remote' : 'from remote');
+      ins = data.send ? [{ label: name }] : [];
+      outs = data.send ? [] : [{ label: name }];
+    } else {
+      ins = slots(data.block, 'inputs', data.varArgCounts);
+      outs = slots(data.block, 'outputs', data.varArgCounts);
+      inTypes = portTypes(data.block, 'inputs');
+      outTypes = portTypes(data.block, 'outputs');
+    }
+    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes);
+    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes);
+    el.style.minHeight = (Math.max(ins.length, outs.length, 1) * 25 + 72) + 'px';
+  }
+  function labelAll() {
+    Object.keys(editor.export().drawflow.Home.data).forEach(labelNode);
   }
   function slotLabel(data, kind, className) {
     var n = parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10);
@@ -158,6 +198,7 @@ document.addEventListener('htmx:responseError', function (event) {
     if (hint) hint.hidden = Object.keys(editor.export().drawflow.Home.data).length > 0;
   }
   editor.on('nodeCreated', showHint);
+  editor.on('nodeCreated', function (number) { labelNode(number); });
   editor.on('nodeRemoved', showHint);
   showHint();
 
@@ -613,6 +654,7 @@ document.addEventListener('htmx:responseError', function (event) {
   function restore(state) {
     editor.clear();
     editor.import(JSON.parse(state));
+    labelAll();
     showHint();
     panel.replaceChildren();
     changed();
