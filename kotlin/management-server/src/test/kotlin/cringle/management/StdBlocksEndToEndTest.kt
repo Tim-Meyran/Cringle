@@ -269,6 +269,33 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("name: \"Ada\"", "age: 36", "next: \"go on\"")
     }
 
+    @Test
+    fun aValueIsWrittenToTheDwhAndReadBack() {
+        // the real data warehouse driver of the engine: a text is written with a key and tags, a second timer, later, reads the entries of the same block into the log
+        deployStd(
+            "std-dwh",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t1", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("t2", "time.timer-trigger", config("intervalMs" to 10, "initialDelayMs" to 1500, "count" to 1)),
+                    block("c", "flow.constant", config("value" to "stored")),
+                    block("w", "dwh.store", JsonObject(mapOf("key" to JsonPrimitive("greeting"), "tags" to JsonObject(mapOf("room" to JsonPrimitive("a1")))))),
+                    block("l1", "log.write", config("level" to "WARN", "prefix" to "wrote: ")),
+                    block("l2", "log.write", config("prefix" to "dwh: ")),
+                ),
+                listOf(
+                    tether("t1", "tick", "c", "trigger"),
+                    tether("c", "out", "w", "in"),
+                    tether("w", "out", "l1", "in"),
+                    tether("t2", "tick", "w", "read"),
+                    tether("w", "entries", "l2", "in"),
+                ),
+            ),
+        )
+        awaitLog("wrote: stored", "dwh: [{\"key\":\"greeting\",\"value\":\"stored\",\"timestamp\":\"", "\"tags\":{\"room\":\"a1\"}}]")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
