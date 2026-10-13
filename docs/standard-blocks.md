@@ -41,6 +41,7 @@ Two rules apply to all blocks with more than one input or output:
 | `flow.buffer` | IN `in`, `flush` (`Int`), OUT `batch` | `size` (optional, ≥ 1) | Collects values and sends them as one list when `flush` arrives or `size` is reached; an empty buffer sends nothing. |
 | `flow.merge` | IN `a`, `b`, OUT `out` | – | Every value of either input passes. |
 | `flow.throttle` | IN `in`, OUT `out`, `dropped` | `intervalMs` (≥ 1) | At most one value per interval on `out`, the others on `dropped`. |
+| `flow.trigger` | IN `trigger` (`Any`), VarArg IN `in` (`Any`), VarArg OUT `out` (`Any`), OUT `done` (`Int`) | – | A trigger releases the held values: for every message at `trigger` the latest value of `in[i]` goes out on `out[i]`, 1:1 (an input without a value sends nothing), and then `done` sends a new trigger signal (the number of triggers so far) that can start the next step of a flow. The numbers of `in` and `out` have to be equal (`varArgCounts` of the blueprint). A tether cannot be pulled, so the block holds what arrived. |
 | `flow.once` | IN `in`, `reset` (`Int`), OUT `out` | – | Only the first value passes; `reset` lets the next one pass. |
 | `flow.log-any` | IN `in` | `level`, `prefix` | Like `flow.log`, the value as JSON text. |
 | `logic.if-any`, `logic.filter-any` | as `logic.if`, `logic.filter` | – | For values of any type. |
