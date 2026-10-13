@@ -103,6 +103,22 @@ class WebBlueprintTest {
     }
 
     @Test
+    fun aSaveListsTheProblemsWithTheirBlocks() {
+        val bad = graph(
+            node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2")), config = """{"x": 1}"""),
+            node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))),
+        )
+        val saved = admin.post("/blueprints/flow-app/save", mapOf("graph" to bad, "options" to "{}", "version" to "1.0.0", "roles" to "a", "revision" to "1")).body()
+        assertTrue(saved.contains("Block reader (acme-flow/src), config: ") && saved.contains("takes no configuration"), saved)
+        assertTrue(saved.contains("class=\"problem\" data-blocks=\"reader\""), saved)
+        assertTrue(saved.contains("id=\"problems\""), saved)
+        // a blueprint without problems has no list that could mark blocks
+        val fine = graph(node(1, "reader", "acme-flow/src", outputs = mapOf("output_1" to listOf("2"))), node(2, "writer", "acme-flow/sink", inputs = mapOf("input_1" to listOf("1"))))
+        val ok = admin.post("/blueprints/flow-app/save", mapOf("graph" to fine, "options" to "{}", "version" to "1.0.0", "roles" to "a", "revision" to "2")).body()
+        assertTrue(ok.contains("The blueprint is valid") && !ok.contains("id=\"problems\""), ok)
+    }
+
+    @Test
     fun thePaletteIsGroupedByPluginAndTheme() {
         val page = admin.get("/blueprints/flow-app").body()
         assertTrue(page.contains("<section class=\"plugin\"><h3>acme-flow</h3>"), page)
