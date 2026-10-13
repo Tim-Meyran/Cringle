@@ -94,6 +94,15 @@ internal class Debounce(private val dispatcher: CoroutineDispatcher = Dispatcher
 }
 
 internal val FLOW_ENTRIES: List<Entry> = listOf(
+    entry(
+        "flow.trigger",
+        listOf(
+            inPort("trigger", ANY),
+            cringle.contract.PortDefinition("in", cringle.contract.PortDirection.IN, setOf(cringle.contract.TetherType.MESSAGE), ANY, varArg = true),
+            cringle.contract.PortDefinition("out", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.MESSAGE), ANY, varArg = true),
+            outPort("done", INT),
+        ),
+    ) { Trigger() },
     entry("flow.delay", listOf(inPort("in", ANY), outPort("out", ANY)), "DelayConfig") { Delay() },
     entry("flow.debounce", listOf(inPort("in", ANY), outPort("out", ANY)), "DebounceConfig") { Debounce() },
     handlerEntry("flow.buffer", listOf(inPort("in", ANY), inPort("flush", INT), outPort("batch", ANY)), "BufferConfig") { config ->

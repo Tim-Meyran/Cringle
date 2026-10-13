@@ -199,6 +199,43 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("b64: QWRh")
     }
 
+    @Test
+    fun aTriggerReleasesHeldValuesIntoTheLog() {
+        // two constants fill the inputs of the trigger block at the start; a second timer, later, triggers it: the values leave on the matching outputs and
+        // the new trigger signal `done` starts the next step of the flow
+        fun indexed(from: String, port: String, fromIndex: Int?, to: String, input: String, toIndex: Int?) =
+            TetherDef(TetherType.MESSAGE, Endpoint(from, port, fromIndex), Endpoint(to, input, toIndex))
+        deployStd(
+            "std-trigger",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t1", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("t2", "time.timer-trigger", config("intervalMs" to 10, "initialDelayMs" to 1500, "count" to 1)),
+                    block("c1", "flow.constant", config("value" to "x")),
+                    block("c2", "flow.constant", config("value" to "y")),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "out" to 2)),
+                    block("next", "flow.constant", config("value" to "after")),
+                    block("l1", "flow.log-any", config("prefix" to "a: ")),
+                    block("l2", "flow.log-any", config("prefix" to "b: ")),
+                    block("l3", "flow.log-any", config("prefix" to "next: ")),
+                ),
+                listOf(
+                    tether("t1", "tick", "c1", "trigger"),
+                    tether("t1", "tick", "c2", "trigger"),
+                    indexed("c1", "out", null, "trig", "in", 0),
+                    indexed("c2", "out", null, "trig", "in", 1),
+                    tether("t2", "tick", "trig", "trigger"),
+                    indexed("trig", "out", 0, "l1", "in", null),
+                    indexed("trig", "out", 1, "l2", "in", null),
+                    tether("trig", "done", "next", "trigger"),
+                    tether("next", "out", "l3", "in"),
+                ),
+            ),
+        )
+        awaitLog("a: \"x\"", "b: \"y\"", "next: \"after\"")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
