@@ -266,6 +266,7 @@ document.addEventListener('htmx:responseError', function (event) {
       fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
       toBlock: to.block, toInput: c.input_class.replace('input_', ''), toCounts: JSON.stringify(to.varArgCounts || {}),
       fromTypes: JSON.stringify(from.types || {}), toTypes: JSON.stringify(to.types || {}),
+      plugins: document.getElementById('plugins').value,
     });
     ['fromExternal', 'toExternal'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
     ['fromBlock', 'toBlock'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
@@ -573,7 +574,7 @@ document.addEventListener('htmx:responseError', function (event) {
   function values() {
     return {
       graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
-      provides: document.getElementById('provides').value, fabrics: document.getElementById('fabrics').value,
+      provides: document.getElementById('provides').value, fabrics: document.getElementById('fabrics').value, plugins: document.getElementById('plugins').value,
       schemas: Array.prototype.filter.call(document.querySelectorAll('.schema-pick'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(','),
       version: document.getElementById('version').value, revision: document.getElementById('revision').value,
     };
@@ -651,7 +652,12 @@ document.addEventListener('htmx:responseError', function (event) {
       if (stateKey() !== lastSaved) saveNow();
     }, 2000);
   }
-  ['version', 'fabrics', 'provides'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  ['version', 'fabrics', 'provides', 'plugins'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  // other versions of a plugin offer other blocks: the editor is read again with the saved ranges
+  document.getElementById('plugins').addEventListener('change', function () {
+    clearTimeout(autosaveTimer);
+    saveNow().then(function () { window.location.reload(); });
+  });
   document.querySelectorAll('.schema-pick').forEach(function (c) { c.addEventListener('change', changed); });
   editor.on('nodeDataChanged', function () { changed(); });
 

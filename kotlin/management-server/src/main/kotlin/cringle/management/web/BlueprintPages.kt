@@ -8,6 +8,7 @@ import cringle.management.ManagementException
 import cringle.packaging.Blueprint
 import cringle.packaging.BlueprintBlock
 import cringle.packaging.Endpoint
+import cringle.packaging.PackageNames
 import cringle.packaging.FabricConfig
 import cringle.packaging.ManifestJson
 import cringle.packaging.PackageProblem
@@ -68,8 +69,9 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             var checked: Blueprint? = null
             val error = attempt {
                 val name = req.params.getValue("name")
-                val snapshot = catalog.snapshot()
                 val previous = drafts.load("project", name)
+                val ranges = req.form["plugins"]?.let { parsePluginRanges(it) } ?: previous?.let { pluginRangesOf(it) }.orEmpty()
+                val snapshot = catalog.snapshot(ranges)
                 val before = previous?.let { blueprintOf(it) }
                 val kept = before?.tethers.orEmpty().filterNot { BlueprintGraph.drawable(it) } + (before?.let { BlueprintGraph.unresolved(it, snapshot::block) }.orEmpty())
                 val graph = parse(req.form["graph"]).jsonObject
@@ -83,19 +85,19 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 problems = PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/$name.json")
                 val fabrics = req.form["fabrics"]?.let { parseFabrics(it) } ?: req.form["roles"]?.let { listOf(FabricLine(1, roles(it), emptyMap())) } ?: previous?.let { fabricsOf(it) } ?: listOf(FabricLine(1, emptyList(), emptyMap()))
                 val schemas = req.form["schemas"]?.let { names(it) } ?: previous?.let { schemasOf(it) }.orEmpty()
-                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas), req.form["revision"]?.toLongOrNull())
+                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas, ranges), req.form["revision"]?.toLongOrNull())
             }
             fragment(result(error, saved, problems, blocks, checked))
         }
     }
 
     /** What a new project draft contains. */
-    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), listOf(FabricLine(1, emptyList(), emptyMap())), emptyList())
+    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), listOf(FabricLine(1, emptyList(), emptyMap())), emptyList(), emptyMap())
 
     /** One fabric of the project: [instances] copies of the blueprint on the engines that have all [roles] and [labels]. */
     private data class FabricLine(val instances: Int, val roles: List<String>, val labels: Map<String, String>)
 
-    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, fabrics: List<FabricLine>, schemas: List<String>): JsonElement = buildJsonObject {
+    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, fabrics: List<FabricLine>, schemas: List<String>, plugins: Map<String, String>): JsonElement = buildJsonObject {
         put("blueprint", Json.parseToJsonElement(ManifestJson.encode(blueprint)))
         put(
             "fabrics",
@@ -110,6 +112,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             ),
         )
         put("schemas", JsonArray(schemas.map { JsonPrimitive(it) }))
+        put("plugins", JsonObject(plugins.mapValues { JsonPrimitive(it.value) }))
         put("ui", buildJsonObject { put("positions", JsonObject(positions.mapValues { (_, p) -> JsonArray(listOf(JsonPrimitive(p.first), JsonPrimitive(p.second))) })) })
     }
 
@@ -134,6 +137,26 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return listOf(FabricLine(1, o["roles"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(), emptyMap()))
     }
+
+    /** `plugin = range`, one per line; an empty range or a line that is only a name is left out; a range that is not valid is refused. */
+    private fun parsePluginRanges(text: String): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        for (line in text.lines().map { it.trim() }.filter { it.isNotEmpty() }) {
+            val name = line.substringBefore('=').trim()
+            val range = line.substringAfter('=', "").trim()
+            if (range.isEmpty()) continue
+            PackageNames.nameProblem(name)?.let { throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "plugin '$name': $it") }
+            try {
+                cringle.packaging.VersionRange.parse(range)
+            } catch (e: IllegalArgumentException) {
+                throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the version range of '$name' is not valid: ${e.message}")
+            }
+            result[name] = range
+        }
+        return result
+    }
+
+    private fun pluginRangesOf(draft: Draft): Map<String, String> = draft.content.jsonObject["plugins"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content }.orEmpty()
 
     private fun schemasOf(draft: Draft): List<String> = draft.content.jsonObject["schemas"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
 
@@ -224,7 +247,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
     private suspend fun check(form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
         val snapshot = try {
-            catalog.snapshot()
+            catalog.snapshot(runCatching { parsePluginRanges(form["plugins"].orEmpty()) }.getOrDefault(emptyMap()))
         } catch (e: Exception) {
             return no(describe(e))
         }
@@ -261,9 +284,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
     suspend fun publish(draft: Draft): String {
         val blueprint = blueprintOf(draft) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the draft holds no blueprint")
         if (blueprint.blocks.isEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the blueprint has no block")
-        val snapshot = catalog.snapshot()
+        val ranges = pluginRangesOf(draft)
+        val snapshot = catalog.snapshot(ranges)
         val used = blueprint.blocks.map { it.block.substringBefore('/') }.distinct()
         val plugins = used.map { name -> snapshot.plugins.firstOrNull { it.manifest.name == name } ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the plugin '$name' is not in the repository") }
+        snapshot.unmatched.filter { it in used }.firstOrNull()?.let { throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "no version of the plugin '$it' satisfies ${ranges[it]}") }
         val schemas = LinkedHashMap<String, String>()
         for (schemaName in schemasOf(draft)) {
             val schemaDraft = drafts.load("schema", schemaName) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the schema draft '$schemaName' of this project does not exist")
@@ -277,7 +302,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             if (schemas.put("schemas/${document.namespace}.json", text) != null) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "two schema drafts have the namespace ${document.namespace}")
         }
         val manifest = ProjectManifest(
-            draft.name, draft.version, plugins.associate { it.manifest.name to "^${it.manifest.version}" },
+            draft.name, draft.version, plugins.associate { it.manifest.name to (ranges[it.manifest.name] ?: "^${it.manifest.version}") },
             listOf("blueprints/${blueprint.name}.json"), schemas.keys.toList(), fabricsOf(draft).map { FabricConfig(blueprint.name, it.instances, it.roles, it.labels) },
         )
         val project = ProjectPackage(manifest, listOf(blueprint), schemas, emptyList())
@@ -290,6 +315,20 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
 
     // --- the page ---
 
+    /** The plugins of the repository with the version that the editor uses and the versions there are. */
+    private fun pluginList(snapshot: PluginCatalog.Snapshot, ranges: Map<String, String>): Html = html(
+        raw("<ul class=\"plugin-versions\">"),
+        snapshot.plugins.map { p ->
+            val name = p.manifest.name
+            html(
+                h("<li><strong>{}</strong> uses {}; available: {}", name, p.manifest.version, snapshot.versions[name].orEmpty().joinToString(", ")),
+                if (name in snapshot.unmatched) h(" <span class=\"problem\">no version satisfies {}, the highest is used</span>", ranges[name]) else Html(""),
+                raw("</li>"),
+            )
+        },
+        raw("</ul>"),
+    )
+
     private fun portJson(p: cringle.contract.PortDefinition) = buildJsonObject {
         put("name", p.name)
         put("varArg", p.varArg)
@@ -298,8 +337,9 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
     }
 
     private suspend fun editor(session: Session, draft: Draft): Html {
+        val ranges = pluginRangesOf(draft)
         val snapshot = try {
-            catalog.snapshot()
+            catalog.snapshot(ranges)
         } catch (e: Exception) {
             return html(pageHeader("Blueprint ${draft.name}", "", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")), notice(describe(e)))
         }
@@ -386,6 +426,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             raw("<small>one fabric per line: instances | roles | labels (roles and labels are optional)</small></div></details>"),
             raw("<details id=\"schemas-box\"><summary>Schemas of the project</summary><div class=\"dropdown\">"),
             schemaBox,
+            raw("</div></details>"),
+            raw("<details id=\"plugins-box\"><summary>Plugins</summary><div class=\"dropdown\">"),
+            h("<textarea id=\"plugins\" rows=\"3\" cols=\"44\" placeholder=\"cringle-std = ~1.9.0\">{}</textarea>", ranges.entries.joinToString("\n") { "${it.key} = ${it.value}" }),
+            raw("<small>plugin = version range (<code>^1.9.0</code>, <code>~1.9.0</code>, <code>1.9.0</code>), one per line. A plugin without a line is used in its highest version.</small>"),
+            pluginList(snapshot, ranges),
             raw("</div></details>"),
             raw("<details id=\"services-box\"><summary>Provided services</summary><div class=\"dropdown\">"),
             h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),

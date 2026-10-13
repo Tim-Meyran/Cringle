@@ -1067,6 +1067,17 @@ public class ManagementCore(
         }
     }
 
+    /** Every plugin of the default repository with all its versions, the highest first. */
+    public suspend fun pluginVersions(): Map<String, List<String>> {
+        val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
+        return try {
+            repo.list(cringle.packaging.PackageKind.PLUGIN).groupBy { it.name }.toSortedMap()
+                .mapValues { (_, entries) -> entries.map { it.version }.sortedByDescending { cringle.packaging.Version.parse(it) } }
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "repository: ${e.message}")
+        }
+    }
+
     /** The plugins of the default repository, each with its highest version (the web editor offers their blocks). */
     public suspend fun latestPlugins(): List<Pair<String, String>> {
         val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))

@@ -35,6 +35,7 @@ class WebBlueprintTest {
 
     private val closeables = ArrayList<AutoCloseable>()
     private lateinit var core: cringle.management.ManagementCore
+    private lateinit var repo: PackageRepository
     private lateinit var admin: WebTestClient
     private lateinit var viewer: WebTestClient
 
@@ -54,7 +55,7 @@ class WebBlueprintTest {
             .block(BlockDefinition("configured", emptyList(), listOf(PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)), emptyList(), SchemaRef("acme.flow", "FlowConfig")))
             .schema("flow.json", """{"namespace":"acme.flow","types":{"FlowConfig":{"record":{"label":"cringle.std/String","limit":{"optional":"cringle.std/Int"}}}}}""")
             .build(Files.createDirectories(dir.resolve("plugins")))
-        val repo = PackageRepository(dir.resolve("repo"))
+        repo = PackageRepository(dir.resolve("repo"))
         repo.publish(plugin.file)
 
         val users = UserManager(FileUserStore(dir.resolve("users.json")))
@@ -221,6 +222,39 @@ class WebBlueprintTest {
         val f = Files.createTempFile(name, ".zip")
         Files.copy(PackageRepository(dir.resolve("repo")).file(name, version), f, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         return cringle.packaging.PackageReader.readProject(f)
+    }
+
+    @Test
+    fun theVersionsOfThePluginsAreSetInTheProject() {
+        val string = SchemaRef("cringle.std", "String")
+        fun block(name: String, port: PortDefinition) = BlockDefinition(name, emptyList(), listOf(port), emptyList())
+        val newer = TestPluginBuilder("acme-flow", "1.1.0").provider("com.acme.FlowProvider")
+            .block(block("src", PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE), string)))
+            .block(block("sink", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
+            .block(block("extra", PortDefinition("in", PortDirection.IN, setOf(TetherType.MESSAGE), string)))
+            .build(Files.createDirectories(dir.resolve("plugins2")))
+        repo.publish(newer.file)
+        val save = { range: String, revision: Int -> admin.post("/blueprints/flow-app/save", mapOf("graph" to connectedGraph(), "options" to "{}", "version" to "1.0.0", "plugins" to range, "revision" to "$revision")).body() }
+
+        // without a range the highest version is used, the box lists the versions
+        val page = admin.get("/blueprints/flow-app").body()
+        assertTrue(page.contains("acme-flow/extra") && page.contains("id=\"plugins-box\"") && page.contains("uses 1.1.0; available: 1.1.0, 1.0.0"), page)
+
+        // a range keeps an older version: its blocks only
+        assertTrue(save("acme-flow = ~1.0.0", 1).contains("Saved as revision 2"))
+        val old = admin.get("/blueprints/flow-app").body()
+        assertTrue(!old.contains("acme-flow/extra") && old.contains("acme-flow = ~1.0.0") && old.contains("uses 1.0.0; available"), old)
+
+        // the range is the dependency of the published project
+        assertTrue(admin.post("/drafts/project/flow-app/publish").body().contains("Published flow-app 1.0.0"))
+        assertEquals(mapOf("acme-flow" to "~1.0.0"), publishedProject("flow-app", "1.0.0").manifest.dependencies)
+
+        // a range that is not valid is refused; one that no version satisfies is shown and refuses the publish
+        assertTrue(save("acme-flow = banana", 2).contains("is not valid"))
+        assertTrue(save("acme-flow = ^2.0.0", 2).contains("Saved as revision 3"))
+        val none = admin.get("/blueprints/flow-app").body()
+        assertTrue(none.contains("no version satisfies ^2.0.0"), none)
+        assertTrue(admin.post("/drafts/project/flow-app/publish").body().contains("satisfies ^2.0.0"))
     }
 
     @Test
