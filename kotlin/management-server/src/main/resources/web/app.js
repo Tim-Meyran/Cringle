@@ -61,6 +61,7 @@ document.addEventListener('htmx:responseError', function (event) {
   if (!host || typeof Drawflow === 'undefined') return;
   var palette = JSON.parse(host.dataset.palette);
   var options = JSON.parse(host.dataset.options);
+  var schemaNames = JSON.parse(host.dataset.schemas || '[]');
   var byBlock = {};
   palette.forEach(function (p) { byBlock[p.block] = p; });
   var editor = new Drawflow(document.getElementById('drawflow'));
@@ -112,11 +113,13 @@ document.addEventListener('htmx:responseError', function (event) {
     return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small>';
   }
   // every port of a node gets its label beside the dot (the tooltip adds the type); a node is as high as its ports need
-  function portTypes(blockType, kind) {
+  // the type of every port of a block: a port of a type parameter has the type the blueprint bound (otherwise the bound of the parameter)
+  function portTypes(blockType, kind, bound) {
     var types = {};
-    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { types[port.name] = port.schema; });
+    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { types[port.name] = (port.typeParam && bound && bound[port.typeParam]) || port.schema; });
     return types;
   }
+  function typeName(type) { return type.substring(type.indexOf('/') + 1); }
   function labelPorts(list, ports, types) {
     Array.prototype.forEach.call(ports, function (port, i) {
       var old = port.querySelector('.port-label');
@@ -125,9 +128,9 @@ document.addEventListener('htmx:responseError', function (event) {
       var text = slot ? slot.label : 'port ' + (i + 1);
       var span = document.createElement('span');
       span.className = 'port-label';
-      span.textContent = text;
-      port.append(span);
       var type = slot && types ? types[slot.port] : null;
+      span.textContent = type ? text + ': ' + typeName(type) : text;
+      port.append(span);
       port.title = type ? text + ' (' + type + ')' : text;
     });
   }
@@ -143,12 +146,17 @@ document.addEventListener('htmx:responseError', function (event) {
     } else {
       ins = slots(data.block, 'inputs', data.varArgCounts);
       outs = slots(data.block, 'outputs', data.varArgCounts);
-      inTypes = portTypes(data.block, 'inputs');
-      outTypes = portTypes(data.block, 'outputs');
+      inTypes = portTypes(data.block, 'inputs', data.types);
+      outTypes = portTypes(data.block, 'outputs', data.types);
     }
     labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes);
     labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes);
     el.style.minHeight = (Math.max(ins.length, outs.length, 1) * 25 + 72) + 'px';
+    // the widest input label and the widest output label must fit side by side
+    var widest = function (selector) {
+      return Array.prototype.reduce.call(el.querySelectorAll(selector), function (w, span) { return Math.max(w, span.offsetWidth); }, 0);
+    };
+    el.style.minWidth = Math.max(200, widest('.input .port-label') + widest('.output .port-label') + 72) + 'px';
   }
   function labelAll() {
     Object.keys(editor.export().drawflow.Home.data).forEach(labelNode);
@@ -234,7 +242,7 @@ document.addEventListener('htmx:responseError', function (event) {
       var p = byBlock[button.dataset.block];
       if (!p) return;
       var id = uniqueId(p.title);
-      var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block) };
+      var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block), types: {} };
       var count = Object.keys(editor.export().drawflow.Home.data).length;
       editor.addNode(p.block, slots(p.block, 'inputs', data.varArgCounts).length, slots(p.block, 'outputs', data.varArgCounts).length,
         40 + 280 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, nodeHtml(data));
@@ -257,6 +265,7 @@ document.addEventListener('htmx:responseError', function (event) {
       fromExternal: isExternal(from) ? from.type : undefined, toExternal: isExternal(to) ? to.type : undefined,
       fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
       toBlock: to.block, toInput: c.input_class.replace('input_', ''), toCounts: JSON.stringify(to.varArgCounts || {}),
+      fromTypes: JSON.stringify(from.types || {}), toTypes: JSON.stringify(to.types || {}),
     });
     ['fromExternal', 'toExternal'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
     ['fromBlock', 'toBlock'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
@@ -426,6 +435,29 @@ document.addEventListener('htmx:responseError', function (event) {
         rebuildNode(id, data, oldCounts);
       });
       parts.push(field('Slots of ' + port, n));
+    });
+    // generics: one select per type parameter of the block
+    ((byBlock[data.block] || {}).typeParameters || []).forEach(function (parameter) {
+      var select = document.createElement('select');
+      var first = document.createElement('option');
+      first.value = '';
+      first.textContent = typeName(parameter.bound) + ' (bound)';
+      select.append(first);
+      schemaNames.forEach(function (name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        opt.selected = ((data.types || {})[parameter.name] || '') === name;
+        select.append(opt);
+      });
+      select.addEventListener('change', function () {
+        data.types = Object.assign({}, data.types);
+        if (select.value) data.types[parameter.name] = select.value; else delete data.types[parameter.name];
+        editor.updateNodeDataFromId(id, data);
+        labelNode(id);
+        changed();
+      });
+      parts.push(field('Type ' + parameter.name, select));
     });
     // a form for the fields of the configuration type of the block; the JSON below stays and shows the same
     var fields = (byBlock[data.block] || {}).configFields || [];

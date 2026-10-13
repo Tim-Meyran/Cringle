@@ -195,6 +195,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         emptyMap()
     }
 
+    private fun types(text: String?): Map<String, cringle.contract.SchemaRef> = try {
+        (Json.parseToJsonElement(text ?: "{}") as? JsonObject).orEmpty().mapNotNull { (k, v) -> (v as? JsonPrimitive)?.content?.let { s -> runCatching { cringle.contract.SchemaRef.parse(s) }.getOrNull()?.let { k to it } } }.toMap()
+    } catch (e: kotlinx.serialization.SerializationException) {
+        emptyMap()
+    }
+
     /** A connection between a local port and an external end (another engine, a service): the local port has to support the tether type of the end. */
     private fun checkExternal(snapshot: PluginCatalog.Snapshot, form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
@@ -238,7 +244,10 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         // the verdict of the same validator that the package build and the deploy use, for this one tether only
         val probe = Blueprint(
             "probe",
-            listOf(BlueprintBlock("a", fromType, varArgCounts = fromCounts), BlueprintBlock("b", toType, varArgCounts = toCounts)),
+            listOf(
+                BlueprintBlock("a", fromType, varArgCounts = fromCounts, types = types(form["fromTypes"])),
+                BlueprintBlock("b", toType, varArgCounts = toCounts, types = types(form["toTypes"])),
+            ),
             listOf(TetherDef(type, Endpoint("a", out.name, outSlot.index), Endpoint("b", input.name, inSlot.index))),
         )
         val problems = PackageValidator.validateBlueprint(probe, snapshot::block, snapshot.registry, "probe").filter { it.path.contains("$.tethers[") }
@@ -281,6 +290,13 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
 
     // --- the page ---
 
+    private fun portJson(p: cringle.contract.PortDefinition) = buildJsonObject {
+        put("name", p.name)
+        put("varArg", p.varArg)
+        put("schema", "${p.schema.namespace}/${p.schema.name}")
+        p.typeParam?.let { put("typeParam", it) }
+    }
+
     private suspend fun editor(session: Session, draft: Draft): Html {
         val snapshot = try {
             catalog.snapshot()
@@ -295,8 +311,9 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     add(
                         buildJsonObject {
                             put("block", "${plugin.manifest.name}/${b.name}")
-                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg); put("schema", "${it.schema.namespace}/${it.schema.name}") } }))
-                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg); put("schema", "${it.schema.namespace}/${it.schema.name}") } }))
+                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { portJson(it) }))
+                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { portJson(it) }))
+                            put("typeParameters", JsonArray(b.typeParameters.map { t -> buildJsonObject { put("name", t.name); put("bound", "${t.bound.namespace}/${t.bound.name}") } }))
                             put("title", b.name)
                             put("varArg", b.ports.any { it.varArg })
                             put("config", b.configSchema?.let { "${it.namespace}/${it.name}" }.orEmpty())
@@ -344,8 +361,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return html(
             h(
-                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
-                palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
+                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-schemas=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
+                palette.toString(), buildJsonArray { snapshot.registry.types().forEach { add(JsonPrimitive("${it.namespace}/${it.name}")) } }.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
             ),
             raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
             raw("<div id=\"editor-left\"><header id=\"editor-head\" class=\"float\">"),

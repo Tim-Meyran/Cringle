@@ -323,6 +323,35 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("typed: ADA")
     }
 
+    @Test
+    fun theGenericTriggerIsBoundToStringInTheBlueprint() {
+        // the same as with flow.trigger-string, but with the type parameter T of flow.trigger bound to String in the blueprint
+        fun pull(from: String, to: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(from, "request", 0), Endpoint(to, "get"))
+        deployStd(
+            "std-generic",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "ada")),
+                    BlueprintBlock(
+                        "trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 1, "request" to 1, "out" to 1),
+                        types = mapOf("T" to cringle.contract.SchemaRef("cringle.std", "String")),
+                    ),
+                    block("up", "text.upper"),
+                    block("l", "flow.log", config("prefix" to "generic: ")),
+                ),
+                listOf(
+                    pull("trig", "name"),
+                    tether("t", "tick", "trig", "trigger"),
+                    TetherDef(TetherType.MESSAGE, Endpoint("trig", "out", 0), Endpoint("up", "in")),
+                    tether("up", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("generic: ADA")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

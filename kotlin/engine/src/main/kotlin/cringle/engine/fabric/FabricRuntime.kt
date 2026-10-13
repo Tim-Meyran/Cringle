@@ -2,6 +2,8 @@
 
 package cringle.engine.fabric
 
+import cringle.contract.BlockDefinition
+import cringle.contract.GenericBlockProvider
 import cringle.contract.Block
 import cringle.contract.BlockContext
 import cringle.contract.BlockId
@@ -93,7 +95,7 @@ public class FabricSpec(
  * again; every start creates fresh block instances through their providers.
  */
 public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
-    private class Entry(val instance: BlueprintBlock, val resolved: ResolvedBlock, val config: Map<String, Any?>)
+    private class Entry(val instance: BlueprintBlock, val resolved: ResolvedBlock, val config: Map<String, Any?>, val definition: BlockDefinition)
 
     private companion object {
         /** How long stopping waits for the TCP listeners of the tethers, for all of them together. */
@@ -133,7 +135,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         entries = resolveEntries()
         network = spec.tethers?.let { config ->
             try {
-                TetherNetwork.create(spec.blueprint, entries.associate { it.instance.id to it.resolved.definition }, config) { info, e ->
+                TetherNetwork.create(spec.blueprint, entries.associate { it.instance.id to it.definition }, config) { info, e ->
                     log(FabricLogger.Level.WARN, "tether ${info.id}: ${e.message}")
                 }
             } catch (e: TetherWiringException) {
@@ -184,7 +186,13 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             if (schema != null && registry != null) {
                 for (e in SchemaValidator(registry).validate(b.config, schema)) problems += "block '${b.id}': config${e.path.removePrefix("$")}: ${e.message}"
             }
-            result += Entry(b, resolved, toKotlin(b.config) as Map<String, Any?>)
+            val definition = try {
+                resolved.definition.bind(b.types)
+            } catch (e: IllegalArgumentException) {
+                problems += "block '${b.id}': ${e.message}"
+                continue
+            }
+            result += Entry(b, resolved, toKotlin(b.config) as Map<String, Any?>, definition)
         }
         for (unknown in spec.restart.keys - ids) problems += "restart policy for unknown block '$unknown'"
         if (problems.isNotEmpty()) throw FabricException("fabric '${spec.id}' cannot be created:\n" + problems.joinToString("\n") { "  $it" })
@@ -411,7 +419,7 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
         val id: String = entry.instance.id
         private val blockId = BlockId(id)
         private val policy = spec.restart[id] ?: spec.defaultRestart
-        private val definition = entry.resolved.definition
+        private val definition = entry.definition
         private var block: Block? = null
         private var driverSet: DriverSet? = null
         private var restartJob: Job? = null
@@ -480,7 +488,8 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
             try {
                 val drivers = spec.drivers.driversFor(blockId, definition.requiredDrivers)
                 driverSet = drivers
-                val created = entry.resolved.provider.createBlock(definition.name, drivers)
+                val provider = entry.resolved.provider
+                val created = if (provider is GenericBlockProvider) provider.createBlock(definition.name, drivers, entry.instance.types) else provider.createBlock(definition.name, drivers)
                 block = created
                 call("init") { created.init(context) }
                 if (gen != generation) return teardown()

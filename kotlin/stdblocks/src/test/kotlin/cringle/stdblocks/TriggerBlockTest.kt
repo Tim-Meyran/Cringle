@@ -87,6 +87,16 @@ class TriggerBlockTest {
     }
 
     @Test
+    fun theGenericTriggerDeclaresTheTypeParameterT() {
+        val definition = StdBlockProvider().definitions.single { it.name == "flow.trigger" }
+        assertEquals(listOf(cringle.contract.TypeParameter("T")), definition.typeParameters)
+        for (port in listOf("in", "out", "request")) assertEquals("T", definition.ports.single { it.name == port }.typeParam, port)
+        val bound = definition.bind(mapOf("T" to STRING))
+        for (port in listOf("in", "out", "request")) assertEquals(STRING, bound.ports.single { it.name == port }.schema, port)
+        assertEquals(ANY, bound.ports.single { it.name == "trigger" }.schema)
+    }
+
+    @Test
     fun theTypedTriggersHaveTypedSlotPortsAndBehaveLikeTheGenericOne() = runTest {
         val variants = mapOf(
             "flow.trigger-string" to Triple(STRING, "text", "pulled"),

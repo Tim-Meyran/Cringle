@@ -5,6 +5,7 @@ package cringle.packaging
 import cringle.contract.BlockDefinition
 import cringle.contract.IsolationLevel
 import cringle.contract.Parity
+import cringle.contract.SchemaRef
 import cringle.contract.TetherType
 import cringle.packaging.JsonReading.enumValue
 import kotlinx.serialization.json.Json
@@ -96,7 +97,7 @@ public object ManifestJson {
         "no-errors" to setOf("type", "name"),
     )
     private val providesKeys = setOf("service", "block", "port", "type")
-    private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts")
+    private val blockKeys = setOf("id", "block", "config", "isolation", "varArgCounts", "types")
     private val tetherKeys = setOf("type", "from", "to", "delivery", "port", "bufferCapacity", "requestTimeout", "retry", "serial", "remote", "record")
     private val endpointKeys = setOf("block", "port", "index")
     private val remoteKeys = setOf("address", "fingerprint", "fabric", "block", "port", "index")
@@ -236,12 +237,23 @@ public object ManifestJson {
                     ?: throw PackageFormatException("$path.varArgCounts.$k", "must be a non-negative integer")
             }
         } ?: emptyMap()
+        val types = o["types"]?.let { t ->
+            JsonReading.obj(t, "$path.types").mapValues { (k, v) ->
+                val text = (v as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw PackageFormatException("$path.types.$k", "must be a schema name 'namespace/Name'")
+                try {
+                    SchemaRef.parse(text)
+                } catch (e: IllegalArgumentException) {
+                    throw PackageFormatException("$path.types.$k", e.message ?: "invalid schema name")
+                }
+            }
+        } ?: emptyMap()
         return BlueprintBlock(
             checkedIdentifier(JsonReading.string(o, "id", path), "$path.id"),
             JsonReading.string(o, "block", path),
             config,
             isolation,
             counts,
+            types,
         )
     }
 
@@ -408,6 +420,7 @@ public object ManifestJson {
                             put("config", x.config)
                             put("isolation", x.isolation.name)
                             put("varArgCounts", JsonObject(x.varArgCounts.mapValues { JsonPrimitive(it.value) }))
+                            if (x.types.isNotEmpty()) put("types", JsonObject(x.types.mapValues { JsonPrimitive(it.value.toString()) }))
                         }
                     },
                 ),

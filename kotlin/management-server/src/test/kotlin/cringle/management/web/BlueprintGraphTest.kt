@@ -122,6 +122,15 @@ class BlueprintGraphTest {
     }
 
     @Test
+    fun theBoundTypesOfTheNodeAreWrittenAndComeBack() {
+        val blueprint = Blueprint("app", listOf(BlueprintBlock("s", "p/sink", types = mapOf("T" to string))), emptyList())
+        val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)
+        assertEquals(true, graph.toString().contains("\"types\":{\"T\":\"cringle.std/String\"}"), graph.toString())
+        assertEquals(blueprint, BlueprintGraph.toBlueprint("app", graph, JsonObject(emptyMap()), emptyList(), emptyList(), definition = ::definition))
+        assertEquals(emptyMap<String, SchemaRef>(), roundTrip(Blueprint("app", listOf(BlueprintBlock("s", "p/sink")), emptyList())).blocks.single().types)
+    }
+
+    @Test
     fun isolationAndCountsOfTheNodeAreWritten() {
         val blueprint = Blueprint("app", listOf(BlueprintBlock("f", "p/fan", isolation = IsolationLevel.PROCESS, varArgCounts = mapOf("in" to 3))), emptyList())
         val graph = BlueprintGraph.toGraph(blueprint, emptyMap(), ::definition)

@@ -84,7 +84,9 @@ Object with keys `name` (block name, same grammar as package names), `schemas` (
 uses, `namespace/Name`), `ports`, `requiredDrivers` (driver ids, unique) and optional `configSchema`. A port has
 `name` (identifier grammar of section 3, unique per block), `direction` (`IN` or `OUT`), `tetherTypes` (non-empty,
 values `REQUEST_RESPONSE`, `MESSAGE`, `STREAM`, `BYTE_STREAM`), `schema` and optional `varArg` (boolean, default
-`false`). Optional `exclusiveResources` lists what the block holds that only one instance can have at a time: objects with `kind` (`PORT`, `SERIAL` or
+`false`) and optional `typeParam`. Optional `typeParameters` makes the block **generic**: a list of objects with `name` (identifier grammar, unique per block)
+and `bound` (a schema reference, default `cringle.std/Any`). A port with `typeParam: "T"` carries the type that the blueprint binds to the parameter `T` (its `schema`
+is the bound of `T`, and is the type of the port as long as nothing is bound); `typeParam` must name a declared parameter. Optional `exclusiveResources` lists what the block holds that only one instance can have at a time: objects with `kind` (`PORT`, `SERIAL` or
 `OTHER`) and `label` (not blank, for example `http` or `COM3`), no duplicates. A fabric with such a block, or with a `TCP` or `SERIAL` tether (section 5), is updated by
 stopping the old fabric before the new one starts instead of side by side (Architecture 14.2). This is exactly the model of `cringle.contract.BlockDefinition`. Within a project a block is addressed as
 `<pluginName>/<blockName>`.
@@ -101,7 +103,7 @@ version of its own and no engine, role or label fields, so it always runs entire
 
 - Block: `id` (unique within the blueprint), `block` (`pluginName/blockName`), optional `config` (object,
   default `{}`), optional `isolation` (`SHARED` default, or `PROCESS`), and `varArgCounts` (object from VarArg
-  port name to a fixed size of at least 0).
+  port name to a fixed size of at least 0), and optional `types` (object from type parameter name to a schema reference `namespace/Name`) that binds type parameters of a generic block (section 4).
 - Tether: `type` (a tether type), `from` and `to`. An endpoint is `{"block": <id>, "port": <name>}` plus `"index"`
   for VarArg ports. The type is fixed here and never changes at runtime. Optional `delivery` (`DROP` default, or
   `BUFFER`) says what happens when the receiving block is not running: `DROP` drops and logs, `BUFFER` keeps the
@@ -208,6 +210,7 @@ blueprint:
 5. the tether `type` is in the `tetherTypes` of both ports;
 6. the `schema` of the OUT port is assignable to the `schema` of the IN port (`schema.md`, section 7);
 7. `index` is present and below the `varArgCounts` size for a VarArg port, and absent for any other port;
+   `types` names only type parameters of the block, every bound schema resolves and is assignable to the bound of its parameter (a parameter without a binding is its bound), and rules 5 and 6 are checked with the ports of the block as bound;
 8. every fabric config names an existing blueprint;
 9. every block id, port name and blueprint reference follows the identifier grammar of section 3;
 10. `bufferCapacity` is at least 1 and `requestTimeout` is positive;
