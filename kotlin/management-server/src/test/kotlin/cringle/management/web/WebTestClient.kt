@@ -78,9 +78,10 @@ class WebTestClient(private val port: Int, serverKey: String) {
     }
 
     /** Posts a file as `multipart/form-data` in the field [field]. */
-    fun postFile(path: String, field: String, filename: String, data: ByteArray): HttpResponse<String> {
+    fun postFile(path: String, field: String, filename: String, data: ByteArray, fields: Map<String, String> = emptyMap()): HttpResponse<String> {
         val boundary = "----cringle-test-boundary"
-        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"; filename=\"$filename\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        val text = fields.entries.joinToString("") { (k, v) -> "--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n" }
+        val head = text + "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"; filename=\"$filename\"\r\nContent-Type: application/octet-stream\r\n\r\n"
         val tail = "\r\n--$boundary--\r\n"
         val body = head.toByteArray() + data + tail.toByteArray()
         val b = HttpRequest.newBuilder(URI.create("https://localhost:$port$path")).header("Content-Type", "multipart/form-data; boundary=$boundary").POST(HttpRequest.BodyPublishers.ofByteArray(body))

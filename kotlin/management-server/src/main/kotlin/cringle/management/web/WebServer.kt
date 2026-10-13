@@ -85,7 +85,9 @@ public class WebServer(
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
         val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
-        val blueprints = BlueprintPages(core, drafts)
+        val projectFiles = ProjectFiles(core.dataDirectory.resolve("drafts").resolve("files"))
+        val blueprints = BlueprintPages(core, drafts, projectFiles)
+        ProjectPages(core, drafts, blueprints, projectFiles).register(this)
         SchemaPages(core, drafts, blueprints).register(this)
         blueprints.register(this)
     }

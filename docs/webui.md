@@ -97,6 +97,19 @@ Only with `--auth`, every route needs `MANAGE_USERS` (or the `users` function). 
 
 Deleting a package version is not possible in the repository (and so not here).
 
+## Projects (#385)
+
+The page **Projects** (group *Build*) manages projects as workspaces. A project is the project draft of the blueprint editor with its files and the schema drafts it names; publishing builds the project package from it. `/projects` lists the projects (version, blocks, files), creates one (a name; it starts with an empty blueprint) and deletes one with its files.
+
+`/projects/{name}` shows the content as a **tree**:
+
+- `project.json`: the version, the number of fabrics and the plugins that the blocks come from.
+- `blueprints/`: the blueprint with the number of blocks and tethers and the link *Open in the editor*.
+- `schemas/`: the schema drafts of the project with *Open* (the schema editor) and *Remove* (the draft stays), and a select to *Add* another one.
+- `binaries/`: the files of the project as a folder tree with size, *Download* and *Delete* (a folder with everything in it), and an **upload**: a file and its path in the project (default the file name, `web/index.html` makes the folders).
+
+*Publish* builds the package from the tree: the blueprint, the schemas and every file as `binaries/<path>`. Files live below `<management home>/drafts/files/<project>/`. A path is relative, written with `/`, every part is letters, digits, `.`, `-` and `_` (no `..`), at most 8 levels and 200 characters; a file is at most 20 MiB, all files of a project 100 MiB. A viewer sees the tree and downloads, and nothing else. Several blueprints in one project, schemas that belong to the project itself and the published versions in the tree are the next slices.
+
 ## Drafts and the schema editor (#212)
 
 A **draft** is work in progress that the ManagementServer keeps: one JSON file `<management home>/drafts/<kind>/<name>.json` (`kind` is `schema`, later also `project`), written atomically, with a version for the package it becomes and a **revision** that every save raises. A save that names the revision it started from is refused if the draft moved on (`changed meanwhile`), so two editors do not silently overwrite each other. Names follow the package name grammar; no name can leave the folder.
