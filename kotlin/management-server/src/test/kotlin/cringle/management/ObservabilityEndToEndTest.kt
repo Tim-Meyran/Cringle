@@ -79,7 +79,7 @@ class ObservabilityEndToEndTest : ServiceTestBase() {
         assertTrue(engineA.heapUsedBytes > 0)
 
         // --- the heartbeat carries a few numbers to the router ---
-        await("vitals at the router") { daemon.router!!.registry.engines().single { it.record.id == "e-a" }.vitals?.fabricCount == 1 }
+        await("vitals at the router") { daemon.router!!.registry.engines().single { it.record.id == "e-a" }.vitals?.let { v -> v.fabricCount == 1 && v.runningFabricCount == 1 } == true }
         val vitals = daemon.router!!.registry.engines().single { it.record.id == "e-a" }.vitals!!
         assertEquals(1, vitals.runningFabricCount)
         assertTrue(vitals.memoryUsedBytes > 0)
