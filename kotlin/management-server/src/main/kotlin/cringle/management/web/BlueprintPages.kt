@@ -40,7 +40,7 @@ import kotlinx.serialization.json.put
  * whether that is allowed ([check]): the server answers with the verdict of the validators that packaging uses (direction, tether type, schema). On
  * save the server turns the graph into the blueprint, validates it completely and stores the draft, also an invalid one as work in progress.
  */
-internal class BlueprintPages(private val core: ManagementCore, private val drafts: DraftStore) {
+internal class BlueprintPages(private val core: ManagementCore, private val drafts: DraftStore, private val files: ProjectFiles) {
     private val catalog = PluginCatalog(core)
     private val pretty = Json { prettyPrint = true }
 
@@ -113,7 +113,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         put("ui", buildJsonObject { put("positions", JsonObject(positions.mapValues { (_, p) -> JsonArray(listOf(JsonPrimitive(p.first), JsonPrimitive(p.second))) })) })
     }
 
-    private fun blueprintOf(draft: Draft): Blueprint? = try {
+    internal fun blueprintOf(draft: Draft): Blueprint? = try {
         ManifestJson.parseBlueprint(draft.content.jsonObject.getValue("blueprint").toString(), "draft ${draft.name}")
     } catch (e: Exception) {
         null
@@ -274,7 +274,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val project = ProjectPackage(manifest, listOf(blueprint), schemas, emptyList())
         val problems = PackageValidator.validateProjectSources(project) + PackageValidator.validateProject(project, plugins)
         if (problems.isNotEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, problems.joinToString("; ") { "${it.path}: ${it.message}" })
-        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, emptyMap(), it) }.toByteArray()
+        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, files.all(draft.name), it) }.toByteArray()
         val m = publishPackage(core, bytes)
         return "Published ${m.name} ${m.version}; deploy it on the deployments page"
     }
