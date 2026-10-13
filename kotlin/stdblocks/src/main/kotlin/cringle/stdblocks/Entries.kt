@@ -26,7 +26,7 @@ internal fun inPort(name: String, schema: SchemaRef = STRING) = PortDefinition(n
 internal fun outPort(name: String, schema: SchemaRef = STRING) = PortDefinition(name, PortDirection.OUT, MESSAGE, schema)
 
 /** A block of the library: its definition and how to make it. */
-internal class Entry(val definition: BlockDefinition, val create: (DriverSet) -> Block)
+internal class Entry(val definition: BlockDefinition, val create: (DriverSet) -> Block, val createTyped: ((DriverSet, Map<String, SchemaRef>) -> Block)? = null)
 
 /** [configuration] is the name of the type in the namespace `cringle.stdblocks`, or `null` for a block without configuration. */
 internal fun entry(name: String, ports: List<PortDefinition>, configuration: String? = null, drivers: List<String> = emptyList(), create: (DriverSet) -> Block) = Entry(

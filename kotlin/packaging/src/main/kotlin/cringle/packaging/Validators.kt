@@ -110,7 +110,8 @@ public object PackageValidator {
                 unresolved += b.id
                 return@forEachIndexed
             }
-            instances.putIfAbsent(b.id, b to definition)
+            val bound = bindTypes(b, definition, "$path.types", registry) { p, m -> problem(p, m) }
+            instances.putIfAbsent(b.id, b to bound)
             val varArgPorts = definition.ports.filter { it.varArg }.map { it.name }.toSet()
             for (name in varArgPorts) {
                 if (name !in b.varArgCounts) problem("$path.varArgCounts", "missing size of VarArg port '$name'")
@@ -317,9 +318,25 @@ public object PackageValidator {
         return port
     }
 
+    /** The definition of [b] with its type parameters bound; a binding that names no parameter, does not resolve or does not fit the bound is reported (and left out). */
+    private fun bindTypes(b: BlueprintBlock, definition: BlockDefinition, path: String, registry: SchemaRegistry, problem: (String, String) -> Unit): BlockDefinition {
+        val usable = HashMap<String, SchemaRef>()
+        for ((name, type) in b.types) {
+            val parameter = definition.typeParameters.firstOrNull { it.name == name }
+            when {
+                parameter == null -> problem("$path.$name", "'${b.block}' has no type parameter '$name'")
+                registry.resolve(type) == null -> problem("$path.$name", "schema '$type' does not resolve")
+                !isAssignable(type, parameter.bound, registry) -> problem("$path.$name", "schema $type is not assignable to the bound ${parameter.bound} of '$name'")
+                else -> usable[name] = type
+            }
+        }
+        return definition.bind(usable)
+    }
+
     private fun schemaRefs(block: BlockDefinition, path: String, registry: SchemaRegistry): List<PackageProblem> {
         val refs = block.schemas.mapIndexed { i, r -> "$path.schemas[$i]" to r } +
             block.ports.mapIndexed { i, p -> "$path.ports[$i].schema" to p.schema } +
+            block.typeParameters.mapIndexed { i, t -> "$path.typeParameters[$i].bound" to t.bound } +
             listOfNotNull(block.configSchema?.let { "$path.configSchema" to it })
         return refs.filter { (_, ref) -> registry.resolve(ref) == null }
             .map { (p, ref: SchemaRef) -> PackageProblem(p, "schema '$ref' does not resolve") }
