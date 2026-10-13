@@ -295,8 +295,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     add(
                         buildJsonObject {
                             put("block", "${plugin.manifest.name}/${b.name}")
-                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
-                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
+                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg); put("schema", "${it.schema.namespace}/${it.schema.name}") } }))
+                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg); put("schema", "${it.schema.namespace}/${it.schema.name}") } }))
                             put("title", b.name)
                             put("varArg", b.ports.any { it.varArg })
                             put("config", b.configSchema?.let { "${it.namespace}/${it.name}" }.orEmpty())
