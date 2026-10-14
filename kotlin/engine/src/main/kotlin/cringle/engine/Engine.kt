@@ -372,6 +372,42 @@ public class Engine private constructor(
                 cringle.engine.v1.SetBreakpointResponse.getDefaultInstance()
             }
 
+        override suspend fun getFabricGraph(request: cringle.engine.v1.GetFabricGraphRequest): cringle.engine.v1.GetFabricGraphResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                val g = fabrics.graph(request.fabricId.value)
+                cringle.engine.v1.GetFabricGraphResponse.newBuilder()
+                    .setFabricId(g.fabricId).setBlueprint(g.blueprint).setFailure(g.failure)
+                    .setState(info(FabricStatus(g.fabricId, g.blueprint, g.state, emptyList())).state)
+                    .addAllBlocks(
+                        g.blocks.map { b ->
+                            cringle.engine.v1.GraphBlock.newBuilder().setId(b.id).setBlock(b.block).setRestarts(b.restarts).setLastError(b.lastError).setErrors(b.errors).setIsolation(b.isolation)
+                                .setState(blockRuntimeState(b.state))
+                                .addAllPorts(
+                                    b.ports.map { p ->
+                                        cringle.engine.v1.GraphPort.newBuilder().setName(p.name).setOut(p.out).addAllTetherTypes(p.tetherTypes.map { it.name }).setVarArg(p.varArg).setCount(p.count).build()
+                                    },
+                                ).build()
+                        },
+                    )
+                    .addAllTethers(
+                        g.tethers.map { t ->
+                            cringle.engine.v1.GraphTether.newBuilder().setId(t.id).setType(t.type.name)
+                                .setFromBlock(t.fromBlock).setFromPort(t.fromPort).setFromIndex(t.fromIndex).setToBlock(t.toBlock).setToPort(t.toPort).setToIndex(t.toIndex)
+                                .setRemote(t.remote).setMessages(t.messages).setBytes(t.bytes).setErrors(t.errors).setLastActivityEpochMillis(t.lastActivityMillis).setCapturable(t.capturable).build()
+                        },
+                    ).build()
+            }
+
+        override suspend fun getTraffic(request: cringle.engine.v1.GetTrafficRequest): cringle.engine.v1.GetTrafficResponse =
+            fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
+                val t = fabrics.traffic(request.fabricId.value, request.tether, if (request.limit > 0) request.limit else 100)
+                cringle.engine.v1.GetTrafficResponse.newBuilder().setCapturable(t.capturable).addAllRecords(
+                    t.records.map { r ->
+                        cringle.engine.v1.TrafficRecord.newBuilder().setSeq(r.seq).setTimeEpochMillis(r.timeMillis).setKind(r.kind.name.lowercase().replace('_', '-')).setPayload(r.payload).build()
+                    },
+                ).build()
+            }
+
         override suspend fun getDebugState(request: cringle.engine.v1.GetDebugStateRequest): cringle.engine.v1.GetDebugStateResponse =
             fabricCall(FabricException::class.java to Status.INVALID_ARGUMENT) {
                 val state = fabrics.debugState(request.fabricId.value)
@@ -503,6 +539,16 @@ public class Engine private constructor(
         } catch (e: IllegalStateException) {
             throw StatusException(Status.FAILED_PRECONDITION.withDescription(e.message))
         }
+    }
+
+    private fun blockRuntimeState(s: BlockState): BlockRuntimeState = when (s) {
+        BlockState.CREATED -> BlockRuntimeState.BLOCK_RUNTIME_STATE_CREATED
+        BlockState.STARTING -> BlockRuntimeState.BLOCK_RUNTIME_STATE_STARTING
+        BlockState.RUNNING -> BlockRuntimeState.BLOCK_RUNTIME_STATE_RUNNING
+        BlockState.RESTARTING -> BlockRuntimeState.BLOCK_RUNTIME_STATE_RESTARTING
+        BlockState.STOPPING -> BlockRuntimeState.BLOCK_RUNTIME_STATE_STOPPING
+        BlockState.STOPPED -> BlockRuntimeState.BLOCK_RUNTIME_STATE_STOPPED
+        BlockState.FAILED -> BlockRuntimeState.BLOCK_RUNTIME_STATE_FAILED
     }
 
     private fun info(s: FabricStatus): FabricInfo = FabricInfo.newBuilder()

@@ -318,6 +318,14 @@ public class ManagementServer(
             cringle.management.v1.SetBreakpointResponse.getDefaultInstance()
         }
 
+        override suspend fun getFabricGraph(request: cringle.management.v1.GetFabricGraphRequest): cringle.engine.v1.GetFabricGraphResponse = guard { need(Permission.READ, access.fabricById(request.fabric));
+            core.fabricGraph(request.fabric)
+        }
+
+        override suspend fun getTraffic(request: cringle.management.v1.GetTrafficRequest): cringle.engine.v1.GetTrafficResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
+            core.fabricTraffic(request.fabric, request.tether, request.limit)
+        }
+
         override suspend fun getDebugState(request: cringle.management.v1.GetDebugStateRequest): cringle.management.v1.GetDebugStateResponse = guard { need(Permission.OPERATE, access.fabricById(request.fabric));
             val state = core.debugState(request.fabric)
             cringle.management.v1.GetDebugStateResponse.newBuilder().addAllBreakpoints(state.breakpointsList).addAllHeld(state.heldList).build()
@@ -467,6 +475,8 @@ public class ManagementServer(
             "ListDwhPartitions" to Permission.READ,
             "SetRecording" to Permission.OPERATE,
             "SetBreakpoint" to Permission.OPERATE,
+            "GetFabricGraph" to Permission.READ,
+            "GetTraffic" to Permission.OPERATE,
             "GetDebugState" to Permission.OPERATE,
             "ResumeFabric" to Permission.OPERATE,
             "SetDwhRetention" to Permission.OPERATE,

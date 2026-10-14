@@ -118,7 +118,7 @@ public class TetherNetwork private constructor(
 
     /** The numbers of every tether of the blueprint (#187), in the order of [tethers]. */
     public fun stats(): List<cringle.engine.metrics.TetherStats> =
-        connections.values.distinctBy { it.info.id }.map { cringle.engine.metrics.TetherStats(it.info.id, it.info.type, it.messages.get(), it.bytes.get(), it.errors.get()) }
+        connections.values.distinctBy { it.info.id }.map { cringle.engine.metrics.TetherStats(it.info.id, it.info.type, it.messages.get(), it.bytes.get(), it.errors.get(), it.lastActivity) }
 
     /** All tethers of the blueprint. */
     public val tethers: List<TetherInfo> = connections.values.map { it.info }.distinctBy { it.id }
@@ -631,6 +631,9 @@ public class TetherNetwork private constructor(
         val bytes = AtomicLong()
         val errors = AtomicLong()
 
+        /** When a value crossed the tether last (epoch milliseconds), 0 if none did. */
+        @Volatile var lastActivity = 0L
+
         @Volatile var queue: Channel<Envelope>? = null
 
         @Volatile var sender: TcpDriver? = null
@@ -768,6 +771,7 @@ public class TetherNetwork private constructor(
 
     private suspend fun hook(c: Connection, kind: TrafficKind, payload: Any?) {
         c.messages.incrementAndGet()
+        c.lastActivity = System.currentTimeMillis()
         if (kind == TrafficKind.BYTES && payload is ByteArray) c.bytes.addAndGet(payload.size.toLong())
         config.observer?.observe(c.info, kind, payload)
         config.interceptor?.beforeDelivery(c.info, kind, payload)

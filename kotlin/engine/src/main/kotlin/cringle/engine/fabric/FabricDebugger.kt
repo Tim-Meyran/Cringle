@@ -5,7 +5,6 @@ package cringle.engine.fabric
 import cringle.engine.tether.TetherInfo
 import cringle.engine.tether.TetherInterceptor
 import cringle.engine.tether.TrafficKind
-import cringle.engine.tether.toJson
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -79,17 +78,7 @@ public class FabricDebugger : TetherInterceptor {
         resume()
     }
 
-    private fun describe(payload: Any?): String {
-        val text = when (payload) {
-            is ByteArray -> "${payload.size} bytes: " + payload.take(32).joinToString(" ") { "%02x".format(it) } + if (payload.size > 32) " ..." else ""
-            else -> try {
-                toJson(payload).toString()
-            } catch (e: IllegalArgumentException) {
-                payload.toString()
-            }
-        }
-        return if (text.length > MAX_PAYLOAD) text.take(MAX_PAYLOAD) + "..." else text
-    }
+    private fun describe(payload: Any?): String = PayloadText.of(payload, MAX_PAYLOAD)
 
     public companion object {
         /** The longest payload text a held value carries. */

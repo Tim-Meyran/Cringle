@@ -604,6 +604,20 @@ public class ManagementCore(
         )
     }
 
+    /** The blocks and tethers of the running [fabric] with their state and numbers (monitor, #399). */
+    public suspend fun fabricGraph(fabric: String): cringle.engine.v1.GetFabricGraphResponse {
+        val record = fabricRecord(fabric)
+        return runningEngine(record.machine, record.engineId).getFabricGraph(cringle.engine.v1.GetFabricGraphRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).build())
+    }
+
+    /** The newest [limit] values that crossed [tether] of the running [fabric] (monitor, #399). */
+    public suspend fun fabricTraffic(fabric: String, tether: String, limit: Int): cringle.engine.v1.GetTrafficResponse {
+        val record = fabricRecord(fabric)
+        return runningEngine(record.machine, record.engineId).getTraffic(
+            cringle.engine.v1.GetTrafficRequest.newBuilder().setFabricId(FabricId.newBuilder().setValue(fabric)).setTether(tether).setLimit(limit).build(),
+        )
+    }
+
     /** The breakpoints of [fabric] and the values held at them. */
     public suspend fun debugState(fabric: String): cringle.engine.v1.GetDebugStateResponse {
         val record = fabricRecord(fabric)

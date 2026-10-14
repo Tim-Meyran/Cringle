@@ -46,7 +46,7 @@ class WebShellTest : ServiceTestBase() {
         assertEquals(listOf("Overview", "Operate", "Observe", "Build", "Administer"), groupsOf(page))
         assertEquals(listOf("Dashboard", "Connect"), entriesOf(page, "Overview"))
         assertEquals(listOf("Machines", "Engines", "Fabrics", "Deployments", "Debugger"), entriesOf(page, "Operate"))
-        assertEquals(listOf("Logs", "Metrics", "Data warehouse"), entriesOf(page, "Observe"))
+        assertEquals(listOf("Logs", "Metrics", "Data warehouse", "Monitor"), entriesOf(page, "Observe"))
         assertEquals(listOf("Drafts"), entriesOf(page, "Build"))
         assertEquals(setOf("Users", "Groups", "Invites", "Registries", "Configuration", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
         assertEquals(1, Regex("aria-current=\"page\"").findAll(page).count())
