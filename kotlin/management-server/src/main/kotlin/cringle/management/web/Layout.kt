@@ -73,7 +73,7 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
             raw("<meta name=\"htmx-config\" content='{\"includeIndicatorStyles\":false}'>"),
             h("<title>{} - Cringle</title>", title),
             raw("<link rel=\"stylesheet\" href=\"/static/vendor/drawflow.min.css\"><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/vendor/htmx.min.js\" defer></script><script src=\"/static/vendor/idiomorph-ext.min.js\" defer></script>"),
-            raw("<script src=\"/static/vendor/drawflow.min.js\" defer></script><script src=\"/static/app.js\" defer></script><script src=\"/static/vendor/alpine.min.js\" defer></script></head>"),
+            raw("<script src=\"/static/vendor/drawflow.min.js\" defer></script><script src=\"/static/app.js\" defer></script><script src=\"/static/monitor.js\" defer></script><script src=\"/static/vendor/alpine.min.js\" defer></script></head>"),
             if (csrf != null) h("<body hx-ext=\"morph\" hx-headers='{\"X-CSRF-Token\": \"{}\"}'>", csrf) else raw("<body hx-ext=\"morph\">"),
             if (openMode) raw("<p class=\"banner\" role=\"alert\">The ManagementServer runs without <code>--auth</code>: everybody who can reach this page is administrator.</p>") else Html(""),
             if (session == null) {

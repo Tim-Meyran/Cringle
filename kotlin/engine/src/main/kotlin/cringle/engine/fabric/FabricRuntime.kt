@@ -78,6 +78,8 @@ public class FabricSpec(
     public val onClose: AutoCloseable? = null,
     /** Records the tethers of the fabric in the data warehouse (#193); closed with the fabric. */
     public val recorder: cringle.engine.dwh.TetherRecorder? = null,
+    /** Copies the recent values of the tethers while the monitor looks (#399). */
+    public val monitor: TrafficMonitor? = null,
     /** Holds values back at breakpoints (#323); closed with the fabric. */
     public val debugger: FabricDebugger? = null,
     /** Migrates the persistent data folders before the blocks start (#258); `null` if the fabric has none. */
@@ -329,6 +331,49 @@ public class FabricRuntime(private val spec: FabricSpec) : AutoCloseable {
     /** Switches the recording of all typed tethers of this fabric on or off (see [cringle.engine.dwh.TetherRecorder.setMode]). */
     public fun setRecording(all: Boolean, default: cringle.packaging.RecordConfig?) {
         (spec.recorder ?: throw FabricException("fabric '${spec.id}' has no data warehouse to record into")).setMode(all, default)
+    }
+
+    /** The blocks and tethers of this fabric with their state and numbers, for the monitor (#399); reading it keeps the capture of the traffic on. */
+    public fun graph(): FabricGraph {
+        spec.monitor?.touch()
+        val stats = stats()
+        val tetherStats = stats.tethers.associateBy { it.id }
+        val blockErrors = stats.blocks.associate { it.id to it.errors }
+        val status = status.value
+        val blocks = entries.map { e ->
+            val host = hosts.first { it.id == e.instance.id }
+            GraphBlock(
+                id = e.instance.id,
+                block = e.instance.block,
+                state = host.state,
+                restarts = host.restarts,
+                lastError = host.lastError.orEmpty(),
+                errors = blockErrors[e.instance.id] ?: 0,
+                isolation = IsolationResolver.resolve(e.resolved.trust, e.instance.isolation).name.lowercase(),
+                ports = e.resolved.definition.ports.map { p ->
+                    GraphPort(p.name, p.direction == cringle.contract.PortDirection.OUT, p.tetherTypes.toList(), p.varArg, if (p.varArg) e.instance.varArgCounts[p.name] ?: 0 else 1)
+                },
+            )
+        }
+        val tethers = network?.tethers.orEmpty().map { t ->
+            val s = tetherStats[t.id]
+            GraphTether(
+                id = t.id, type = t.type,
+                fromBlock = t.from.block, fromPort = t.from.port, fromIndex = t.from.index ?: -1,
+                toBlock = t.to.block, toPort = t.to.port, toIndex = t.to.index ?: -1,
+                remote = t.remote != null,
+                messages = s?.messages ?: 0, bytes = s?.bytes ?: 0, errors = s?.errors ?: 0, lastActivityMillis = s?.lastActivityMillis ?: 0,
+                capturable = TrafficMonitor.canBeSeen(t.type),
+            )
+        }
+        return FabricGraph(spec.id, spec.blueprint.name, status.state, status.failure.orEmpty(), blocks, tethers)
+    }
+
+    /** The newest [limit] values of [tether] (monitor, #399); keeps the capture on. */
+    public fun traffic(tether: String, limit: Int): TrafficResult {
+        spec.monitor?.touch()
+        val info = network?.tethers?.firstOrNull { it.id == tether } ?: throw FabricException("fabric '${spec.id}' has no tether '$tether'")
+        return TrafficResult(TrafficMonitor.canBeSeen(info.type), spec.monitor?.recent(tether, limit).orEmpty())
     }
 
     private fun debugger(): FabricDebugger = spec.debugger ?: throw FabricException("fabric '${spec.id}' has no tethers to debug")

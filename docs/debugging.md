@@ -10,3 +10,7 @@ The ManagementServer can set **breakpoints on tethers** of a running fabric and 
 Use: `cringle debug break <fabric> <tether> on|off`, `cringle debug state <fabric>`, `cringle debug resume <fabric> [<tether>] [--one]`; the WebUI has the page *Debugger* (`webui.md`). All need `OPERATE` for the fabric (an operator, or a scoped role for the machine, project or fabric); the held values can contain data, so reading them needs the same right. gRPC: `SetBreakpoint`, `GetDebugState`, `ResumeFabric` on the ManagementServer and the engine (`engine_management.proto`, `management.proto`).
 
 Not included: breakpoints on blocks (only tethers), conditions, changing a held value, and breakpoints that survive a redeploy.
+
+## Monitor in the WebUI (#399)
+
+The page `/monitor/{fabric}` shows the running fabric on a canvas with the state and the activity of every block and tether, the last values of a tether in a table, and sets breakpoints on blocks, ports and tethers (the debugger of this chapter). Details: `webui.md`.

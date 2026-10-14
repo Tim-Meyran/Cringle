@@ -281,6 +281,10 @@ A new token (Users page) is shown, once and sticky in `#flash`, as the value, as
 
 `GET /debug` and `GET /debug/list` show the fabrics that have a breakpoint or hold values: the breakpoints (with *Remove*), the held values (tether, sender output, receiver input, since when, the value as JSON, shortened to 4096 characters) and *Step* (release the oldest, the breakpoint stays so the next value is held) and *Resume all*. `POST /debug/break` (fabric, tether, mode `on|off`) sets or removes a breakpoint, `POST /debug/resume` (fabric, tether optional, `one`) releases values. Every route needs `OPERATE` for the fabric. The list holds only state; messages go into `#flash`. See `debugging.md`.
 
+### Monitor (#399)
+
+`GET /monitor` lists the running fabrics, `GET /monitor/{fabric}` shows one on the canvas of the blueprint editor, read only: the border of a block shows its state, a tether is drawn bold while values cross it, dashed with a breakpoint and red with errors. A click on a block shows its statistics (state, restarts, errors, values and bytes in and out, ports), a click on a port its tethers, a click on a tether the last N values (10, 50 or 100) as a table with *Set breakpoint*, *Step* and *Resume all*; values that are held by a breakpoint are listed too. A breakpoint on a block holds the values of all its inputs, one on a port those of its tethers. *Pause* stops the refresh (every 2 s) so that values can be read; opening a long value pauses too. The data comes from `GET /monitor/{fabric}/graph` (JSON, `READ`) and the fragments `block`, `port` and `tether` (the values need `OPERATE`, like the debugger); `POST /monitor/{fabric}/breakpoint` and `/resume` need `OPERATE`. The engine copies the values only while a monitor looks (lease of 60 s, 100 values per tether); the values of TCP and serial tethers are not copied, only the numbers are shown.
+
 
 ## Layout of the forms and of the editors (#357)
 

@@ -26,6 +26,7 @@ internal object Icons {
         "registries" to "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20\"/>",
         "trust" to "<path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"/><path d=\"m9 12 2 2 4-4\"/>",
         "packages" to "<path d=\"M16.5 9.4 7.5 4.2\"/><path d=\"M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z\"/><path d=\"M3.3 7 12 12l8.7-5M12 22V12\"/>",
+        "monitor" to "<path d=\"M22 12h-4l-3 9L9 3l-3 9H2\"/>",
         "plus" to "<path d=\"M12 5v14M5 12h14\"/>",
         "x" to "<path d=\"M18 6 6 18M6 6l12 12\"/>",
         "dot" to "<circle cx=\"12\" cy=\"12\" r=\"3\"/>",
@@ -33,7 +34,7 @@ internal object Icons {
 
     private val byLabel = mapOf(
         "Dashboard" to "dashboard", "Connect" to "connect", "Machines" to "machines", "Engines" to "engines", "Fabrics" to "fabrics", "Deployments" to "deployments",
-        "Debugger" to "debugger", "Logs" to "logs", "Metrics" to "metrics", "Data warehouse" to "dwh", "Projects" to "packages", "Drafts" to "drafts", "Configuration" to "config",
+        "Debugger" to "debugger", "Monitor" to "monitor", "Logs" to "logs", "Metrics" to "metrics", "Data warehouse" to "dwh", "Projects" to "packages", "Drafts" to "drafts", "Configuration" to "config",
         "Users" to "users", "Groups" to "groups", "Invites" to "invites", "Registries" to "registries", "Trust" to "trust", "Packages" to "packages",
     )
 

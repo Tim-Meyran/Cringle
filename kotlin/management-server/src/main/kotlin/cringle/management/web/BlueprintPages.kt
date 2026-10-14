@@ -300,7 +300,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val problems = checkBlueprint(named)
         val positions = previous.content.jsonObject["ui"]?.jsonObject?.get("positions")?.jsonObject.orEmpty()
             .mapValues { (_, p) -> p.jsonArray[0].jsonPrimitive.content.toDouble() to p.jsonArray[1].jsonPrimitive.content.toDouble() }
-        val saved = drafts.save("project", name, version?.trim()?.ifEmpty { null } ?: previous.version, content(named, positions, fabricsOf(previous), schemasOf(previous)), null)
+        val saved = drafts.save("project", name, version?.trim()?.ifEmpty { null } ?: previous.version, content(named, positions, fabricsOf(previous), schemasOf(previous), pluginRangesOf(previous)), null)
         return saved to problems
     }
 

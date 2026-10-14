@@ -37,6 +37,12 @@ service EngineManagementService {
   // Remote debugging (Architecture 16.4): a breakpoint on a tether holds back every value before the receiving block gets it, until it is resumed.
   rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
 
+  // The blocks and tethers of a fabric with their state and numbers, for the monitor. Reading it keeps the capture of the traffic on.
+  rpc GetFabricGraph(GetFabricGraphRequest) returns (GetFabricGraphResponse);
+
+  // The newest values that crossed one tether (monitor). Only tethers whose values may be copied have any.
+  rpc GetTraffic(GetTrafficRequest) returns (GetTrafficResponse);
+
   // The breakpoints of a fabric and the values held at them (the output of the sender, the input of the receiver).
   rpc GetDebugState(GetDebugStateRequest) returns (GetDebugStateResponse);
 
@@ -117,6 +123,86 @@ message SetRecordingRequest {
 }
 
 message SetRecordingResponse {}
+
+message GetFabricGraphRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+}
+
+message GraphPort {
+  string name = 1;
+  // true for an output.
+  bool out = 2;
+  repeated string tether_types = 3;
+  bool var_arg = 4;
+  // The number of tethers of a VarArg port, 1 for a plain port.
+  int32 count = 5;
+}
+
+message GraphBlock {
+  string id = 1;
+  // `plugin/block`.
+  string block = 2;
+  BlockRuntimeState state = 3;
+  int32 restarts = 4;
+  string last_error = 5;
+  // Crashes and failed starts since the fabric was created.
+  int64 errors = 6;
+  // `shared` or `process`.
+  string isolation = 7;
+  repeated GraphPort ports = 8;
+}
+
+message GraphTether {
+  // The name the debugger and the data warehouse use, `a.out -> b.in`.
+  string id = 1;
+  string type = 2;
+  string from_block = 3;
+  string from_port = 4;
+  // -1 for a plain port.
+  int32 from_index = 5;
+  string to_block = 6;
+  string to_port = 7;
+  int32 to_index = 8;
+  // One end is on another engine or is a service.
+  bool remote = 9;
+  // Cumulative since the fabric was created.
+  int64 messages = 10;
+  int64 bytes = 11;
+  int64 errors = 12;
+  int64 last_activity_epoch_millis = 13;
+  // false for a tether whose values are not copied (TCP, serial).
+  bool capturable = 14;
+}
+
+message GetFabricGraphResponse {
+  string fabric_id = 1;
+  string blueprint = 2;
+  FabricRuntimeState state = 3;
+  string failure = 4;
+  repeated GraphBlock blocks = 5;
+  repeated GraphTether tethers = 6;
+}
+
+message GetTrafficRequest {
+  cringle.common.v1.FabricId fabric_id = 1;
+  string tether = 2;
+  // At most this many values, newest first; 0 is the default of 100.
+  int32 limit = 3;
+}
+
+message TrafficRecord {
+  int64 seq = 1;
+  int64 time_epoch_millis = 2;
+  // message, request, response, stream-opened, stream-item or bytes.
+  string kind = 3;
+  // The value as JSON text (bytes as a hex dump), shortened to 4096 characters.
+  string payload = 4;
+}
+
+message GetTrafficResponse {
+  bool capturable = 1;
+  repeated TrafficRecord records = 2;
+}
 
 message SetBreakpointRequest {
   cringle.common.v1.FabricId fabric_id = 1;

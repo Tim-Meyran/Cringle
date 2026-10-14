@@ -204,6 +204,7 @@ internal class OverviewPages(private val core: ManagementCore) {
                 "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}{}</td><td>{}</td>{}</tr>",
                 base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), violatedBadge(f.info), stateBadge(if (f.desiredRunning) "running" else "stopped"),
                 actionsCell(
+                    if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING) h("<a class=\"btn small\" href=\"/monitor/{}\">Monitor</a>", id) else Html(""),
                     if (running) button(session, Permission.OPERATE, "Stop", "$base/stop", scopes = scopes)
                     else button(session, Permission.OPERATE, if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) "Retry" else "Start", "$base/start", scopes = scopes),
                     button(session, Permission.OPERATE, "Remove", "$base/remove", "Remove fabric $id?", scopes),

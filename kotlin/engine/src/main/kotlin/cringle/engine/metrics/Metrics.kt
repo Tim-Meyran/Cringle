@@ -15,6 +15,8 @@ public data class TetherStats(
     val bytes: Long,
     /** Validation and delivery failures. */
     val errors: Long,
+    /** When a value crossed the tether last (epoch milliseconds), 0 if none did. */
+    val lastActivityMillis: Long = 0,
 )
 
 /** The numbers of one block: how often it failed (crashes and failed starts, restarts included). */

@@ -94,6 +94,12 @@ public class FabricManager(private val deployer: FabricDeployer) : AutoCloseable
         find(id).setRecording(all, default)
     }
 
+    /** The blocks and tethers of the fabric [id] with their state and numbers (monitor, #399). */
+    public fun graph(id: String): FabricGraph = find(id).graph()
+
+    /** The recent values of a tether of the fabric [id] (monitor, #399). */
+    public fun traffic(id: String, tether: String, limit: Int): TrafficResult = find(id).traffic(tether, limit)
+
     /** Sets or removes a breakpoint on a tether of the fabric [id] (#323). */
     public fun setBreakpoint(id: String, tether: String, enabled: Boolean): Unit = find(id).setBreakpoint(tether, enabled)
 
@@ -263,6 +269,7 @@ public class LocalFabricDeployer(
             }
             val recorder = builtin?.let { cringle.engine.dwh.TetherRecorder(it.dwh, request.fabricId) { message -> paths.fileLogger().log(FabricLogger.Level.WARN, message) } }
             val debugger = tethers?.let { FabricDebugger() }
+            val monitor = tethers?.let { TrafficMonitor() }
             return FabricRuntime(
                 FabricSpec(
                     id = request.fabricId,
@@ -273,7 +280,7 @@ public class LocalFabricDeployer(
                     wiring = wiring,
                     tethers = tethers?.let {
                         TetherConfig(
-                            registry, it.bufferCapacity, it.requestTimeout, listOfNotNull(it.observer, recorder).let { o -> if (o.size < 2) o.firstOrNull() else TetherObserver { t, k, p -> o.forEach { x -> x.observe(t, k, p) } } },
+                            registry, it.bufferCapacity, it.requestTimeout, listOfNotNull(it.observer, recorder, monitor).let { o -> if (o.size < 2) o.firstOrNull() else TetherObserver { t, k, p -> o.forEach { x -> x.observe(t, k, p) } } },
                             listOfNotNull(it.interceptor, debugger).let { i -> if (i.size < 2) i.firstOrNull() else TetherInterceptor { t, k, p -> i.forEach { x -> x.beforeDelivery(t, k, p) } } },
                             it.tcp ?: builtin?.let { b -> { block: String -> b.tcp.driverFor(request.fabricId, block) } },
                             it.serial ?: builtin?.let { b -> { block: String -> b.serial.driverFor(request.fabricId, block) } },
@@ -288,6 +295,7 @@ public class LocalFabricDeployer(
                     onClose = loaders,
                     recorder = recorder,
                     debugger = debugger,
+                    monitor = monitor,
                     migrations = migrations,
                 ),
             )

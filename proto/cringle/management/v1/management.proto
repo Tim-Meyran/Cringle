@@ -124,6 +124,12 @@ service ManagementService {
   // Sets or removes a breakpoint on a tether of a fabric: values on it are held back before the receiving block gets them.
   rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
 
+  // The blocks and tethers of a running fabric with their state and numbers (monitor).
+  rpc GetFabricGraph(GetFabricGraphRequest) returns (cringle.engine.v1.GetFabricGraphResponse);
+
+  // The newest values that crossed one tether of a running fabric (monitor); the values can contain data, so it needs the right to operate.
+  rpc GetTraffic(GetTrafficRequest) returns (cringle.engine.v1.GetTrafficResponse);
+
   // The breakpoints of a fabric and the values held at them.
   rpc GetDebugState(GetDebugStateRequest) returns (GetDebugStateResponse);
 
@@ -340,6 +346,16 @@ message SetRecordingRequest {
 }
 
 message SetRecordingResponse {}
+
+message GetFabricGraphRequest {
+  string fabric = 1;
+}
+
+message GetTrafficRequest {
+  string fabric = 1;
+  string tether = 2;
+  int32 limit = 3;
+}
 
 message SetBreakpointRequest {
   string fabric = 1;
