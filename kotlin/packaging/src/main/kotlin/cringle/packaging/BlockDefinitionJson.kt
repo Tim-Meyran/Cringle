@@ -9,6 +9,7 @@ import cringle.contract.PortDefinition
 import cringle.contract.PortDirection
 import cringle.contract.SchemaRef
 import cringle.contract.TetherType
+import cringle.contract.TypeParameter
 import cringle.packaging.JsonReading.enumValue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -21,9 +22,10 @@ import kotlinx.serialization.json.put
 
 /** JSON form of [BlockDefinition] as used in plugin manifests (see `spec/package-format.md`, section 4). */
 public object BlockDefinitionJson {
-    private val nameKeys = setOf("name", "schemas", "ports", "requiredDrivers", "configSchema", "exclusiveResources")
+    private val nameKeys = setOf("name", "schemas", "ports", "requiredDrivers", "configSchema", "exclusiveResources", "typeParameters")
+    private val parameterKeys = setOf("name", "bound")
     private val resourceKeys = setOf("kind", "label")
-    private val portKeys = setOf("name", "direction", "tetherTypes", "schema", "varArg")
+    private val portKeys = setOf("name", "direction", "tetherTypes", "schema", "varArg", "typeParam")
 
     /** Parses a block definition from text. */
     public fun parse(text: String): BlockDefinition =
@@ -48,6 +50,7 @@ public object BlockDefinitionJson {
                 JsonReading.stringList(o, "requiredDrivers", path),
                 configSchema,
                 JsonReading.objectList(o, "exclusiveResources", path).mapIndexed { i, r -> resource(r, "$path.exclusiveResources[$i]") },
+                JsonReading.objectList(o, "typeParameters", path).mapIndexed { i, r -> parameter(r, "$path.typeParameters[$i]") },
             )
         }
     }
@@ -68,8 +71,16 @@ public object BlockDefinitionJson {
                 types.toSet(),
                 ref(JsonReading.string(o, "schema", path), "$path.schema"),
                 varArg,
+                JsonReading.optString(o, "typeParam", path)?.let { ManifestJson.checkedIdentifier(it, "$path.typeParam") },
             )
         }
+    }
+
+    private fun parameter(o: JsonObject, path: String): TypeParameter {
+        JsonReading.keys(o, path, parameterKeys)
+        val name = ManifestJson.checkedIdentifier(JsonReading.string(o, "name", path), "$path.name")
+        val bound = JsonReading.optString(o, "bound", path)?.let { ref(it, "$path.bound") }
+        return construct(path) { if (bound == null) TypeParameter(name) else TypeParameter(name, bound) }
     }
 
     private fun resource(o: JsonObject, path: String): ExclusiveResource {
@@ -98,12 +109,16 @@ public object BlockDefinitionJson {
                         put("tetherTypes", buildJsonArray { p.tetherTypes.forEach { add(JsonPrimitive(it.name)) } })
                         put("schema", p.schema.toString())
                         if (p.varArg) put("varArg", true)
+                        p.typeParam?.let { put("typeParam", it) }
                     }
                 },
             ),
         )
         put("requiredDrivers", buildJsonArray { d.requiredDrivers.forEach { add(JsonPrimitive(it)) } })
         d.configSchema?.let { put("configSchema", it.toString()) }
+        if (d.typeParameters.isNotEmpty()) {
+            put("typeParameters", JsonArray(d.typeParameters.map { t -> buildJsonObject { put("name", t.name); put("bound", t.bound.toString()) } }))
+        }
         if (d.exclusiveResources.isNotEmpty()) {
             put("exclusiveResources", JsonArray(d.exclusiveResources.map { r -> buildJsonObject { put("kind", r.kind.name); put("label", r.label) } }))
         }

@@ -8,6 +8,7 @@ import cringle.management.ManagementException
 import cringle.packaging.Blueprint
 import cringle.packaging.BlueprintBlock
 import cringle.packaging.Endpoint
+import cringle.packaging.PackageNames
 import cringle.packaging.FabricConfig
 import cringle.packaging.ManifestJson
 import cringle.packaging.PackageProblem
@@ -40,7 +41,7 @@ import kotlinx.serialization.json.put
  * whether that is allowed ([check]): the server answers with the verdict of the validators that packaging uses (direction, tether type, schema). On
  * save the server turns the graph into the blueprint, validates it completely and stores the draft, also an invalid one as work in progress.
  */
-internal class BlueprintPages(private val core: ManagementCore, private val drafts: DraftStore) {
+internal class BlueprintPages(private val core: ManagementCore, private val drafts: DraftStore, private val files: ProjectFiles) {
     private val catalog = PluginCatalog(core)
     private val pretty = Json { prettyPrint = true }
 
@@ -65,10 +66,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             var saved: Draft? = null
             var problems: List<PackageProblem> = emptyList()
             var blocks = 0
+            var checked: Blueprint? = null
             val error = attempt {
                 val name = req.params.getValue("name")
-                val snapshot = catalog.snapshot()
                 val previous = drafts.load("project", name)
+                val ranges = req.form["plugins"]?.let { parsePluginRanges(it) } ?: previous?.let { pluginRangesOf(it) }.orEmpty()
+                val snapshot = catalog.snapshot(ranges)
                 val before = previous?.let { blueprintOf(it) }
                 val kept = before?.tethers.orEmpty().filterNot { BlueprintGraph.drawable(it) } + (before?.let { BlueprintGraph.unresolved(it, snapshot::block) }.orEmpty())
                 val graph = parse(req.form["graph"]).jsonObject
@@ -78,22 +81,23 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, e.message ?: "invalid graph")
                 }
                 blocks = blueprint.blocks.size
+                checked = blueprint
                 problems = PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/$name.json")
                 val fabrics = req.form["fabrics"]?.let { parseFabrics(it) } ?: req.form["roles"]?.let { listOf(FabricLine(1, roles(it), emptyMap())) } ?: previous?.let { fabricsOf(it) } ?: listOf(FabricLine(1, emptyList(), emptyMap()))
                 val schemas = req.form["schemas"]?.let { names(it) } ?: previous?.let { schemasOf(it) }.orEmpty()
-                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas), req.form["revision"]?.toLongOrNull())
+                saved = drafts.save("project", name, req.form["version"].orEmpty().trim().ifEmpty { "1.0.0" }, content(blueprint, BlueprintGraph.positions(graph), fabrics, schemas, ranges), req.form["revision"]?.toLongOrNull())
             }
-            fragment(result(error, saved, problems, blocks))
+            fragment(result(error, saved, problems, blocks, checked))
         }
     }
 
     /** What a new project draft contains. */
-    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), listOf(FabricLine(1, emptyList(), emptyMap())), emptyList())
+    fun emptyContent(name: String): JsonElement = content(Blueprint(name, emptyList(), emptyList()), emptyMap(), listOf(FabricLine(1, emptyList(), emptyMap())), emptyList(), emptyMap())
 
     /** One fabric of the project: [instances] copies of the blueprint on the engines that have all [roles] and [labels]. */
     private data class FabricLine(val instances: Int, val roles: List<String>, val labels: Map<String, String>)
 
-    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, fabrics: List<FabricLine>, schemas: List<String>): JsonElement = buildJsonObject {
+    private fun content(blueprint: Blueprint, positions: Map<String, Pair<Double, Double>>, fabrics: List<FabricLine>, schemas: List<String>, plugins: Map<String, String>): JsonElement = buildJsonObject {
         put("blueprint", Json.parseToJsonElement(ManifestJson.encode(blueprint)))
         put(
             "fabrics",
@@ -108,10 +112,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             ),
         )
         put("schemas", JsonArray(schemas.map { JsonPrimitive(it) }))
+        put("plugins", JsonObject(plugins.mapValues { JsonPrimitive(it.value) }))
         put("ui", buildJsonObject { put("positions", JsonObject(positions.mapValues { (_, p) -> JsonArray(listOf(JsonPrimitive(p.first), JsonPrimitive(p.second))) })) })
     }
 
-    private fun blueprintOf(draft: Draft): Blueprint? = try {
+    internal fun blueprintOf(draft: Draft): Blueprint? = try {
         ManifestJson.parseBlueprint(draft.content.jsonObject.getValue("blueprint").toString(), "draft ${draft.name}")
     } catch (e: Exception) {
         null
@@ -132,6 +137,26 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return listOf(FabricLine(1, o["roles"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(), emptyMap()))
     }
+
+    /** `plugin = range`, one per line; an empty range or a line that is only a name is left out; a range that is not valid is refused. */
+    private fun parsePluginRanges(text: String): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        for (line in text.lines().map { it.trim() }.filter { it.isNotEmpty() }) {
+            val name = line.substringBefore('=').trim()
+            val range = line.substringAfter('=', "").trim()
+            if (range.isEmpty()) continue
+            PackageNames.nameProblem(name)?.let { throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "plugin '$name': $it") }
+            try {
+                cringle.packaging.VersionRange.parse(range)
+            } catch (e: IllegalArgumentException) {
+                throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the version range of '$name' is not valid: ${e.message}")
+            }
+            result[name] = range
+        }
+        return result
+    }
+
+    private fun pluginRangesOf(draft: Draft): Map<String, String> = draft.content.jsonObject["plugins"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content }.orEmpty()
 
     private fun schemasOf(draft: Draft): List<String> = draft.content.jsonObject["schemas"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
 
@@ -193,6 +218,12 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         emptyMap()
     }
 
+    private fun types(text: String?): Map<String, cringle.contract.SchemaRef> = try {
+        (Json.parseToJsonElement(text ?: "{}") as? JsonObject).orEmpty().mapNotNull { (k, v) -> (v as? JsonPrimitive)?.content?.let { s -> runCatching { cringle.contract.SchemaRef.parse(s) }.getOrNull()?.let { k to it } } }.toMap()
+    } catch (e: kotlinx.serialization.SerializationException) {
+        emptyMap()
+    }
+
     /** A connection between a local port and an external end (another engine, a service): the local port has to support the tether type of the end. */
     private fun checkExternal(snapshot: PluginCatalog.Snapshot, form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
@@ -216,7 +247,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
     private suspend fun check(form: Map<String, String>): JsonObject {
         fun no(message: String) = buildJsonObject { put("ok", false); put("message", message) }
         val snapshot = try {
-            catalog.snapshot()
+            catalog.snapshot(runCatching { parsePluginRanges(form["plugins"].orEmpty()) }.getOrDefault(emptyMap()))
         } catch (e: Exception) {
             return no(describe(e))
         }
@@ -236,12 +267,41 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         // the verdict of the same validator that the package build and the deploy use, for this one tether only
         val probe = Blueprint(
             "probe",
-            listOf(BlueprintBlock("a", fromType, varArgCounts = fromCounts), BlueprintBlock("b", toType, varArgCounts = toCounts)),
+            listOf(
+                BlueprintBlock("a", fromType, varArgCounts = fromCounts, types = types(form["fromTypes"])),
+                BlueprintBlock("b", toType, varArgCounts = toCounts, types = types(form["toTypes"])),
+            ),
             listOf(TetherDef(type, Endpoint("a", out.name, outSlot.index), Endpoint("b", input.name, inSlot.index))),
         )
         val problems = PackageValidator.validateBlueprint(probe, snapshot::block, snapshot.registry, "probe").filter { it.path.contains("$.tethers[") }
         if (problems.isNotEmpty()) return no(problems.joinToString("; ") { it.message })
         return buildJsonObject { put("ok", true); put("type", type.name) }
+    }
+
+    // --- for the MCP server (McpTools) ---
+
+    /** Every block of the plugins in the repository (each plugin in its highest version) as `plugin@version` and its definition. */
+    internal suspend fun catalogBlocks(): List<Triple<String, String, BlockDefinition>> =
+        catalog.snapshot().plugins.flatMap { p -> p.manifest.blocks.map { Triple(p.manifest.name, p.manifest.version, it) } }
+
+    /** The problems that the validators find in [blueprint] (the check of the editor and of publishing). */
+    internal suspend fun checkBlueprint(blueprint: Blueprint): List<PackageProblem> {
+        val snapshot = catalog.snapshot()
+        return PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/${blueprint.name}.json")
+    }
+
+    /**
+     * Stores [blueprint] as the blueprint of the project draft [name] (fabrics, schemas and positions of the draft stay) and returns the draft with the problems of
+     * the check; a blueprint with problems is stored as work in progress, as by the editor.
+     */
+    internal suspend fun saveBlueprint(name: String, blueprint: Blueprint, version: String?): Pair<Draft, List<PackageProblem>> {
+        val previous = drafts.load("project", name) ?: throw DraftException("there is no project '$name'")
+        val named = blueprint.copy(name = name)
+        val problems = checkBlueprint(named)
+        val positions = previous.content.jsonObject["ui"]?.jsonObject?.get("positions")?.jsonObject.orEmpty()
+            .mapValues { (_, p) -> p.jsonArray[0].jsonPrimitive.content.toDouble() to p.jsonArray[1].jsonPrimitive.content.toDouble() }
+        val saved = drafts.save("project", name, version?.trim()?.ifEmpty { null } ?: previous.version, content(named, positions, fabricsOf(previous), schemasOf(previous), pluginRangesOf(previous)), null)
+        return saved to problems
     }
 
     // --- publishing ---
@@ -250,9 +310,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
     suspend fun publish(draft: Draft): String {
         val blueprint = blueprintOf(draft) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the draft holds no blueprint")
         if (blueprint.blocks.isEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the blueprint has no block")
-        val snapshot = catalog.snapshot()
+        val ranges = pluginRangesOf(draft)
+        val snapshot = catalog.snapshot(ranges)
         val used = blueprint.blocks.map { it.block.substringBefore('/') }.distinct()
         val plugins = used.map { name -> snapshot.plugins.firstOrNull { it.manifest.name == name } ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the plugin '$name' is not in the repository") }
+        snapshot.unmatched.filter { it in used }.firstOrNull()?.let { throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "no version of the plugin '$it' satisfies ${ranges[it]}") }
         val schemas = LinkedHashMap<String, String>()
         for (schemaName in schemasOf(draft)) {
             val schemaDraft = drafts.load("schema", schemaName) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the schema draft '$schemaName' of this project does not exist")
@@ -266,22 +328,44 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             if (schemas.put("schemas/${document.namespace}.json", text) != null) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "two schema drafts have the namespace ${document.namespace}")
         }
         val manifest = ProjectManifest(
-            draft.name, draft.version, plugins.associate { it.manifest.name to "^${it.manifest.version}" },
+            draft.name, draft.version, plugins.associate { it.manifest.name to (ranges[it.manifest.name] ?: "^${it.manifest.version}") },
             listOf("blueprints/${blueprint.name}.json"), schemas.keys.toList(), fabricsOf(draft).map { FabricConfig(blueprint.name, it.instances, it.roles, it.labels) },
         )
         val project = ProjectPackage(manifest, listOf(blueprint), schemas, emptyList())
         val problems = PackageValidator.validateProjectSources(project) + PackageValidator.validateProject(project, plugins)
         if (problems.isNotEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, problems.joinToString("; ") { "${it.path}: ${it.message}" })
-        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, emptyMap(), it) }.toByteArray()
+        val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, files.all(draft.name), it) }.toByteArray()
         val m = publishPackage(core, bytes)
         return "Published ${m.name} ${m.version}; deploy it on the deployments page"
     }
 
     // --- the page ---
 
+    /** The plugins of the repository with the version that the editor uses and the versions there are. */
+    private fun pluginList(snapshot: PluginCatalog.Snapshot, ranges: Map<String, String>): Html = html(
+        raw("<ul class=\"plugin-versions\">"),
+        snapshot.plugins.map { p ->
+            val name = p.manifest.name
+            html(
+                h("<li><strong>{}</strong> uses {}; available: {}", name, p.manifest.version, snapshot.versions[name].orEmpty().joinToString(", ")),
+                if (name in snapshot.unmatched) h(" <span class=\"problem\">no version satisfies {}, the highest is used</span>", ranges[name]) else Html(""),
+                raw("</li>"),
+            )
+        },
+        raw("</ul>"),
+    )
+
+    private fun portJson(p: cringle.contract.PortDefinition) = buildJsonObject {
+        put("name", p.name)
+        put("varArg", p.varArg)
+        put("schema", "${p.schema.namespace}/${p.schema.name}")
+        p.typeParam?.let { put("typeParam", it) }
+    }
+
     private suspend fun editor(session: Session, draft: Draft): Html {
+        val ranges = pluginRangesOf(draft)
         val snapshot = try {
-            catalog.snapshot()
+            catalog.snapshot(ranges)
         } catch (e: Exception) {
             return html(pageHeader("Blueprint ${draft.name}", "", raw("<a class=\"btn\" href=\"/drafts\">All drafts</a>")), notice(describe(e)))
         }
@@ -293,11 +377,13 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                     add(
                         buildJsonObject {
                             put("block", "${plugin.manifest.name}/${b.name}")
-                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
-                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { buildJsonObject { put("name", it.name); put("varArg", it.varArg) } }))
+                            put("inputs", JsonArray(BlueprintGraph.inputs(b).map { portJson(it) }))
+                            put("outputs", JsonArray(BlueprintGraph.outputs(b).map { portJson(it) }))
+                            put("typeParameters", JsonArray(b.typeParameters.map { t -> buildJsonObject { put("name", t.name); put("bound", "${t.bound.namespace}/${t.bound.name}") } }))
                             put("title", b.name)
                             put("varArg", b.ports.any { it.varArg })
                             put("config", b.configSchema?.let { "${it.namespace}/${it.name}" }.orEmpty())
+                            put("configFields", ConfigFields.of(b, snapshot.registry))
                         },
                     )
                 }
@@ -341,8 +427,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return html(
             h(
-                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
-                palette.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
+                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-schemas=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
+                palette.toString(), buildJsonArray { snapshot.registry.types().forEach { add(JsonPrimitive("${it.namespace}/${it.name}")) } }.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
             ),
             raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
             raw("<div id=\"editor-left\"><header id=\"editor-head\" class=\"float\">"),
@@ -367,6 +453,11 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             raw("<details id=\"schemas-box\"><summary>Schemas of the project</summary><div class=\"dropdown\">"),
             schemaBox,
             raw("</div></details>"),
+            raw("<details id=\"plugins-box\"><summary>Plugins</summary><div class=\"dropdown\">"),
+            h("<textarea id=\"plugins\" rows=\"3\" cols=\"44\" placeholder=\"cringle-std = ~1.9.0\">{}</textarea>", ranges.entries.joinToString("\n") { "${it.key} = ${it.value}" }),
+            raw("<small>plugin = version range (<code>^1.9.0</code>, <code>~1.9.0</code>, <code>1.9.0</code>), one per line. A plugin without a line is used in its highest version.</small>"),
+            pluginList(snapshot, ranges),
+            raw("</div></details>"),
             raw("<details id=\"services-box\"><summary>Provided services</summary><div class=\"dropdown\">"),
             h("<textarea id=\"provides\" rows=\"3\" cols=\"44\" placeholder=\"orders=store.in\">{}</textarea>", provides),
             raw("<small>service=block.port, one per line</small></div></details>"),
@@ -379,10 +470,25 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         )
     }
 
-    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>, blocks: Int): Html = html(
+    private fun result(error: String?, saved: Draft?, problems: List<PackageProblem>, blocks: Int, blueprint: Blueprint?): Html = html(
         notice(error),
         if (saved != null) html(info("Saved as revision ${saved.revision}."), h("<input type=\"hidden\" id=\"revision\" value=\"{}\" hx-swap-oob=\"true\">", saved.revision)) else Html(""),
         if (error == null && problems.isEmpty()) info(if (blocks == 0) "The blueprint has no block yet; add one to be able to publish it." else "The blueprint is valid.") else Html(""),
-        if (problems.isNotEmpty()) html(raw("<p class=\"error\">The blueprint has problems:</p><ul>"), problems.map { h("<li><code>{}</code> {}</li>", it.path, it.message) }, raw("</ul>")) else Html(""),
+        if (problems.isNotEmpty()) {
+            val described = if (blueprint != null) BlueprintProblems.describe(problems, blueprint) else problems.map { DescribedProblem(it.message, emptyList(), it.path) }
+            html(
+                raw("<p class=\"error\">The blueprint has problems (click one to go to the block):</p><ul id=\"problems\">"),
+                described.map {
+                    if (it.blocks.isEmpty()) {
+                        h("<li><code>{}</code> {}</li>", it.path, it.text)
+                    } else {
+                        h("<li><button type=\"button\" class=\"problem\" data-blocks=\"{}\">{}</button></li>", it.blocks.joinToString(","), it.text)
+                    }
+                },
+                raw("</ul>"),
+            )
+        } else {
+            raw("<span id=\"problems-none\"></span>")
+        },
     )
 }

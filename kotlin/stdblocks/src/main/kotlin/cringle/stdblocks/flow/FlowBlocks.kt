@@ -9,6 +9,9 @@ import cringle.contract.LoggingDriver
 import cringle.contract.Tether
 import cringle.contract.TetherEvent
 import cringle.stdblocks.ANY
+import cringle.stdblocks.BOOLEAN
+import cringle.stdblocks.DOUBLE
+import cringle.stdblocks.STRING
 import cringle.stdblocks.Entry
 import cringle.stdblocks.INT
 import cringle.stdblocks.entry
@@ -93,7 +96,50 @@ internal class Debounce(private val dispatcher: CoroutineDispatcher = Dispatcher
     }
 }
 
+/** `flow.trigger` for values of [type]: the slot ports `in`, `request` and `out` have that type, `trigger` takes any signal, `done` is the next trigger signal. */
+private fun trigger(name: String, type: cringle.contract.SchemaRef, neutral: Any? = null) = entry(
+    name,
+    listOf(
+        inPort("trigger", ANY),
+        cringle.contract.PortDefinition("in", cringle.contract.PortDirection.IN, setOf(cringle.contract.TetherType.MESSAGE), type, varArg = true),
+        cringle.contract.PortDefinition("out", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.MESSAGE), type, varArg = true),
+        cringle.contract.PortDefinition("request", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.REQUEST_RESPONSE), type, varArg = true),
+        outPort("done", INT),
+    ),
+) { Trigger(if (neutral == null) { value -> value } else { _ -> neutral }) }
+
+/** The value the trigger sends when it pulls a value of type [type]: a neutral one for the basic types, otherwise the signal itself passes. */
+private fun neutralFor(type: cringle.contract.SchemaRef?): (Any) -> Any = when (type) {
+    STRING -> { _ -> "" }
+    DOUBLE -> { _ -> 0.0 }
+    INT -> { _ -> 0L }
+    BOOLEAN -> { _ -> false }
+    else -> { value -> value }
+}
+
+/** `flow.trigger` with the type parameter `T` (bound `Any`): the ports `in`, `request` and `out` carry `T`, `trigger` takes any signal, `done` is the next trigger signal. */
+private val GENERIC_TRIGGER = run {
+    val message = setOf(cringle.contract.TetherType.MESSAGE)
+    val ports = listOf(
+        inPort("trigger", ANY),
+        cringle.contract.PortDefinition("in", cringle.contract.PortDirection.IN, message, ANY, varArg = true, typeParam = "T"),
+        cringle.contract.PortDefinition("out", cringle.contract.PortDirection.OUT, message, ANY, varArg = true, typeParam = "T"),
+        cringle.contract.PortDefinition("request", cringle.contract.PortDirection.OUT, setOf(cringle.contract.TetherType.REQUEST_RESPONSE), ANY, varArg = true, typeParam = "T"),
+        outPort("done", INT),
+    )
+    Entry(
+        cringle.contract.BlockDefinition("flow.trigger", listOf(ANY, INT), ports, emptyList(), null, emptyList(), listOf(cringle.contract.TypeParameter("T"))),
+        { Trigger(neutralFor(null)) },
+        { _, types -> Trigger(neutralFor(types["T"])) },
+    )
+}
+
 internal val FLOW_ENTRIES: List<Entry> = listOf(
+    GENERIC_TRIGGER,
+    trigger("flow.trigger-string", STRING, ""),
+    trigger("flow.trigger-number", DOUBLE, 0.0),
+    trigger("flow.trigger-int", INT, 0L),
+    trigger("flow.trigger-boolean", BOOLEAN, false),
     entry("flow.delay", listOf(inPort("in", ANY), outPort("out", ANY)), "DelayConfig") { Delay() },
     entry("flow.debounce", listOf(inPort("in", ANY), outPort("out", ANY)), "DebounceConfig") { Debounce() },
     handlerEntry("flow.buffer", listOf(inPort("in", ANY), inPort("flush", INT), outPort("batch", ANY)), "BufferConfig") { config ->

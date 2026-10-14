@@ -50,6 +50,9 @@ public class SchemaRegistry {
         documents[document.namespace] = document
     }
 
+    /** All types of all documents, as references, in the order of the documents. */
+    public fun types(): List<SchemaRef> = documents.values.flatMap { d -> d.types.keys.map { SchemaRef(d.namespace, it) } }
+
     /** Returns the definition of [ref], or `null` if its namespace or name is unknown. */
     public fun resolve(ref: SchemaRef): TypeDef? = documents[ref.namespace]?.types?.get(ref.name)
 

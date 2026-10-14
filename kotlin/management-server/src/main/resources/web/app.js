@@ -61,6 +61,7 @@ document.addEventListener('htmx:responseError', function (event) {
   if (!host || typeof Drawflow === 'undefined') return;
   var palette = JSON.parse(host.dataset.palette);
   var options = JSON.parse(host.dataset.options);
+  var schemaNames = JSON.parse(host.dataset.schemas || '[]');
   var byBlock = {};
   palette.forEach(function (p) { byBlock[p.block] = p; });
   var editor = new Drawflow(document.getElementById('drawflow'));
@@ -68,6 +69,7 @@ document.addEventListener('htmx:responseError', function (event) {
   editor.start();
   var graph = JSON.parse(host.dataset.graph);
   if (Object.keys(graph.drawflow.Home.data).length > 0) editor.import(graph);
+  setTimeout(function () { labelAll(); }, 0);
   // the palette, the toolbar and the properties float above the canvas: start with the graph clear of the palette and the toolbar
   editor.canvas_x = 280;
   editor.canvas_y = 90;
@@ -108,10 +110,56 @@ document.addEventListener('htmx:responseError', function (event) {
     return counts;
   }
   function nodeHtml(data) {
-    var ins = slots(data.block, 'inputs', data.varArgCounts), outs = slots(data.block, 'outputs', data.varArgCounts);
-    var label = function (l) { return l.label; };
-    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small><small class="ports">in: ' + esc(ins.map(label).join(', ')) +
-      ' | out: ' + esc(outs.map(label).join(', ')) + '</small>';
+    return '<div class="node-title">' + esc(data.id) + '</div><small>' + esc(data.block) + '</small>';
+  }
+  // every port of a node gets its label beside the dot (the tooltip adds the type); a node is as high as its ports need
+  // the type of every port of a block: a port of a type parameter has the type the blueprint bound (otherwise the bound of the parameter)
+  function portTypes(blockType, kind, bound) {
+    var types = {};
+    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { types[port.name] = (port.typeParam && bound && bound[port.typeParam]) || port.schema; });
+    return types;
+  }
+  function typeName(type) { return type.substring(type.indexOf('/') + 1); }
+  function labelPorts(list, ports, types) {
+    Array.prototype.forEach.call(ports, function (port, i) {
+      var old = port.querySelector('.port-label');
+      if (old) old.remove();
+      var slot = list[i];
+      var text = slot ? slot.label : 'port ' + (i + 1);
+      var span = document.createElement('span');
+      span.className = 'port-label';
+      var type = slot && types ? types[slot.port] : null;
+      span.textContent = type ? text + ': ' + typeName(type) : text;
+      port.append(span);
+      port.title = type ? text + ' (' + type + ')' : text;
+    });
+  }
+  function labelNode(number) {
+    var el = document.getElementById('node-' + number);
+    if (!el) return;
+    var data = editor.getNodeFromId(number).data;
+    var ins, outs, inTypes = null, outTypes = null;
+    if (data.kind === 'external') {
+      var name = data.mode === 'service' ? 'service' : (data.send ? 'to remote' : 'from remote');
+      ins = data.send ? [{ label: name }] : [];
+      outs = data.send ? [] : [{ label: name }];
+    } else {
+      ins = slots(data.block, 'inputs', data.varArgCounts);
+      outs = slots(data.block, 'outputs', data.varArgCounts);
+      inTypes = portTypes(data.block, 'inputs', data.types);
+      outTypes = portTypes(data.block, 'outputs', data.types);
+    }
+    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes);
+    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes);
+    el.style.minHeight = (Math.max(ins.length, outs.length, 1) * 25 + 72) + 'px';
+    // the widest input label and the widest output label must fit side by side
+    var widest = function (selector) {
+      return Array.prototype.reduce.call(el.querySelectorAll(selector), function (w, span) { return Math.max(w, span.offsetWidth); }, 0);
+    };
+    el.style.minWidth = Math.max(200, widest('.input .port-label') + widest('.output .port-label') + 72) + 'px';
+  }
+  function labelAll() {
+    Object.keys(editor.export().drawflow.Home.data).forEach(labelNode);
   }
   function slotLabel(data, kind, className) {
     var n = parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10);
@@ -158,6 +206,7 @@ document.addEventListener('htmx:responseError', function (event) {
     if (hint) hint.hidden = Object.keys(editor.export().drawflow.Home.data).length > 0;
   }
   editor.on('nodeCreated', showHint);
+  editor.on('nodeCreated', function (number) { labelNode(number); });
   editor.on('nodeRemoved', showHint);
   showHint();
 
@@ -193,7 +242,7 @@ document.addEventListener('htmx:responseError', function (event) {
       var p = byBlock[button.dataset.block];
       if (!p) return;
       var id = uniqueId(p.title);
-      var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block) };
+      var data = { id: id, block: p.block, config: {}, isolation: 'SHARED', varArgCounts: defaultCounts(p.block), types: {} };
       var count = Object.keys(editor.export().drawflow.Home.data).length;
       editor.addNode(p.block, slots(p.block, 'inputs', data.varArgCounts).length, slots(p.block, 'outputs', data.varArgCounts).length,
         40 + 280 * (count % 4), 40 + 140 * Math.floor(count / 4), 'cringle-block', data, nodeHtml(data));
@@ -201,15 +250,51 @@ document.addEventListener('htmx:responseError', function (event) {
   });
 
   var rejecting = false;
+  // the blocks of a refused connection are marked for a few seconds
+  function flashNodes(numbers) {
+    var els = numbers.map(function (n) { return document.getElementById('node-' + n); }).filter(Boolean);
+    els.forEach(function (el) { el.classList.add('node-error'); });
+    setTimeout(function () { els.forEach(function (el) { el.classList.remove('node-error'); }); }, 4000);
+  }
   // the server decides whether a connection is allowed
   var rebuilding = false;
+  // generics: a port of a type parameter that is not bound yet takes the type of the port it is connected to (an unbound `T` is `Any`, that connects to nothing typed)
+  function genericPort(data, kind, className) {
+    var slot = slots(data.block, kind, data.varArgCounts)[parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10) - 1];
+    if (!slot) return null;
+    var def = ((byBlock[data.block] || {})[kind] || []).filter(function (p) { return p.name === slot.port; })[0];
+    return { name: slot.port, parameter: def && def.typeParam };
+  }
+  function inferTypes(c, from, to) {
+    var done = [];
+    if (isExternal(from) || isExternal(to)) return done;
+    var out = genericPort(from, 'outputs', c.output_class), inn = genericPort(to, 'inputs', c.input_class);
+    var outType = portTypes(from.block, 'outputs', from.types)[out && out.name], inType = portTypes(to.block, 'inputs', to.types)[inn && inn.name];
+    var bind = function (id, data, port, type) {
+      if (!port || !port.parameter || (data.types || {})[port.parameter] || !type || type === 'cringle.std/Any') return;
+      data.types = Object.assign({}, data.types);
+      data.types[port.parameter] = type;
+      editor.updateNodeDataFromId(id, data);
+      labelNode(id);
+      done.push({ id: id, data: data, parameter: port.parameter });
+    };
+    bind(c.output_id, from, out, inType);
+    bind(c.input_id, to, inn, outType);
+    return done;
+  }
+  function undoInferred(done) {
+    done.forEach(function (d) { delete d.data.types[d.parameter]; editor.updateNodeDataFromId(d.id, d.data); labelNode(d.id); });
+  }
   editor.on('connectionCreated', function (c) {
     if (rebuilding) return;
     var from = blockData(c.output_id), to = blockData(c.input_id);
+    var inferred = inferTypes(c, from, to);
     var body = new URLSearchParams({
       fromExternal: isExternal(from) ? from.type : undefined, toExternal: isExternal(to) ? to.type : undefined,
       fromBlock: from.block, fromOutput: c.output_class.replace('output_', ''), fromCounts: JSON.stringify(from.varArgCounts || {}),
       toBlock: to.block, toInput: c.input_class.replace('input_', ''), toCounts: JSON.stringify(to.varArgCounts || {}),
+      fromTypes: JSON.stringify(from.types || {}), toTypes: JSON.stringify(to.types || {}),
+      plugins: document.getElementById('plugins').value,
     });
     ['fromExternal', 'toExternal'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
     ['fromBlock', 'toBlock'].forEach(function (k) { if (body.get(k) === 'undefined') body.delete(k); });
@@ -217,16 +302,19 @@ document.addEventListener('htmx:responseError', function (event) {
       .then(function (r) { return r.json(); })
       .then(function (verdict) {
         if (verdict.ok) {
-          say('Connected as a ' + verdict.type + ' tether.', false);
+          say('Connected as a ' + verdict.type + ' tether.' + (inferred.length ? ' Type ' + inferred.map(function (d) { return d.parameter + ' = ' + typeName(d.data.types[d.parameter]); }).join(', ') + '.' : ''), false);
           window.cringleEditorSnapshot();
         } else {
+          undoInferred(inferred);
           rejecting = true;
           editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
           rejecting = false;
           say('Not connected: ' + verdict.message, true);
+          flashNodes([c.output_id, c.input_id]);
         }
       })
       .catch(function () {
+        undoInferred(inferred);
         rejecting = true;
         editor.removeSingleConnection(c.output_id, c.input_id, c.output_class, c.input_class);
         rejecting = false;
@@ -243,6 +331,74 @@ document.addEventListener('htmx:responseError', function (event) {
     wrap.append(l);
     return wrap;
   }
+  // one field of the configuration form: [f] is {name, kind, optional, values}; an empty optional field is absent from the configuration
+  function configField(f, id, data, jsonArea) {
+    function store(value) {
+      data.config = data.config || {};
+      if (value === undefined) delete data.config[f.name]; else data.config[f.name] = value;
+      editor.updateNodeDataFromId(id, data);
+      jsonArea.value = JSON.stringify(data.config, null, 2);
+      jsonArea.classList.remove('invalid');
+      changed();
+    }
+    var current = (data.config || {})[f.name];
+    var control;
+    if (f.kind === 'boolean') {
+      control = document.createElement('select');
+      [['', f.optional ? '(not set)' : 'false'], ['true', 'true'], ['false', 'false']].forEach(function (pair) {
+        if (pair[0] === 'false' && !f.optional) return;
+        var opt = document.createElement('option');
+        opt.value = pair[0];
+        opt.textContent = pair[1];
+        opt.selected = (current === undefined ? '' : String(current)) === pair[0];
+        control.append(opt);
+      });
+      control.addEventListener('change', function () { store(control.value === '' ? (f.optional ? undefined : false) : control.value === 'true'); });
+    } else if (f.kind === 'enum') {
+      control = document.createElement('select');
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = f.optional ? '(not set)' : '(choose)';
+      control.append(none);
+      (f.values || []).forEach(function (v) {
+        var opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        opt.selected = current === v;
+        control.append(opt);
+      });
+      control.addEventListener('change', function () { store(control.value === '' ? undefined : control.value); });
+    } else if (f.kind === 'json') {
+      control = document.createElement('textarea');
+      control.rows = 3;
+      control.value = current === undefined ? '' : JSON.stringify(current);
+      control.addEventListener('input', function () {
+        if (control.value.trim() === '') { control.classList.remove('invalid'); store(undefined); return; }
+        try {
+          var parsed = JSON.parse(control.value);
+          control.classList.remove('invalid');
+          store(parsed);
+        } catch (e) {
+          control.classList.add('invalid');
+        }
+      });
+    } else {
+      control = document.createElement('input');
+      if (f.kind === 'int' || f.kind === 'double') {
+        control.type = 'number';
+        control.step = f.kind === 'int' ? '1' : 'any';
+      }
+      control.value = current === undefined ? '' : current;
+      control.addEventListener('input', function () {
+        if (control.value === '') { store(undefined); return; }
+        if (f.kind === 'int') store(parseInt(control.value, 10));
+        else if (f.kind === 'double') store(parseFloat(control.value));
+        else store(control.value);
+      });
+    }
+    return field(f.name + (f.optional ? '' : ' *'), control);
+  }
+
   function showExternal(id, data) {
     function text(label, name, placeholder) {
       var input = document.createElement('input');
@@ -288,6 +444,7 @@ document.addEventListener('htmx:responseError', function (event) {
         data.config = JSON.parse(config.value || '{}');
         config.classList.remove('invalid');
         editor.updateNodeDataFromId(id, data);
+        changed();
       } catch (e) {
         config.classList.add('invalid');
       }
@@ -310,7 +467,44 @@ document.addEventListener('htmx:responseError', function (event) {
       });
       parts.push(field('Slots of ' + port, n));
     });
-    parts.push(field('Configuration (JSON)', config));
+    // generics: one select per type parameter of the block
+    ((byBlock[data.block] || {}).typeParameters || []).forEach(function (parameter) {
+      var select = document.createElement('select');
+      var first = document.createElement('option');
+      first.value = '';
+      first.textContent = typeName(parameter.bound) + ' (bound)';
+      select.append(first);
+      schemaNames.forEach(function (name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        opt.selected = ((data.types || {})[parameter.name] || '') === name;
+        select.append(opt);
+      });
+      select.addEventListener('change', function () {
+        data.types = Object.assign({}, data.types);
+        if (select.value) data.types[parameter.name] = select.value; else delete data.types[parameter.name];
+        editor.updateNodeDataFromId(id, data);
+        labelNode(id);
+        changed();
+      });
+      parts.push(field('Type ' + parameter.name, select));
+    });
+    // a form for the fields of the configuration type of the block; the JSON below stays and shows the same
+    var fields = (byBlock[data.block] || {}).configFields || [];
+    if (fields.length > 0) {
+      var form = document.createElement('div');
+      form.className = 'config-form';
+      fields.forEach(function (f) { form.append(configField(f, id, data, config)); });
+      parts.push(form);
+      var folded = document.createElement('details');
+      var summary = document.createElement('summary');
+      summary.textContent = 'Configuration as JSON';
+      folded.append(summary, config);
+      parts.push(folded);
+    } else {
+      parts.push(field('Configuration (JSON)', config));
+    }
     panel.replaceChildren.apply(panel, parts);
   });
 
@@ -410,7 +604,7 @@ document.addEventListener('htmx:responseError', function (event) {
   function values() {
     return {
       graph: JSON.stringify(editor.export()), options: JSON.stringify(options),
-      provides: document.getElementById('provides').value, fabrics: document.getElementById('fabrics').value,
+      provides: document.getElementById('provides').value, fabrics: document.getElementById('fabrics').value, plugins: document.getElementById('plugins').value,
       schemas: Array.prototype.filter.call(document.querySelectorAll('.schema-pick'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(','),
       version: document.getElementById('version').value, revision: document.getElementById('revision').value,
     };
@@ -421,10 +615,63 @@ document.addEventListener('htmx:responseError', function (event) {
     saving = true;
     var state = stateKey();
     return htmx.ajax('POST', host.dataset.saveUrl, { source: host, target: '#result', swap: 'morph:innerHTML', values: values() })
-      .then(function () { lastSaved = state; })
+      .then(function () { lastSaved = state; markProblems(); })
       .finally(function () { saving = false; });
   }
   if (save) save.addEventListener('click', saveNow);
+
+  // blocks with a problem: marked with the class node-error; a click on a problem selects the block and shows it in the middle of the canvas
+  function nodeNumber(blockId) {
+    var nodes = editor.export().drawflow.Home.data;
+    var keys = Object.keys(nodes);
+    for (var i = 0; i < keys.length; i++) if (nodes[keys[i]].data.id === blockId) return keys[i];
+    return null;
+  }
+  function clearErrors() {
+    document.querySelectorAll('#drawflow .node-error').forEach(function (el) { el.classList.remove('node-error'); });
+  }
+  function markErrors(blockIds) {
+    blockIds.forEach(function (blockId) {
+      var number = nodeNumber(blockId);
+      var el = number && document.getElementById('node-' + number);
+      if (el) el.classList.add('node-error');
+    });
+  }
+  function markProblems() {
+    clearErrors();
+    var first = null;
+    document.querySelectorAll('#problems button.problem').forEach(function (b) {
+      var ids = b.dataset.blocks.split(',');
+      markErrors(ids);
+      if (first === null) first = ids[0];
+    });
+    if (first !== null) focusBlock(first, false);
+  }
+  function focusBlock(blockId, select) {
+    var number = nodeNumber(blockId);
+    if (!number) return;
+    var node = editor.getNodeFromId(number);
+    var zoom = editor.zoom || 1;
+    editor.canvas_x = editor.container.clientWidth / 2 - (node.pos_x + 100) * zoom;
+    editor.canvas_y = editor.container.clientHeight / 2 - (node.pos_y + 40) * zoom;
+    editor.precanvas.style.transform = 'translate(' + editor.canvas_x + 'px, ' + editor.canvas_y + 'px) scale(' + zoom + ')';
+    if (select) {
+      document.querySelectorAll('#drawflow .drawflow-node.selected').forEach(function (el) { el.classList.remove('selected'); });
+      var el = document.getElementById('node-' + number);
+      if (el) el.classList.add('selected');
+      editor.dispatch('nodeSelected', number);
+    }
+  }
+  var resultBox = document.getElementById('result');
+  if (resultBox) {
+    resultBox.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('button.problem');
+      if (!button) return;
+      var ids = button.dataset.blocks.split(',');
+      markErrors(ids);
+      focusBlock(ids[0], true);
+    });
+  }
 
   // autosave 2 s after the last change, only when something differs from what was saved
   var autosave = document.getElementById('autosave');
@@ -435,7 +682,12 @@ document.addEventListener('htmx:responseError', function (event) {
       if (stateKey() !== lastSaved) saveNow();
     }, 2000);
   }
-  ['version', 'fabrics', 'provides'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  ['version', 'fabrics', 'provides', 'plugins'].forEach(function (id) { document.getElementById(id).addEventListener('input', changed); });
+  // other versions of a plugin offer other blocks: the editor is read again with the saved ranges
+  document.getElementById('plugins').addEventListener('change', function () {
+    clearTimeout(autosaveTimer);
+    saveNow().then(function () { window.location.reload(); });
+  });
   document.querySelectorAll('.schema-pick').forEach(function (c) { c.addEventListener('change', changed); });
   editor.on('nodeDataChanged', function () { changed(); });
 
@@ -470,6 +722,7 @@ document.addEventListener('htmx:responseError', function (event) {
   function restore(state) {
     editor.clear();
     editor.import(JSON.parse(state));
+    labelAll();
     showHint();
     panel.replaceChildren();
     changed();

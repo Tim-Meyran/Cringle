@@ -34,7 +34,7 @@ internal object Icons {
 
     private val byLabel = mapOf(
         "Dashboard" to "dashboard", "Connect" to "connect", "Machines" to "machines", "Engines" to "engines", "Fabrics" to "fabrics", "Deployments" to "deployments",
-        "Debugger" to "debugger", "Monitor" to "monitor", "Logs" to "logs", "Metrics" to "metrics", "Data warehouse" to "dwh", "Drafts" to "drafts", "Configuration" to "config",
+        "Debugger" to "debugger", "Monitor" to "monitor", "Logs" to "logs", "Metrics" to "metrics", "Data warehouse" to "dwh", "Projects" to "packages", "Drafts" to "drafts", "Configuration" to "config",
         "Users" to "users", "Groups" to "groups", "Invites" to "invites", "Registries" to "registries", "Trust" to "trust", "Packages" to "packages",
     )
 

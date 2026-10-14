@@ -64,8 +64,7 @@ internal object BlueprintGraph {
 
     /** The content of a node: the block id, the block, and the names of its ports (Drawflow draws the ports as dots without labels). */
     fun nodeHtml(id: String, block: String, ins: List<Slot>, outs: List<Slot>): String =
-        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small><small class=\"ports\">in: " + esc(ins.joinToString(", ") { it.label }) +
-            " | out: " + esc(outs.joinToString(", ") { it.label }) + "</small>"
+        "<div class=\"node-title\">" + esc(id) + "</div><small>" + esc(block) + "</small>"
 
     /** True for a tether to a port on another engine or to a service: one local end and an external end (`remote` or `service`). */
     fun external(t: TetherDef): Boolean = (t.remote != null || t.service != null) && (t.from != null) != (t.to != null)
@@ -195,6 +194,7 @@ internal object BlueprintGraph {
                         put("config", b.config)
                         put("isolation", b.isolation.name)
                         put("varArgCounts", JsonObject(countsFor(def, b.varArgCounts).mapValues { JsonPrimitive(it.value) }))
+                        put("types", JsonObject(b.types.mapValues { JsonPrimitive("${it.value.namespace}/${it.value.name}") }))
                     },
                 )
                 put("class", "cringle-block")
@@ -268,7 +268,14 @@ internal object BlueprintGraph {
             } ?: before?.isolation ?: cringle.contract.IsolationLevel.SHARED
             val given = (data["varArgCounts"] as? JsonObject)?.mapValues { (k, v) -> v.jsonPrimitive.content.toIntOrNull() ?: throw GraphException("the count of '$k' is not a number") }
                 ?: before?.varArgCounts.orEmpty()
-            byNumber[number] = BlueprintBlock(id, block, config, isolation, countsFor(definition(block), given))
+            val types = (data["types"] as? JsonObject)?.mapValues { (k, v) ->
+                try {
+                    cringle.contract.SchemaRef.parse(v.jsonPrimitive.content)
+                } catch (e: IllegalArgumentException) {
+                    throw GraphException("the type '$k' of '$id' is not a schema name: ${e.message}")
+                }
+            } ?: before?.types.orEmpty()
+            byNumber[number] = BlueprintBlock(id, block, config, isolation, countsFor(definition(block), given), types)
         }
         fun outSlot(number: String, className: String): Slot {
             val block = byNumber.getValue(number)

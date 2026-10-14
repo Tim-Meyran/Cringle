@@ -5,6 +5,7 @@ package cringle.packaging
 import cringle.contract.BlockDefinition
 import cringle.contract.IsolationLevel
 import cringle.contract.Parity
+import cringle.contract.SchemaRef
 import cringle.contract.TetherType
 import kotlinx.serialization.json.JsonObject
 
@@ -221,7 +222,7 @@ public data class ProvidedService(
 
 /**
  * A block instance in a blueprint. [block] is `pluginName/blockName`; [varArgCounts] gives the fixed size of every
- * VarArg port of the block.
+ * VarArg port of the block; [types] binds type parameters of the block (name to schema; one that is missing is its bound).
  */
 public data class BlueprintBlock(
     public val id: String,
@@ -229,6 +230,7 @@ public data class BlueprintBlock(
     public val config: JsonObject = JsonObject(emptyMap()),
     public val isolation: IsolationLevel = IsolationLevel.SHARED,
     public val varArgCounts: Map<String, Int> = emptyMap(),
+    public val types: Map<String, SchemaRef> = emptyMap(),
 )
 
 /**

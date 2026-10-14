@@ -80,6 +80,29 @@
     "ThrottleConfig": { "record": { "intervalMs": "cringle.std/Int" } },
     "BufferConfig": { "record": { "size": { "optional": "cringle.std/Int" } } },
     "PathConfig": { "record": { "path": "cringle.std/String" } },
+    "TextInputConfig": { "record": { "value": "cringle.std/String" } },
+    "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
+    "LogWriteConfig": {
+      "record": {
+        "level": { "optional": "LogLevel" },
+        "prefix": { "optional": "cringle.std/String" },
+        "template": { "optional": "cringle.std/String" }
+      }
+    },
+    "DwhWriteConfig": {
+      "record": {
+        "key": "cringle.std/String",
+        "tags": { "optional": { "map": "cringle.std/String" } }
+      }
+    },
+    "DwhStoreConfig": {
+      "record": {
+        "key": "cringle.std/String",
+        "tags": { "optional": { "map": "cringle.std/String" } },
+        "limit": { "optional": "cringle.std/Int" },
+        "lastMs": { "optional": "cringle.std/Int" }
+      }
+    },
     "LogLevel": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
   }
 }

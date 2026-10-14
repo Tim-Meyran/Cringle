@@ -199,6 +199,196 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("b64: QWRh")
     }
 
+    @Test
+    fun aTriggerReleasesHeldValuesIntoTheLog() {
+        // two constants fill the inputs of the trigger block at the start; a second timer, later, triggers it: the values leave on the matching outputs and
+        // the new trigger signal `done` starts the next step of the flow
+        fun indexed(from: String, port: String, fromIndex: Int?, to: String, input: String, toIndex: Int?) =
+            TetherDef(TetherType.MESSAGE, Endpoint(from, port, fromIndex), Endpoint(to, input, toIndex))
+        deployStd(
+            "std-trigger",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t1", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("t2", "time.timer-trigger", config("intervalMs" to 10, "initialDelayMs" to 1500, "count" to 1)),
+                    block("c1", "flow.constant", config("value" to "x")),
+                    block("c2", "flow.constant", config("value" to "y")),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "request" to 2, "out" to 2)),
+                    block("next", "flow.constant", config("value" to "after")),
+                    block("l1", "flow.log-any", config("prefix" to "a: ")),
+                    block("l2", "flow.log-any", config("prefix" to "b: ")),
+                    block("l3", "flow.log-any", config("prefix" to "next: ")),
+                ),
+                listOf(
+                    tether("t1", "tick", "c1", "trigger"),
+                    tether("t1", "tick", "c2", "trigger"),
+                    indexed("c1", "out", null, "trig", "in", 0),
+                    indexed("c2", "out", null, "trig", "in", 1),
+                    tether("t2", "tick", "trig", "trigger"),
+                    indexed("trig", "out", 0, "l1", "in", null),
+                    indexed("trig", "out", 1, "l2", "in", null),
+                    tether("trig", "done", "next", "trigger"),
+                    tether("next", "out", "l3", "in"),
+                ),
+            ),
+        )
+        awaitLog("a: \"x\"", "b: \"y\"", "next: \"after\"")
+    }
+
+    @Test
+    fun aTriggerPullsTheValuesOfInputBlocks() {
+        // the trigger asks a text input and a number input for their values; the answers leave on the matching outputs, `done` starts the next step
+        fun indexed(from: String, port: String, fromIndex: Int?, to: String, input: String, toIndex: Int?) =
+            TetherDef(if (port == "request" || input == "get") TetherType.REQUEST_RESPONSE else TetherType.MESSAGE, Endpoint(from, port, fromIndex), Endpoint(to, input, toIndex))
+        deployStd(
+            "std-pull",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "Ada")),
+                    block("age", "input.number", config("value" to 36)),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 2, "request" to 2, "out" to 2)),
+                    block("l1", "flow.log-any", config("prefix" to "name: ")),
+                    block("l2", "flow.log-any", config("prefix" to "age: ")),
+                    block("next", "flow.constant", config("value" to "go on")),
+                    block("l3", "flow.log-any", config("prefix" to "next: ")),
+                ),
+                listOf(
+                    indexed("trig", "request", 0, "name", "get", null),
+                    indexed("trig", "request", 1, "age", "get", null),
+                    tether("t", "tick", "trig", "trigger"),
+                    indexed("trig", "out", 0, "l1", "in", null),
+                    indexed("trig", "out", 1, "l2", "in", null),
+                    tether("trig", "done", "next", "trigger"),
+                    tether("next", "out", "l3", "in"),
+                ),
+            ),
+        )
+        awaitLog("name: \"Ada\"", "age: 36", "next: \"go on\"")
+    }
+
+    @Test
+    fun aValueIsWrittenToTheDwhAndReadBack() {
+        // the real data warehouse driver of the engine: a text is written with a key and tags, a second timer, later, reads the entries of the same block into the log
+        deployStd(
+            "std-dwh",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t1", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("t2", "time.timer-trigger", config("intervalMs" to 10, "initialDelayMs" to 1500, "count" to 1)),
+                    block("c", "flow.constant", config("value" to "stored")),
+                    block("w", "dwh.store", JsonObject(mapOf("key" to JsonPrimitive("greeting"), "tags" to JsonObject(mapOf("room" to JsonPrimitive("a1")))))),
+                    block("l1", "log.write", config("level" to "WARN", "prefix" to "wrote: ")),
+                    block("l2", "log.write", config("prefix" to "dwh: ")),
+                ),
+                listOf(
+                    tether("t1", "tick", "c", "trigger"),
+                    tether("c", "out", "w", "in"),
+                    tether("w", "out", "l1", "in"),
+                    tether("t2", "tick", "w", "read"),
+                    tether("w", "entries", "l2", "in"),
+                ),
+            ),
+        )
+        awaitLog("wrote: stored", "dwh: [{\"key\":\"greeting\",\"value\":\"stored\",\"timestamp\":\"", "\"tags\":{\"room\":\"a1\"}}]")
+    }
+
+    @Test
+    fun aTypedTriggerFeedsTypedBlocks() {
+        // flow.trigger-string pulls a text input; its typed output goes straight into text.upper (a String port) and on into the log: with the generic trigger this
+        // connection is refused ("Any is not assignable to String")
+        fun pull(from: String, to: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(from, "request", 0), Endpoint(to, "get"))
+        deployStd(
+            "std-typed",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "ada")),
+                    BlueprintBlock("trig", "cringle-std/flow.trigger-string", varArgCounts = mapOf("in" to 1, "request" to 1, "out" to 1)),
+                    block("up", "text.upper"),
+                    block("l", "flow.log", config("prefix" to "typed: ")),
+                ),
+                listOf(
+                    pull("trig", "name"),
+                    tether("t", "tick", "trig", "trigger"),
+                    TetherDef(TetherType.MESSAGE, Endpoint("trig", "out", 0), Endpoint("up", "in")),
+                    tether("up", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("typed: ADA")
+    }
+
+    @Test
+    fun theGenericTriggerIsBoundToStringInTheBlueprint() {
+        // the same as with flow.trigger-string, but with the type parameter T of flow.trigger bound to String in the blueprint
+        fun pull(from: String, to: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(from, "request", 0), Endpoint(to, "get"))
+        deployStd(
+            "std-generic",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("name", "input.text", config("value" to "ada")),
+                    BlueprintBlock(
+                        "trig", "cringle-std/flow.trigger", varArgCounts = mapOf("in" to 1, "request" to 1, "out" to 1),
+                        types = mapOf("T" to cringle.contract.SchemaRef("cringle.std", "String")),
+                    ),
+                    block("up", "text.upper"),
+                    block("l", "flow.log", config("prefix" to "generic: ")),
+                ),
+                listOf(
+                    pull("trig", "name"),
+                    tether("t", "tick", "trig", "trigger"),
+                    TetherDef(TetherType.MESSAGE, Endpoint("trig", "out", 0), Endpoint("up", "in")),
+                    tether("up", "out", "l", "in"),
+                ),
+            ),
+        )
+        awaitLog("generic: ADA")
+    }
+
+    @Test
+    fun aRunningFabricIsReadAndControlledThroughTheMcpTools() {
+        deployStd(
+            "std-mcp",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("s", "text.to-string"),
+                    block("l", "flow.log", config("prefix" to "mcp: ")),
+                ),
+                listOf(tether("t", "tick", "s", "in"), tether("s", "out", "l", "in")),
+            ),
+        )
+        awaitLog("mcp: ")
+        val drafts = cringle.management.web.DraftStore(dir.resolve("mcp-drafts"))
+        val tools = cringle.management.web.McpTools(core, drafts, cringle.management.web.BlueprintPages(core, drafts, cringle.management.web.ProjectFiles(dir.resolve("mcp-files"))))
+        val session = cringle.management.web.Session("s", null, cringle.router.users.Permission.entries.toSet(), "c", java.time.Instant.now())
+        fun call(name: String, vararg args: Pair<String, String>): String = runBlocking {
+            tools.all.first { it.name == name }.run(session, cringle.management.web.McpArgs(JsonObject(args.associate { (k, v) -> k to JsonPrimitive(v) }))).toString()
+        }
+
+        val fabrics = call("list_fabrics")
+        assertTrue(fabrics.contains("\"blueprint\":\"app\"") && fabrics.contains("\"state\":\"running\"") && fabrics.contains("\"block\":\"l\""), fabrics)
+        val fabric = Regex("\"fabric\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        val machine = Regex("\"machine\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        val engine = Regex("\"engine\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        assertTrue(call("query_logs", "fabric" to fabric, "level" to "info").contains("mcp: "))
+        assertTrue(call("get_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"fabric\":\"$fabric\""))
+        assertTrue(call("list_deployments").contains("\"project\":\"std-mcp\""))
+        assertTrue(call("list_engines", "machine" to machine).contains("\"state\":\"running\""))
+        assertTrue(call("stop_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"desiredRunning\":false"))
+        assertTrue(call("start_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"desiredRunning\":true"))
+        assertTrue(call("undeploy", "project" to "std-mcp").contains(fabric))
+        assertTrue(call("list_fabrics").let { !it.contains("\"blueprint\":\"app\"") }, "undeployed")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

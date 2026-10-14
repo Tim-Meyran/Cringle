@@ -194,6 +194,7 @@ public class Daemon(
             repositoryPort = if ("repository" in components) effectiveValue("repository.port").toInt() else null,
             command = companions.command,
             webUrl = effectiveValue("management.web.url").takeIf { it.isNotEmpty() },
+            mcp = effectiveValue("management.mcp").takeIf { it.isNotEmpty() },
         )
     }
 
@@ -223,6 +224,7 @@ public class Daemon(
             arguments += bindArguments()
             current.webPort?.let { arguments += listOf("--web-port", it.toString()) }
             current.webUrl?.let { arguments += listOf("--web-url", it) }
+            current.mcp?.let { arguments += listOf("--mcp", it) }
             current.repositoryPort?.let { arguments += listOf("--repository", "127.0.0.1:$it") }
             router?.let { arguments += listOf("--router", "127.0.0.1:${it.port}") }
             companionProcesses[name] = CompanionProcess("management", current.command, "cringle.management.MainKt", arguments, environment, logs).also { it.start() }

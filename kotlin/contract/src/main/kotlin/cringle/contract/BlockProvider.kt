@@ -31,6 +31,15 @@ public interface BlockProvider {
 }
 
 /**
+ * A [BlockProvider] with generic blocks that need to know what their type parameters are bound to. The engine calls this method instead of
+ * [BlockProvider.createBlock]; a provider without generic blocks does not implement it.
+ */
+public interface GenericBlockProvider : BlockProvider {
+    /** Like [BlockProvider.createBlock] for a block whose type parameters the blueprint bound to [types] (parameter name to schema; only the bound ones). */
+    public fun createBlock(definitionName: String, drivers: DriverSet, types: Map<String, SchemaRef>): Block
+}
+
+/**
  * The drivers a block was granted. It contains exactly the drivers named in
  * [BlockDefinition.requiredDrivers]; the instances are the engine-wide driver instances.
  */

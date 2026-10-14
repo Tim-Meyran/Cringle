@@ -218,7 +218,13 @@ ul.errors { color: var(--danger); }
 #drawflow .drawflow-node .ports { color: var(--text-faint); }
 #drawflow .drawflow-node .input, #drawflow .drawflow-node .output { width: 14px; height: 14px; background: var(--surface-3); border: 2px solid var(--accent); }
 #drawflow .drawflow-node .input:hover, #drawflow .drawflow-node .output:hover { background: var(--accent); }
-#drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs { width: 0; }
+#drawflow .drawflow-node { align-items: flex-start; }
+#drawflow .drawflow-node .inputs, #drawflow .drawflow-node .outputs { width: 0; margin-top: 46px; }
+#drawflow .drawflow-node .outputs { margin-left: auto; }
+#drawflow .drawflow-node .drawflow_content_node { position: absolute; top: var(--space-3); left: var(--space-3); right: var(--space-3); width: auto; }
+#drawflow .drawflow-node .port-label { position: absolute; top: 50%; transform: translateY(-50%); font-size: 11px; line-height: 1; color: var(--text-muted); white-space: nowrap; pointer-events: none; }
+#drawflow .drawflow-node .input .port-label { left: 20px; }
+#drawflow .drawflow-node .output .port-label { right: 20px; }
 #drawflow .connection .main-path { stroke: var(--text-faint); stroke-width: 2px; }
 #drawflow .connection .main-path:hover, #drawflow .connection .main-path.selected { stroke: var(--accent); }
 textarea.invalid { border-color: var(--danger); }
@@ -543,3 +549,24 @@ dialog.dialog::backdrop { background: rgba(6, 8, 12, 0.66); -webkit-backdrop-fil
 #monitor .connection .main-path.held { stroke: var(--warning); stroke-dasharray: 8 5; }
 #monitor .connection .main-path.err { stroke: var(--danger); }
 #monitor .connection .main-path.remote { stroke-dasharray: 3 4; }
+#properties .config-form { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
+#properties details summary { cursor: pointer; color: var(--text-muted); padding: var(--space-1) 0; }
+#properties .config-form textarea.invalid, #properties details textarea.invalid { border-color: var(--danger); }
+#drawflow .drawflow-node.node-error { border: 2px dashed var(--danger); box-shadow: 0 0 0 2px rgba(255, 90, 90, 0.25), 0 6px 18px rgba(0, 0, 0, 0.35); }
+#drawflow .drawflow-node.node-error .node-title::before { content: "! "; color: var(--danger); font-weight: 700; }
+#problems { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+#problems button.problem { margin: 0; width: 100%; text-align: left; justify-content: flex-start; white-space: normal; border-color: var(--danger); }
+#editor-bar #result { max-height: 14rem; overflow: auto; }
+
+/* the tree of a project */
+ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0 0 0 var(--space-5); }
+ul.tree { padding-left: 0; }
+ul.tree li { margin: var(--space-1) 0; }
+ul.tree summary { cursor: pointer; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; }
+ul.tree .leaf { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-1) 0 var(--space-1) var(--space-3); border-radius: var(--radius-sm); }
+ul.tree .leaf:hover { background: var(--surface-2); }
+ul.tree .file { font-family: var(--font-mono, ui-monospace, monospace); }
+ul.tree .muted { color: var(--text-muted); font-size: var(--text-sm); }
+ul.tree .row-actions { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
+ul.tree form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: 0; }
+ul.tree .add { padding-top: var(--space-2); }

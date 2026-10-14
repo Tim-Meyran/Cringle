@@ -46,6 +46,8 @@ public class WebServer(
     webUrl: String? = null,
     /** The port of the gRPC server of this management server, for the page *Connect*; `null` if it is not known. */
     private val grpcPort: () -> Int? = { null },
+    /** What the MCP endpoint `/mcp` offers (`--mcp`). */
+    private val mcp: McpMode = McpMode.ON,
 ) : AutoCloseable {
     private val log = LoggerFactory.getLogger("cringle.management.web")
     private val sessions = Sessions(users, clock, idleTimeout)
@@ -56,6 +58,8 @@ public class WebServer(
 
     /** The entries of the navigation. */
     public val navigation: MutableList<NavItem> = arrayListOf(NavItem("Dashboard", "/", group = "Overview"))
+
+    private var mcpServer: McpServer? = null
 
     private val fingerprint = core.identity.publicKeyFingerprint
     private val layout = Layout(navigation, version(), fingerprint)
@@ -86,10 +90,14 @@ public class WebServer(
         users?.let { val pages = UserPages(it, this); pages.register(this); RegistryPages(it, core.identity.keyPair, pages).register(this) }
         TrustPackagePages(core).register(this)
         val drafts = DraftStore(core.dataDirectory.resolve("drafts"))
-        val blueprints = BlueprintPages(core, drafts)
+        val projectFiles = ProjectFiles(core.dataDirectory.resolve("drafts").resolve("files"))
+        val blueprints = BlueprintPages(core, drafts, projectFiles)
+        ProjectPages(core, drafts, blueprints, projectFiles).register(this)
         SchemaPages(core, drafts, blueprints).register(this)
         blueprints.register(this)
+        if (mcp != McpMode.OFF) mcpServer = McpServer(McpTools(core, drafts, blueprints), mcp, version())
     }
+
 
     private fun sslContext(): SSLContext {
         val store = KeyStore.getInstance("PKCS12")
@@ -181,10 +189,34 @@ public class WebServer(
         val uri: URI = exchange.requestURI
         val path = uri.rawPath ?: "/"
         val response = when {
+            path == MCP_PATH -> mcpRequest(exchange, method)
             path.startsWith("/static/") -> if (method == "GET" || method == "HEAD") staticFile(path.removePrefix("/static/"), exchange.requestHeaders.getFirst("If-None-Match")) else status(405)
             else -> dynamic(exchange, method, path, uri)
         }
         send(exchange, response, method == "HEAD")
+    }
+
+    /**
+     * The MCP endpoint (`docs/mcp.md`): `POST` with a JSON-RPC message and `Authorization: Bearer <token>`. A browser cannot get here: a request with an `Origin`
+     * header (a page that sends it) and one that is not `application/json` (no preflight, so a page could send it without CORS) are refused, so that a page in
+     * the browser of an administrator cannot control Cringle on a server without `--auth`.
+     */
+    private fun mcpRequest(exchange: HttpExchange, method: String): WebResponse {
+        val server = mcpServer ?: return notFound()
+        val h = exchange.requestHeaders
+        if (method != "POST") return WebResponse(405, ByteArray(0), "text/plain; charset=utf-8", headers = mapOf("Allow" to "POST"))
+        if (h.getFirst("Origin") != null) return WebResponse(403, "the MCP endpoint is not for browsers".toByteArray(), "text/plain; charset=utf-8")
+        if (h.getFirst("Content-Type")?.substringBefore(';')?.trim()?.lowercase() != "application/json") {
+            return WebResponse(415, "Content-Type must be application/json".toByteArray(), "text/plain; charset=utf-8")
+        }
+        val bearer = h.getFirst("Authorization")?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }?.substring(7)?.trim()
+        val session = sessions.forToken(bearer)
+        if (session == null) {
+            log.warn("MCP request without a valid token from {}", exchange.remoteAddress.address.hostAddress)
+            return WebResponse(401, "a valid token is needed: Authorization: Bearer <token>".toByteArray(), "text/plain; charset=utf-8", headers = mapOf("WWW-Authenticate" to "Bearer"))
+        }
+        val body = readBody(exchange, MCP_MAX_BODY)
+        return runBlocking { server.handle(body, session) }
     }
 
     private fun dynamic(exchange: HttpExchange, method: String, path: String, uri: URI): WebResponse {
@@ -330,6 +362,11 @@ public class WebServer(
 
     private fun version(): String = WebServer::class.java.`package`?.implementationVersion ?: "dev"
 }
+
+/** The path of the MCP endpoint. */
+internal const val MCP_PATH: String = "/mcp"
+
+private const val MCP_MAX_BODY = 4 * 1024 * 1024
 
 private val HOST = Regex("([A-Za-z0-9.\\-]+|\\[[0-9A-Fa-f:.]+])(:[0-9]{1,5})?")
 

@@ -99,6 +99,8 @@ public class ManagementServer(
     webUrl: String? = null,
     /** Where the gRPC server listens (`loopback`, `all` or an address, see [cringle.common.BindAddress]); `null` is the loopback interface. */
     bindHost: String? = null,
+    /** What the MCP endpoint of the web interface offers (`--mcp`). */
+    mcp: cringle.management.web.McpMode = cringle.management.web.McpMode.ON,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val service = Service()
@@ -127,7 +129,7 @@ public class ManagementServer(
         .build()
 
     /** The web interface; `null` if no web port was given. Pages register their routes before [start]. */
-    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost, webUrl = webUrl, grpcPort = { server.port }) }
+    public val web: cringle.management.web.WebServer? = webPort?.let { cringle.management.web.WebServer(core, users, it, webHost ?: bindHost, webUrl = webUrl, grpcPort = { server.port }, mcp = mcp) }
 
     /** The result of the recovery that ran at [start]; `null` before start or if recovery is switched off. */
     @Volatile

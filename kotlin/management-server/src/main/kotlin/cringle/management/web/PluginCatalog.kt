@@ -5,6 +5,8 @@ package cringle.management.web
 import cringle.contract.BlockDefinition
 import cringle.management.ManagementCore
 import cringle.packaging.PluginPackage
+import cringle.packaging.Version
+import cringle.packaging.VersionRange
 import cringle.schema.SchemaConflictException
 import cringle.schema.SchemaParseException
 import cringle.schema.SchemaParser
@@ -16,7 +18,7 @@ internal class PluginCatalog(private val core: ManagementCore) {
     private val packages = ConcurrentHashMap<String, PluginPackage>()
 
     /** The state of the repository at one moment: the plugin packages and the schemas of all of them. */
-    class Snapshot(val plugins: List<PluginPackage>) {
+    class Snapshot(val plugins: List<PluginPackage>, val versions: Map<String, List<String>> = emptyMap(), val unmatched: Set<String> = emptySet()) {
         val registry: SchemaRegistry = SchemaRegistry().also { registry ->
             for (plugin in plugins) {
                 for ((entry, text) in plugin.schemas) {
@@ -38,8 +40,23 @@ internal class PluginCatalog(private val core: ManagementCore) {
         }
     }
 
-    /** Reads the current plugins; a package is downloaded once per version. */
-    suspend fun snapshot(): Snapshot = Snapshot(
-        core.latestPlugins().map { (name, version) -> packages[name + "@" + version] ?: core.readPlugin(name, version).also { packages[name + "@" + version] = it } },
-    )
+    /**
+     * Reads the current plugins; a package is downloaded once per version. Per plugin the version is the highest one that satisfies its range in [ranges];
+     * a plugin without a range, or one that no version satisfies (it is in [Snapshot.unmatched]), is taken in its highest version.
+     */
+    suspend fun snapshot(ranges: Map<String, String> = emptyMap()): Snapshot {
+        val versions = core.pluginVersions()
+        val unmatched = HashSet<String>()
+        val chosen = versions.map { (name, all) ->
+            val range = ranges[name]?.let { runCatching { VersionRange.parse(it) }.getOrNull() }
+            val match = range?.let { r -> all.firstOrNull { r.matches(Version.parse(it)) } }
+            if (range != null && match == null) unmatched += name
+            name to (match ?: all.first())
+        }
+        return Snapshot(
+            chosen.map { (name, version) -> packages[name + "@" + version] ?: core.readPlugin(name, version).also { packages[name + "@" + version] = it } },
+            versions,
+            unmatched,
+        )
+    }
 }

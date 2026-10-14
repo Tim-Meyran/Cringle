@@ -77,10 +77,19 @@ class WebTestClient(private val port: Int, serverKey: String) {
         return client.send(b.build(), HttpResponse.BodyHandlers.ofString())
     }
 
+    /** Posts [json] to [path] like an MCP client: `Content-Type: application/json`, the bearer [token], no cookie; [extra] are more headers. */
+    fun postJson(path: String, json: String, token: String? = null, extra: Map<String, String> = emptyMap(), contentType: String = "application/json"): HttpResponse<String> {
+        val b = HttpRequest.newBuilder(URI.create("https://localhost:$port$path")).header("Content-Type", contentType).POST(HttpRequest.BodyPublishers.ofString(json))
+        token?.let { b.header("Authorization", "Bearer $it") }
+        extra.forEach { (k, v) -> b.header(k, v) }
+        return client.send(b.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
     /** Posts a file as `multipart/form-data` in the field [field]. */
-    fun postFile(path: String, field: String, filename: String, data: ByteArray): HttpResponse<String> {
+    fun postFile(path: String, field: String, filename: String, data: ByteArray, fields: Map<String, String> = emptyMap()): HttpResponse<String> {
         val boundary = "----cringle-test-boundary"
-        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"; filename=\"$filename\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        val text = fields.entries.joinToString("") { (k, v) -> "--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n" }
+        val head = text + "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"; filename=\"$filename\"\r\nContent-Type: application/octet-stream\r\n\r\n"
         val tail = "\r\n--$boundary--\r\n"
         val body = head.toByteArray() + data + tail.toByteArray()
         val b = HttpRequest.newBuilder(URI.create("https://localhost:$port$path")).header("Content-Type", "multipart/form-data; boundary=$boundary").POST(HttpRequest.BodyPublishers.ofByteArray(body))
