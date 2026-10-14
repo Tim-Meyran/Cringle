@@ -352,6 +352,43 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         awaitLog("generic: ADA")
     }
 
+    @Test
+    fun aRunningFabricIsReadAndControlledThroughTheMcpTools() {
+        deployStd(
+            "std-mcp",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 1)),
+                    block("s", "text.to-string"),
+                    block("l", "flow.log", config("prefix" to "mcp: ")),
+                ),
+                listOf(tether("t", "tick", "s", "in"), tether("s", "out", "l", "in")),
+            ),
+        )
+        awaitLog("mcp: ")
+        val drafts = cringle.management.web.DraftStore(dir.resolve("mcp-drafts"))
+        val tools = cringle.management.web.McpTools(core, drafts, cringle.management.web.BlueprintPages(core, drafts, cringle.management.web.ProjectFiles(dir.resolve("mcp-files"))))
+        val session = cringle.management.web.Session("s", null, cringle.router.users.Permission.entries.toSet(), "c", java.time.Instant.now())
+        fun call(name: String, vararg args: Pair<String, String>): String = runBlocking {
+            tools.all.first { it.name == name }.run(session, cringle.management.web.McpArgs(JsonObject(args.associate { (k, v) -> k to JsonPrimitive(v) }))).toString()
+        }
+
+        val fabrics = call("list_fabrics")
+        assertTrue(fabrics.contains("\"blueprint\":\"app\"") && fabrics.contains("\"state\":\"running\"") && fabrics.contains("\"block\":\"l\""), fabrics)
+        val fabric = Regex("\"fabric\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        val machine = Regex("\"machine\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        val engine = Regex("\"engine\":\"([^\"]+)\"").find(fabrics)!!.groupValues[1]
+        assertTrue(call("query_logs", "fabric" to fabric, "level" to "info").contains("mcp: "))
+        assertTrue(call("get_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"fabric\":\"$fabric\""))
+        assertTrue(call("list_deployments").contains("\"project\":\"std-mcp\""))
+        assertTrue(call("list_engines", "machine" to machine).contains("\"state\":\"running\""))
+        assertTrue(call("stop_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"desiredRunning\":false"))
+        assertTrue(call("start_fabric", "machine" to machine, "engine" to engine, "fabric" to fabric).contains("\"desiredRunning\":true"))
+        assertTrue(call("undeploy", "project" to "std-mcp").contains(fabric))
+        assertTrue(call("list_fabrics").let { !it.contains("\"blueprint\":\"app\"") }, "undeployed")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

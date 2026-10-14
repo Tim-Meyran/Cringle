@@ -255,6 +255,32 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         return buildJsonObject { put("ok", true); put("type", type.name) }
     }
 
+    // --- for the MCP server (McpTools) ---
+
+    /** Every block of the plugins in the repository (each plugin in its highest version) as `plugin@version` and its definition. */
+    internal suspend fun catalogBlocks(): List<Triple<String, String, BlockDefinition>> =
+        catalog.snapshot().plugins.flatMap { p -> p.manifest.blocks.map { Triple(p.manifest.name, p.manifest.version, it) } }
+
+    /** The problems that the validators find in [blueprint] (the check of the editor and of publishing). */
+    internal suspend fun checkBlueprint(blueprint: Blueprint): List<PackageProblem> {
+        val snapshot = catalog.snapshot()
+        return PackageValidator.validateBlueprint(blueprint, snapshot::block, snapshot.registry, "blueprints/${blueprint.name}.json")
+    }
+
+    /**
+     * Stores [blueprint] as the blueprint of the project draft [name] (fabrics, schemas and positions of the draft stay) and returns the draft with the problems of
+     * the check; a blueprint with problems is stored as work in progress, as by the editor.
+     */
+    internal suspend fun saveBlueprint(name: String, blueprint: Blueprint, version: String?): Pair<Draft, List<PackageProblem>> {
+        val previous = drafts.load("project", name) ?: throw DraftException("there is no project '$name'")
+        val named = blueprint.copy(name = name)
+        val problems = checkBlueprint(named)
+        val positions = previous.content.jsonObject["ui"]?.jsonObject?.get("positions")?.jsonObject.orEmpty()
+            .mapValues { (_, p) -> p.jsonArray[0].jsonPrimitive.content.toDouble() to p.jsonArray[1].jsonPrimitive.content.toDouble() }
+        val saved = drafts.save("project", name, version?.trim()?.ifEmpty { null } ?: previous.version, content(named, positions, fabricsOf(previous), schemasOf(previous)), null)
+        return saved to problems
+    }
+
     // --- publishing ---
 
     /** Builds, validates and publishes the project package of the draft; used by the publish route of the drafts. */

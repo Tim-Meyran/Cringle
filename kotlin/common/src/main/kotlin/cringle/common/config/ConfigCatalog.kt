@@ -112,6 +112,13 @@ public object ConfigCatalog {
             "management.web.url", "", "Public address of the web interface for login links and QR codes (https://host:port); empty: the Host header of the request.",
             setOf(RestartTarget.MANAGEMENT), "url", ::webUrl,
         ),
+        ConfigKey(
+            "management.mcp", "on",
+            "The MCP server of the management server (POST /mcp of the web interface): on (all tools), read-only (tools that only read) or off. Clients sign in with the token of a user.",
+            setOf(RestartTarget.MANAGEMENT), "on|read-only|off",
+            { if (it.lowercase() in setOf("on", "read-only", "off")) null else "'$it' is not on, read-only or off" },
+            { it.lowercase() },
+        ),
         ConfigKey("repository.port", "7600", "Port of the package repository.", setOf(RestartTarget.REPOSITORY, RestartTarget.MANAGEMENT), "port", ::port),
     )
 

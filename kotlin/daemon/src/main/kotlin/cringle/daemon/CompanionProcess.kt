@@ -188,6 +188,8 @@ public data class Companions(
     val command: EngineCommand = EngineCommand(),
     /** The public address of the web interface (`--web-url`), `null` for the `Host` header (#314). */
     val webUrl: String? = null,
+    /** What the MCP server of the management server offers (`--mcp`: `on`, `read-only`, `off`), `null` for the default of the program. */
+    val mcp: String? = null,
 ) {
     /** Whether the daemon runs at least one program. */
     val any: Boolean get() = managementPort != null || repositoryPort != null

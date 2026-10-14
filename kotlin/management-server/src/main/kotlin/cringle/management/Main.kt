@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory
 
 private const val USAGE =
     "usage: management-server [--home <dir>] [--port <port>] [--repository <host:port>] [--repository-token <token>] " +
-        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>] [--web-url <https url>] [--bind <loopback|all|address>] [--trust-local]"
+        "[--router <host:port>] [--machine <id>=<daemon host:port>]... [--cache-max-unused-days <n>] [--auth] [--web-port <port>] [--web-host <host>] [--web-url <https url>] [--bind <loopback|all|address>] [--mcp <on|read-only|off>] [--trust-local]"
 
 /** Entry point of the management server process. Exit code 2 signals invalid arguments. */
 public fun main(args: Array<String>) {
@@ -50,6 +50,7 @@ private fun runManagementServer(args: Array<String>) {
     var webHost: String? = null
     var webUrl: String? = null
     var bind: String? = cringle.common.BindAddress.fromEnvironment()
+    var mcp = cringle.management.web.McpMode.ON
     var i = 0
     fun fail(message: String): Nothing {
         System.err.println("error: $message")
@@ -80,6 +81,7 @@ private fun runManagementServer(args: Array<String>) {
             "--web-host" -> webHost = value(option)
             "--web-url" -> webUrl = value(option).also { v -> try { cringle.management.web.checkWebUrl(v) } catch (e: IllegalArgumentException) { fail(e.message ?: "invalid --web-url") } }
             "--bind" -> bind = value(option)
+            "--mcp" -> mcp = try { cringle.management.web.McpMode.parse(value(option)) } catch (e: IllegalArgumentException) { fail(e.message ?: "invalid --mcp") }
             else -> fail("unknown argument '$option'")
         }
         i += 1
@@ -113,7 +115,7 @@ private fun runManagementServer(args: Array<String>) {
     } else {
         System.err.println("WARNING: no --auth: everybody who can reach the port is administrator")
     }
-    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost, webUrl = webUrl, bindHost = bind)
+    val server = ManagementServer(core, port, users, cacheMaxUnusedDays = cacheDays, onAuthenticated = { bootstrapFile?.used(it) }, webPort = webPort, webHost = webHost, webUrl = webUrl, bindHost = bind, mcp = mcp)
     Runtime.getRuntime().addShutdownHook(Thread({ certificateWatcher.close(); server.close() }, "management-shutdown"))
     server.start()
     LoggerFactory.getLogger("cringle.management").info("management server started on port {}", server.port)
