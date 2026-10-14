@@ -40,6 +40,20 @@ public class Sessions(
         return session
     }
 
+    /**
+     * The session of one request of the API (the MCP endpoint) with the bearer [token]: not kept, nothing to expire. Without user management everybody is
+     * administrator and [token] is not needed; with it an invalid or missing token gives `null`.
+     */
+    public fun forToken(token: String?): Session? {
+        val manager = users ?: return Session(newId(), null, Permission.entries.toSet(), newId(), clock.instant())
+        val user = token?.let(manager::authenticate) ?: return null
+        return Session(
+            newId(), user, manager.permissions(user), newId(), clock.instant(),
+            scoped = { permission, scopes -> manager.allowed(user, permission, scopes) },
+            anywhere = { permission -> manager.allowedAnywhere(user, permission) },
+        )
+    }
+
     /** A session of the open (no `--auth`) mode. */
     public fun open(): Session {
         val session = Session(newId(), null, Permission.entries.toSet(), newId(), clock.instant())

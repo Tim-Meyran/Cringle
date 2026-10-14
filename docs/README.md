@@ -12,6 +12,7 @@
 | [ci.md](ci.md) | Die GitHub-Workflows und die Self-hosted-Runner (Labels, was sie bereitstellen müssen). Englisch. |
 | [users.md](users.md) | Benutzer, Gruppen, Rollen und ihre Gültigkeitsbereiche (Scopes). Englisch. |
 | [webui.md](webui.md) | WebUI des ManagementServers (htmx, Alpine.js, Drawflow): Start, Login, Sicherheit, Aufbau von Seiten. Englisch. |
+| [mcp.md](mcp.md) | MCP server of the ManagementServer: an AI client reads and controls Cringle with the token of a user. Setting `--mcp` / `management.mcp`, tools, rights. Englisch. |
 | [daemon-service.md](daemon-service.md) | Daemon als Dienst, Engine-Identität und Trust-Dateien. Englisch. |
 | [gradle-plugin.md](gradle-plugin.md) | Gradle-Plugins `cringle.plugin` und `cringle.project`, `cringlePublish`. Englisch. |
 | [running-from-the-ide.md](running-from-the-ide.md) | Gradle-Tasks `runDaemon`, `runManagementServer`, `runEngine`, `runCli` zum Starten und Debuggen in der IDE. Englisch. |
