@@ -5,6 +5,8 @@ package cringle.stdblocks.http
 import cringle.contract.Block
 import cringle.contract.BlockContext
 import cringle.contract.BuiltinDriverTypes
+import cringle.contract.ExclusiveKind
+import cringle.contract.ExclusiveResource
 import cringle.contract.HttpDriver
 import cringle.contract.HttpRegistration
 import cringle.contract.HttpRequest
@@ -169,6 +171,8 @@ internal val HTTP_ENTRIES: List<Entry> = listOf(
         listOf(PortDefinition("handler", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), ANY)),
         "HttpEndpointConfig",
         listOf(BuiltinDriverTypes.HTTP.id),
+        // a route of the API port is served by one fabric at a time: a project with an endpoint is updated by stopping the old fabric first
+        listOf(ExclusiveResource(ExclusiveKind.PORT, "api")),
     ) { HttpEndpoint(it[HttpDriver::class]) },
     entry(
         "http.response",

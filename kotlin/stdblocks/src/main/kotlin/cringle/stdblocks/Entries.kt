@@ -29,8 +29,15 @@ internal fun outPort(name: String, schema: SchemaRef = STRING) = PortDefinition(
 internal class Entry(val definition: BlockDefinition, val create: (DriverSet) -> Block, val createTyped: ((DriverSet, Map<String, SchemaRef>) -> Block)? = null)
 
 /** [configuration] is the name of the type in the namespace `cringle.stdblocks`, or `null` for a block without configuration. */
-internal fun entry(name: String, ports: List<PortDefinition>, configuration: String? = null, drivers: List<String> = emptyList(), create: (DriverSet) -> Block) = Entry(
-    BlockDefinition(name, ports.map { it.schema }.distinct(), ports, drivers, configuration?.let { SchemaRef(StdBlockProvider.NAMESPACE, it) }),
+internal fun entry(
+    name: String,
+    ports: List<PortDefinition>,
+    configuration: String? = null,
+    drivers: List<String> = emptyList(),
+    exclusiveResources: List<cringle.contract.ExclusiveResource> = emptyList(),
+    create: (DriverSet) -> Block,
+) = Entry(
+    BlockDefinition(name, ports.map { it.schema }.distinct(), ports, drivers, configuration?.let { SchemaRef(StdBlockProvider.NAMESPACE, it) }, exclusiveResources),
     create,
 )
 
