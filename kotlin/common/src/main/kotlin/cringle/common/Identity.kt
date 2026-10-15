@@ -24,6 +24,9 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Date
 import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.asn1.x509.Extension
+import org.bouncycastle.asn1.x509.GeneralName
+import org.bouncycastle.asn1.x509.GeneralNames
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -90,6 +93,29 @@ public class Identity private constructor(
         write(dir.resolve(CERT_FILE), pem("CERTIFICATE", certificate.encoded), secret = false)
     }
 
+    /**
+     * The certificate for a server that clients reach by name (the web interface): the same key pair and subject, and a Subject Alternative Name for every entry
+     * of [names] (an IP address becomes an IP entry, anything else a DNS name). It is stored as `web.crt` next to the identity certificate and used again while it
+     * has these names, this key and more than [RENEWAL_THRESHOLD] left; otherwise a new one is issued. The key, and so the fingerprint that peers pin, does not change.
+     */
+    @Synchronized
+    @JvmOverloads
+    public fun webCertificate(names: Collection<String>, clock: Clock = Clock.systemUTC()): X509Certificate {
+        val wanted = names.map { it.trim().trim('[', ']').lowercase() }.filter { it.isNotEmpty() }.toSortedSet()
+        val file = dir.resolve(WEB_CERT_FILE)
+        if (Files.exists(file)) {
+            val current = runCatching { parse(unpem(Files.readString(file))) }.getOrNull()
+            if (current != null && current.publicKey == keyPair.public && subjectNames(current) == wanted &&
+                Duration.between(clock.instant(), current.notAfter.toInstant()) > RENEWAL_THRESHOLD
+            ) {
+                return current
+            }
+        }
+        val issued = issue(commonName, keyPair, VALIDITY, clock.instant(), wanted)
+        write(file, pem("CERTIFICATE", issued.encoded), secret = false)
+        return issued
+    }
+
     /** How long the current certificate is still valid at [clock]; negative if it has ended. */
     public fun remaining(clock: Clock = Clock.systemUTC()): Duration = Duration.between(clock.instant(), certificate.notAfter.toInstant())
 
@@ -120,6 +146,13 @@ public class Identity private constructor(
         private const val KEY_FILE = "identity.key"
         private const val PUB_FILE = "identity.pub"
         private const val CERT_FILE = "identity.crt"
+        private const val WEB_CERT_FILE = "web.crt"
+
+        private fun isAddress(name: String): Boolean = name.contains(':') || Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}").matches(name)
+
+        /** The names of the Subject Alternative Name of [certificate] (DNS names and addresses). */
+        private fun subjectNames(certificate: X509Certificate): Set<String> =
+            (certificate.subjectAlternativeNames ?: emptyList()).mapNotNull { it[1] as? String }.map { it.lowercase() }.toSortedSet()
 
         /**
          * Loads the identity from `<home>/certs`, creating key pair and certificate on first use. [commonName] is the
@@ -153,7 +186,7 @@ public class Identity private constructor(
             return Identity(dir, commonName, pair, cert)
         }
 
-        private fun issue(commonName: String, pair: KeyPair, validity: Duration, now: Instant): X509Certificate {
+        private fun issue(commonName: String, pair: KeyPair, validity: Duration, now: Instant, names: Collection<String> = emptyList()): X509Certificate {
             val subject = X500Name("CN=$commonName")
             val builder = JcaX509v3CertificateBuilder(
                 subject,
@@ -163,6 +196,12 @@ public class Identity private constructor(
                 subject,
                 pair.public,
             )
+            if (names.isNotEmpty()) {
+                val entries = names.map { n ->
+                    if (isAddress(n)) GeneralName(GeneralName.iPAddress, n) else GeneralName(GeneralName.dNSName, n)
+                }
+                builder.addExtension(Extension.subjectAlternativeName, false, GeneralNames(entries.toTypedArray()))
+            }
             val signer = JcaContentSignerBuilder("SHA256withECDSA").build(pair.private)
             return JcaX509CertificateConverter().setProvider(BouncyCastleProvider()).getCertificate(builder.build(signer))
         }
