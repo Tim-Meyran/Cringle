@@ -16,6 +16,7 @@ The management server carries the plugin (the jar of the module `kotlin/stdblock
 - **Fixed types.** A block works on one type: counters are `Int`, texts are `String`, conditions are `Boolean`, numbers `Double`. **Converter blocks** (`text.to-string`, `text.parse-int`, `math.int-to-double`, …) join them. The type **`cringle.std/Any`** (`spec/schema.md`) stands for a value of any type: every typed port can feed an `Any` port, and the `data.as-*` blocks turn an `Any` value back into a typed one after checking it. Blocks that only pass values on (delay, buffer, merge, …) work on `Any`.
 - Every block has a configuration schema in the namespace `cringle.stdblocks` (`kotlin/stdblocks/src/main/resources/cringle/stdblocks/schema.json`) when it needs a configuration; the editor and the engine check it.
 - A block never reaches outside through anything but a driver: `flow.log` uses the logging driver, the `file` blocks the driver `filesystem-fabric` (below).
+- **An output that nothing is connected to is harmless** (#412). A message that a block sends on a port without a tether goes nowhere; the block and the fabric keep running. So `out` of `dwh.write` or `log.write`, `error` of `text.parse` and every other output are optional parts of a flow. Every block of the library is wrapped for this (`QuietOutputs`); requests, streams and other failures are not affected.
 
 ## The blocks
 

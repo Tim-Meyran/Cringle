@@ -389,6 +389,29 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         assertTrue(call("list_fabrics").let { !it.contains("\"blueprint\":\"app\"") }, "undeployed")
     }
 
+    @Test
+    fun anOutputThatNothingIsConnectedToDoesNotFailTheFabric() {
+        // dwh.write and text.upper have an out that nothing is connected to: they keep running and the fabric stays running
+        deployStd(
+            "std-quiet",
+            Blueprint(
+                "app",
+                listOf(
+                    block("t", "time.timer-trigger", config("intervalMs" to 10, "count" to 3)),
+                    block("s", "text.to-string"),
+                    block("w", "dwh.write", JsonObject(mapOf("key" to JsonPrimitive("k")))),
+                    block("u", "text.upper"),
+                    block("l", "flow.log", config("prefix" to "quiet: ")),
+                ),
+                listOf(tether("t", "tick", "s", "in"), tether("s", "out", "w", "in"), tether("s", "out", "u", "in"), tether("s", "out", "l", "in")),
+            ),
+        )
+        awaitLog("quiet: 3")
+        val fabric = runBlocking { core.listFabrics(null, null) }.single { it.info.blueprint == "app" }
+        assertTrue(fabric.info.blocksList.all { it.state.name.endsWith("RUNNING") }, fabric.info.toString())
+        assertTrue(fabric.info.state.name.endsWith("RUNNING"), fabric.info.toString())
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
