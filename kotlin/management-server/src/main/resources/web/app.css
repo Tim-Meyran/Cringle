@@ -239,6 +239,22 @@ textarea.invalid { border-color: var(--danger); }
 #palette details.theme > button { margin-left: var(--space-3); width: calc(100% - var(--space-3)); }
 #canvas-hint[hidden] { display: none; }
 
+/* the navigation can be folded away: only the icons stay (the class is on <html>, app.js keeps it) */
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.nav-toggle { color: var(--text-faint); }
+@media (min-width: 901px) {
+  html.nav-collapsed { --sidebar: 60px; }
+  html.nav-collapsed .sidebar { padding-left: var(--space-2); padding-right: var(--space-2); align-items: center; }
+  html.nav-collapsed .sidebar-head { flex-direction: column; gap: var(--space-2); }
+  html.nav-collapsed .brand { padding: var(--space-1); }
+  html.nav-collapsed .brand-text, html.nav-collapsed .nav-title, html.nav-collapsed .who-text, html.nav-collapsed .sidebar-foot .btn, html.nav-collapsed .build { display: none; }
+  html.nav-collapsed .sidebar nav, html.nav-collapsed .nav-group { width: 100%; }
+  html.nav-collapsed .nav-group a { font-size: 0; padding: 0; height: 34px; }
+  html.nav-collapsed .nav-item .ico { left: 50%; transform: translate(-50%, -50%); }
+  html.nav-collapsed .nav-group { margin-bottom: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+  html.nav-collapsed .sidebar-foot { align-items: center; }
+}
+
 /* below 900 px the sidebar becomes a bar on top */
 @media (max-width: 900px) {
   .app { grid-template-columns: minmax(0, 1fr); }
@@ -248,7 +264,7 @@ textarea.invalid { border-color: var(--danger); }
   .nav-title { display: none; }
   .nav-group a { margin: 0; }
   .sidebar-foot { flex-direction: row; align-items: center; margin-left: auto; padding: 0; border: 0; }
-  .build { display: none; }
+  .build, .nav-toggle { display: none; }
   main { padding: var(--space-5) var(--space-4) 48px; }
   .page-header { flex-direction: column; }
   main > table, #list > table { display: block; overflow-x: auto; }

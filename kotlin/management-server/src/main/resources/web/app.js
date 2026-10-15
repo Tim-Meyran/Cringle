@@ -1,3 +1,26 @@
+// The navigation can be folded away (button.nav-toggle): the class nav-collapsed on <html> narrows the sidebar to its icons; the state is kept in this browser.
+(function () {
+  var root = document.documentElement, key = 'cringle.nav', button = document.querySelector('.nav-toggle');
+  if (!button) return;
+  function show(collapsed) {
+    root.classList.toggle('nav-collapsed', collapsed);
+    var label = collapsed ? 'Unfold the navigation' : 'Fold the navigation away';
+    button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  }
+  var collapsed = false;
+  try { collapsed = window.localStorage.getItem(key) === 'collapsed'; } catch (e) { /* no storage: the state is not kept */ }
+  show(collapsed);
+  button.addEventListener('click', function () {
+    collapsed = !root.classList.contains('nav-collapsed');
+    show(collapsed);
+    try { window.localStorage.setItem(key, collapsed ? 'collapsed' : 'expanded'); } catch (e) { /* not kept */ }
+    // the canvas of the editor and the monitor take the new width
+    window.dispatchEvent(new Event('resize'));
+  });
+})();
+
 // Own helpers of the WebUI; the page logic is in htmx attributes and Alpine x-data.
 // The lists refresh themselves (hx-trigger "every 5s [cringleIdle()]"), morphing the new HTML into the old. They wait while the user is working in a
 // list: a field has the focus, a <details> is open, or a field differs from what it had when it was rendered (text typed, an option changed).

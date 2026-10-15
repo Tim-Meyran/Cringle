@@ -50,10 +50,12 @@ class WebShellTest : ServiceTestBase() {
         assertEquals(listOf("Projects", "Drafts"), entriesOf(page, "Build"))
         assertEquals(setOf("Users", "Groups", "Invites", "Registries", "Configuration", "Trust", "Packages"), entriesOf(page, "Administer").toSet())
         assertEquals(1, Regex("aria-current=\"page\"").findAll(page).count())
-        assertTrue(page.contains("<a href=\"/machines\" aria-current=\"page\">Machines</a>"), page)
+        // the navigation can be folded away: the button is in every page of the shell
+        assertTrue(page.contains("class=\"icon-btn nav-toggle\"") && page.contains("aria-expanded=\"true\""), page)
+        assertTrue(page.contains("<a href=\"/machines\" title=\"Machines\" aria-current=\"page\">Machines</a>"), page)
         // the editors belong to the drafts, a detail page to its list
-        assertTrue(admin.get("/fabrics").body().contains("<a href=\"/fabrics\" aria-current=\"page\">Fabrics</a>"))
-        assertTrue(admin.get("/").body().contains("<a href=\"/\" aria-current=\"page\">Dashboard</a>"))
+        assertTrue(admin.get("/fabrics").body().contains("<a href=\"/fabrics\" title=\"Fabrics\" aria-current=\"page\">Fabrics</a>"))
+        assertTrue(admin.get("/").body().contains("<a href=\"/\" title=\"Dashboard\" aria-current=\"page\">Dashboard</a>"))
         assertTrue(page.contains("administrator") && page.contains("Sign out"))
     }
 

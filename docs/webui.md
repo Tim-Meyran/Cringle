@@ -238,6 +238,8 @@ A page that adds a list follows the same rules: build it with `section(...)`, gi
 
 ## Design system (#246)
 
+**Folding the navigation (#402):** the button at the top of the sidebar folds the navigation to its icons (60 px; every link keeps its name as `title`) and back. The class `nav-collapsed` on `<html>` does it, `app.js` sets it from `localStorage` (`cringle.nav`, per browser; without storage the state is not kept), and the editor and the monitor follow because they use `--sidebar`. Below 900 px, where the sidebar is a bar on top, the button is hidden.
+
 There is **one theme: dark**, minimal and carefully made. `app.css` has no light mode and no `prefers-color-scheme` rule (`color-scheme: dark`, so the browser's own controls are dark too); `ThemeTest` checks both and that every text color has at least 4.5:1 (WCAG AA) on every surface it is used on and every badge color on its tint. Everything is a token in `:root`, the components below only use tokens, so changing the look is one place.
 
 | Tokens | Meaning |
