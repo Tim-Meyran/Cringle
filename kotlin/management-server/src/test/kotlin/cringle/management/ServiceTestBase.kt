@@ -55,6 +55,9 @@ import org.junit.jupiter.api.assertThrows
  */
 abstract class ServiceTestBase {
     protected lateinit var dir: Path
+
+    /** Settings that the daemon of the test gets as if it was started with arguments (`api.port` and so on). */
+    protected open val daemonOverrides: Map<String, String> get() = emptyMap()
     protected lateinit var s: ManagementServiceCoroutineStub
     protected lateinit var tls: ManagementTls
     protected lateinit var core: ManagementCore
@@ -273,7 +276,7 @@ abstract class ServiceTestBase {
         repository.setTrust("acme-svc", cringle.repository.PluginTrust.TRUSTED)
 
         tls = ManagementTls(dir.resolve("tls"))
-        daemon = Daemon(home, combined = true).start()
+        daemon = Daemon(home, combined = true, overrides = daemonOverrides).start()
         closeables += daemon
         tls.trust(daemon)
         val repositoryServer = tls.startRepository(repository)

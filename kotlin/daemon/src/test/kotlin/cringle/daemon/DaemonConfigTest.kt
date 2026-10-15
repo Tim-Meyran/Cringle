@@ -71,7 +71,7 @@ class DaemonConfigTest {
         assertEquals(
             listOf(
                 "bind", "cringle.host", "components", "daemon.port", "router.mode", "router.port", "router.address",
-                "management.port", "management.web.port", "management.web.url", "management.mcp", "repository.port",
+                "management.port", "management.web.port", "management.web.url", "management.mcp", "api.port", "api.tls", "repository.port",
             ),
             list.entriesList.map { it.key },
         )

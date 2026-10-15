@@ -119,6 +119,19 @@ public object ConfigCatalog {
             { if (it.lowercase() in setOf("on", "read-only", "off")) null else "'$it' is not on, read-only or off" },
             { it.lowercase() },
         ),
+        ConfigKey(
+            "api.port", "8080",
+            "Port of the HTTP API of an engine: the endpoint blocks of its fabrics are reached on it (opened with the first route; 0: any free port, written to `api.port` in the engine folder). " +
+                "Two engines of a machine that have endpoints need different ports. Read when an engine starts.",
+            setOf(RestartTarget.NONE), "port",
+            { if (it.toIntOrNull()?.let { p -> p in 0..65535 } == true) null else "'$it' is not a port (0 to 65535)" },
+        ),
+        ConfigKey(
+            "api.tls", "on", "HTTPS for the HTTP API of the engines (their own certificate, with host names): on or off (plain HTTP, only behind a proxy that does TLS). Read when an engine starts.",
+            setOf(RestartTarget.NONE), "on|off",
+            { if (it.lowercase() in setOf("on", "off")) null else "'$it' is not on or off" },
+            { it.lowercase() },
+        ),
         ConfigKey("repository.port", "7600", "Port of the package repository.", setOf(RestartTarget.REPOSITORY, RestartTarget.MANAGEMENT), "port", ::port),
     )
 

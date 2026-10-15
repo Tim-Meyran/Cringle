@@ -9,7 +9,10 @@ import cringle.common.v1.EngineId
 import cringle.common.v1.FabricId
 import cringle.common.v1.FabricLifecycleState
 import cringle.contract.LogLevel
+import cringle.engine.drivers.ApiSettings
 import cringle.engine.drivers.BuiltinDrivers
+import cringle.engine.drivers.FileUserManagement
+import cringle.engine.drivers.HttpService
 import cringle.engine.drivers.LogQuery
 import cringle.engine.fabric.BlockState
 import cringle.engine.fabric.DeployPlugin
@@ -82,10 +85,17 @@ public class Engine private constructor(
     private val enrollmentSecret: ByteArray?,
     requestedTetherPort: Int,
     tetherOptions: RemoteTetherOptions,
+    api: ApiSettings,
 ) {
     /** The fabrics of this engine. */
     /** The built-in drivers of this engine (logging, filesystem, TCP). */
-    public val drivers: BuiltinDrivers = BuiltinDrivers(dir)
+    public val drivers: BuiltinDrivers = BuiltinDrivers(
+        dir,
+        http = HttpService(
+            api.port, bindHost, if (api.tls) identity.common else null, FileUserManagement(api.usersFile),
+            onStarted = { port -> runCatching { Files.writeString(dir.resolve(API_PORT_FILE), port.toString()) } },
+        ),
+    )
 
     /**
      * The tethers between engines (`spec/tether.md`): serves the senders that the fabrics of this engine allow, over mutual
@@ -612,6 +622,9 @@ public class Engine private constructor(
         /** Name of the file that holds the port for tethers between engines of a running engine. */
         public const val TETHER_PORT_FILE: String = "tether.port"
 
+        /** Name of the file that holds the API port of a running engine (written when the first route is registered). */
+        public const val API_PORT_FILE: String = "api.port"
+
         /** How often the retention of the DWH is applied. */
         public const val DWH_RETENTION_INTERVAL_SECONDS: Long = 60
 
@@ -638,7 +651,9 @@ public class Engine private constructor(
             } catch (e: IllegalArgumentException) {
                 throw EngineArgsException("--bind: ${e.message}")
             }
-            return Engine(dir, identity, config, args.managementPort, bindHost, CringleHome.resolve(args.home, env), heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort, tetherOptions)
+            val home = CringleHome.resolve(args.home, env)
+            val api = ApiSettings(env["CRINGLE_API_PORT"]?.toIntOrNull()?.takeIf { it in 0..65535 } ?: ApiSettings.DEFAULT_PORT, env["CRINGLE_API_TLS"]?.lowercase() != "off", home.resolve("management").resolve("users.json"))
+            return Engine(dir, identity, config, args.managementPort, bindHost, home, heartbeatInterval, trustStore, tls, enrollmentSecret, args.tetherPort, tetherOptions, api)
         }
 
         /**

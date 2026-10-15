@@ -122,6 +122,12 @@ class BlocksTest {
             },
         )
             .add(cringle.contract.FilesystemDriver::class, cringle.engine.drivers.FilesystemSandbox(java.nio.file.Files.createTempDirectory("std-blocks-test")))
+            .add(cringle.contract.HttpDriver::class, object : cringle.contract.HttpDriver {
+                override val type: DriverType get() = BuiltinDriverTypes.HTTP
+
+                override suspend fun register(route: cringle.contract.HttpRoute, handler: suspend (cringle.contract.HttpRequest) -> cringle.contract.HttpResponse): cringle.contract.HttpRegistration =
+                    throw UnsupportedOperationException()
+            })
         for (definition in provider.definitions) provider.createBlock(definition.name, drivers)
         assertThrows<IllegalArgumentException> { provider.createBlock("nothing", drivers) }
 

@@ -48,7 +48,7 @@ class ConfigStoreTest {
         val store = store()
         for ((key, value) in listOf(
             "daemon.port" to "0", "daemon.port" to "70000", "management.port" to "abc", "bind" to "192.0.2.7", "components" to "management,router",
-            "management.web.url" to "http://x:1", "management.web.url" to "https://x/path", "management.web.url" to "https://u@x:1", "management.mcp" to "maybe",
+            "management.web.url" to "http://x:1", "management.web.url" to "https://x/path", "management.web.url" to "https://u@x:1", "management.mcp" to "maybe", "api.port" to "70000", "api.port" to "abc", "api.tls" to "maybe",
         )) {
             assertThrows<ConfigException>("$key=$value") { store.set(key, value) }
         }
@@ -84,6 +84,8 @@ class ConfigStoreTest {
         assertEquals("https://cringle.example:8443", store.set("management.web.url", "https://cringle.example:8443"))
         assertEquals("", store.set("management.web.url", ""))
         assertEquals("read-only", store.set("management.mcp", "Read-Only"))
+        assertEquals("0", store.set("api.port", "0"))
+        assertEquals("off", store.set("api.tls", "OFF"))
     }
 
     @Test

@@ -70,6 +70,8 @@ public class EngineSupervisor(
     private val secureRandom: SecureRandom = SecureRandom(),
     /** `all` makes the engines listen on every network interface (their `--bind`); `null` is the loopback interface. */
     private val bindHost: String? = null,
+    /** More variables for the environment of an engine process (the settings of its HTTP API). */
+    private val engineEnvironment: () -> Map<String, String> = { emptyMap() },
     /**
      * Announces at the router that [engine] will register with the secret whose SHA-256 is the second argument
      * (`PrepareEngine`). Called before the engine process starts; if it throws, the engine is not started.
@@ -183,6 +185,7 @@ public class EngineSupervisor(
             val builder = ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.appendTo(logs.resolve("${m.id}.err.log").toFile()))
             builder.environment()["CRINGLE_HOME"] = home.toString()
+            engineEnvironment().forEach { (k, v) -> builder.environment()[k] = v }
             
             // the secret goes to the engine through its environment, never as an argument
             enrollmentSecret?.let { secret -> builder.environment()["CRINGLE_ENROLLMENT_SECRET"] = secret.joinToString("") { "%02x".format(it) } }

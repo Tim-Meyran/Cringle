@@ -61,6 +61,8 @@ The daemon alone (a machine that is not the central one of a site): add `--daemo
 | `router.address` | empty | `host:port` of the router that this machine uses (`router.mode` remote) | the daemon |
 | `management.port` | `7500` | port of the management server (gRPC: CLI and daemons) | the management server |
 | `management.web.port` | `8443` | port of the web interface | the management server |
+| `api.port` | `8080` | port of the HTTP API of an engine (blocks `http.endpoint`, `standard-blocks.md`); opened by the first route of an engine, `0`: any free port (written to `api.port` in the engine folder); two engines with endpoints need different ports | the engines, at their next start |
+| `api.tls` | `on` | HTTPS for the HTTP API of the engines (the key of the engine, a certificate with host names); `off`: plain HTTP, only behind a proxy that does TLS | the engines, at their next start |
 | `management.mcp` | `on` | the MCP server of the management server: `on`, `read-only` (only the tools that read) or `off`; see `mcp.md` | the management server |
 | `management.web.url` | empty | public address for login links and QR codes (`https://host:port`); empty: the `Host` header of the request | the management server |
 | `repository.port` | `7600` | port of the package repository | the repository and the management server |

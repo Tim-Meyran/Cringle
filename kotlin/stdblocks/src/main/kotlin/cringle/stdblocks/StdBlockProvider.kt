@@ -22,6 +22,7 @@ import cringle.stdblocks.data.DATA_ENTRIES
 import cringle.stdblocks.flow.Constant
 import cringle.stdblocks.flow.FLOW_ENTRIES
 import cringle.stdblocks.dwh.DWH_ENTRIES
+import cringle.stdblocks.http.HTTP_ENTRIES
 import cringle.stdblocks.input.INPUT_ENTRIES
 import cringle.stdblocks.log.LOG_ENTRIES
 import cringle.stdblocks.flow.Log
@@ -46,7 +47,7 @@ private val CORE_ENTRIES: List<Entry> = listOf(
     entry("file.watch", listOf(outPort("created"), outPort("removed")), "FileWatchConfig", FILES) { FileWatch(it[FilesystemDriver::class]) },
 )
 
-private val ENTRIES: List<Entry> = CORE_ENTRIES + FLOW_ENTRIES + INPUT_ENTRIES + LOG_ENTRIES + DWH_ENTRIES + DATA_ENTRIES + TEXT_ENTRIES + MATH_ENTRIES + LOGIC_ENTRIES
+private val ENTRIES: List<Entry> = CORE_ENTRIES + FLOW_ENTRIES + INPUT_ENTRIES + LOG_ENTRIES + HTTP_ENTRIES + DWH_ENTRIES + DATA_ENTRIES + TEXT_ENTRIES + MATH_ENTRIES + LOGIC_ENTRIES
 
 /**
  * The blocks of the plugin `cringle-std` (`docs/standard-blocks.md`). Names are `<theme>.<name>` in lower case. Values have fixed types: counters and
@@ -71,7 +72,7 @@ public class StdBlockProvider : GenericBlockProvider {
          * The version of the plugin. A version of a package never changes in a repository: raise it whenever a block changes.
          * The schema of the configurations is `/cringle/stdblocks/schema.json` on the class path.
          */
-        public const val VERSION: String = "1.11.0"
+        public const val VERSION: String = "1.12.0"
 
         /** The namespace of the configuration schemas. */
         public const val NAMESPACE: String = "cringle.stdblocks"

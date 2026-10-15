@@ -124,6 +124,7 @@ public class Daemon(
         startTimeout,
         stopTimeout,
         bindHost = bind,
+        engineEnvironment = { mapOf("CRINGLE_API_PORT" to effectiveValue("api.port"), "CRINGLE_API_TLS" to effectiveValue("api.tls")) },
         // An engine that is stopped by the daemon may not get to unregister itself (on Windows the process is killed).
         onStopped = { id, _ -> router?.registry?.unregister(id) },
         // combined mode: the router of this process; a separate router is announced to by mTLS from the daemon (#114)
