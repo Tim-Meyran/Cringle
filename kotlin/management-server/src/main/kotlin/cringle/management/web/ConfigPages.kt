@@ -18,6 +18,9 @@ internal class ConfigPages(private val core: ManagementCore) {
         r.get("/config", Permission.READ) { WebResponse.redirect("/config/local") }
         r.get("/config/{machine}", Permission.READ) { req ->
             val machine = req.params.getValue("machine")
+            // the entry of the navigation names the machine `local`; where there is none, the first machine is shown
+            val known = core.listMachines().map { it.record.id }
+            if (machine == "local" && "local" !in known && known.isNotEmpty()) return@get WebResponse.redirect("/config/${known.first()}")
             web.render("Configuration", req, section("Configuration", "The settings of the services of a machine. A change is written to its settings file and applied by its daemon.", "config/$machine", configList(req.session!!, machine, null, null)))
         }
         r.get("/config/{machine}/list", Permission.READ) { req -> fragment(configList(req.session!!, req.params.getValue("machine"), null, null)) }

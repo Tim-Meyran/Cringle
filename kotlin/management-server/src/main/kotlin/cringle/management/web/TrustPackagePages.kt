@@ -171,7 +171,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                         ),
                     )
                 } else {
-                    Html("")
+                    raw("<td class=\"actions\"></td>")
                 },
             )
         }
@@ -185,7 +185,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         }
         return html(
             flash(error, done),
-            dataTable(listOf("Kind", "Name", "Version", "Bytes", "Trust", ""), rows, raw("The repository is empty. Publish a package below.")),
+            dataTable(listOf("Kind", "Name", "Version", "Bytes", "Trust", ""), rows, raw("The repository is empty. Use <em>Publish a package</em> to add the first one.")),
             formPanel("Publish a package", "The repository checks the package and its hash.", upload),
         )
     }

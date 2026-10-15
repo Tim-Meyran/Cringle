@@ -149,14 +149,14 @@ internal class ConnectPages(private val core: ManagementCore, private val grpcPo
         listOf("Component", "Address", "Key (SHA-256 of the public key)", "Use"),
         rows.map { r ->
             h(
-                "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}{}</td></tr>",
-                r.component, copy(r.address),
+                "<tr><td><strong>{}</strong></td><td>{}</td><td>{}</td><td><div>{}</div>{}</td></tr>",
+                r.component, copy(r.address, "addr"),
                 r.fingerprint?.let { h("<code class=\"fingerprint\" data-copy=\"{}\" title=\"Click to copy\">{}</code>", it, it.take(16) + "…") } ?: raw("<span class=\"muted\">not read</span>"),
-                r.note, r.command?.let { h("<br>{}", copy(it)) } ?: Html(""),
+                r.note, r.command?.let { copy(it, "cmd") } ?: Html(""),
             )
         },
         raw("No address."),
     )
 
-    private fun copy(text: String): Html = h("<code data-copy=\"{}\" title=\"Click to copy\">{}</code>", text, text)
+    private fun copy(text: String, css: String = ""): Html = h("<code{} data-copy=\"{}\" title=\"Click to copy\">{}</code>", if (css.isEmpty()) Html("") else raw(" class=\"$css\""), text, text)
 }

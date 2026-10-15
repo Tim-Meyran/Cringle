@@ -66,6 +66,8 @@ class WebConnectTest {
         val page = admin.get("/connect").body()
         assertTrue(page.contains("This server") && page.contains("localhost:7599"), page)
         assertTrue(page.contains("data-copy=\"cringle login --server localhost:7599 --fingerprint $managementKey\""), page)
+        // an address stays in one line, the command wraps below its description (#411)
+        assertTrue(page.contains("<code class=\"addr\" data-copy=\"localhost:7599\"") && page.contains("<code class=\"cmd\" data-copy=\"cringle login"), page)
     }
 
     @Test
