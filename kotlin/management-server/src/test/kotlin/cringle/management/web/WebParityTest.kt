@@ -36,7 +36,7 @@ class WebParityTest {
         "dwh list" to "GET /dwh/list", "dwh query" to "GET /dwh/records", "dwh record" to "POST /dwh/recording", "debug break" to "POST /debug/break", "debug state" to "GET /debug/list", "debug resume" to "POST /debug/resume", "dwh retention" to "POST /dwh/retention",
         "router add" to "POST /trust/routers", "router remove" to "POST /trust/routers/remove", "router list" to "GET /trust",
         "trust list" to "GET /trust/list", "trust add" to "POST /trust/probe", "trust add-component" to "POST /trust/components", "trust revoke" to "POST /trust/revoke",
-        "repo publish" to "POST /packages/upload", "repo list" to "GET /packages", "repo versions" to "GET /packages/list", "repo trust" to "POST /packages/p/trust",
+        "repo publish" to "POST /packages/upload", "repo fetch" to "POST /packages/fetch", "repo list" to "GET /packages", "repo versions" to "GET /packages/list", "repo trust" to "POST /packages/p/trust",
         "user create" to "POST /users", "user list" to "GET /users", "user delete" to "POST /users/u1/delete",
         "user grant" to "POST /users/u1/grant", "user revoke" to "POST /users/u1/revoke",
         "group create" to "POST /groups", "group list" to "GET /groups", "group grant" to "POST /groups/g1/grant", "group revoke" to "POST /groups/g1/revoke",

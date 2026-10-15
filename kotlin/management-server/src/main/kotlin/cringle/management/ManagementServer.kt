@@ -412,6 +412,11 @@ public class ManagementServer(
 
         override suspend fun publishPackage(requests: Flow<PublishRequest>): PublishResponse = guard { access.requireAnywhere(Permission.OPERATE); core.repository().publishPackage(requests) }
 
+        override suspend fun fetchPackages(request: cringle.management.v1.FetchPackagesRequest): cringle.management.v1.FetchPackagesResponse = guard {
+            access.requireAnywhere(Permission.OPERATE)
+            core.fetchPackages(request.source, request.token.ifEmpty { null }, request.packagesList, request.update, request.dryRun)
+        }
+
         override suspend fun listPackages(request: ListPackagesRequest): ListPackagesResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listPackages(request) }
 
         override suspend fun listVersions(request: ListVersionsRequest): ListVersionsResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listVersions(request) }
@@ -489,6 +494,7 @@ public class ManagementServer(
             "AddTrustedComponent" to Permission.ADMINISTER,
             "RemoveTrust" to Permission.ADMINISTER,
             "PublishPackage" to Permission.OPERATE,
+            "FetchPackages" to Permission.OPERATE,
             "ListPackages" to Permission.READ,
             "ListVersions" to Permission.READ,
             "GetPackage" to Permission.READ,

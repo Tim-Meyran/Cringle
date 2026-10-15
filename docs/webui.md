@@ -93,6 +93,7 @@ Only with `--auth`, every route needs `MANAGE_USERS` (or the `users` function). 
 | | `POST /trust/routers/remove`, `POST /trust/components`, `POST /trust/revoke` | `ADMINISTER` | disconnect a router, trust a component (`COMPONENT` or `SERVER`) by fingerprint, revoke (for a router also the engines that came through it) |
 | Packages | `GET /packages`, `GET /packages/list` | `READ` | projects and plugins with version, size and the trust status of plugins |
 | | `POST /packages/upload` | `OPERATE` | publish a package file (multipart, at most 64 MB); the repository verifies it |
+| | `POST /packages/fetch` | `OPERATE` | fetch the missing versions from a remote repository (dialog *Fetch from a remote repository*: address, packages `name[@range]`, only update, dry run, token); the result is listed in the flash (#426) |
 | | `POST /packages/{plugin}/trust` | `ADMINISTER` | `trusted` or `untrusted` for all versions of a plugin |
 
 Deleting a package version is not possible in the repository (and so not here).
@@ -189,6 +190,7 @@ Every command of the CLI either has a route of the web layer or is named below w
 | `cringle trust add-component` | `POST /trust/components` |
 | `cringle trust revoke` | `POST /trust/revoke` |
 | `cringle repo publish` | `POST /packages/upload` |
+| `cringle repo fetch` | `POST /packages/fetch` |
 | `cringle repo list` | `GET /packages` |
 | `cringle repo versions` | `GET /packages/list` |
 | `cringle repo trust` | `POST /packages/p/trust` |
