@@ -342,10 +342,13 @@ internal object BlueprintGraph {
                             val to = byNumber.getValue(target)
                             val outS = outSlot(number, outName)
                             val inS = inSlot(target, targetClass)
-                            val type = commonType(outS.port, inS.port) ?: throw GraphException("${from.id}.${outS.port.name} and ${to.id}.${inS.port.name} share no tether type")
+                            val common = commonType(outS.port, inS.port) ?: throw GraphException("${from.id}.${outS.port.name} and ${to.id}.${inS.port.name} share no tether type")
                             val a = Endpoint(from.id, outS.port.name, outS.index)
                             val b = Endpoint(to.id, inS.port.name, inS.index)
                             val key = key(a, b)
+                            // two ports that share several types (a function block pushes and can be asked): the edge can say which one it is, else the first
+                            val chosen = (options[key] as? JsonObject)?.get("type")?.jsonPrimitive?.content?.let { name -> TetherType.entries.firstOrNull { it.name == name } }
+                            val type = chosen?.takeIf { it in outS.port.tetherTypes && it in inS.port.tetherTypes } ?: common
                             built += key to tether(type, a, b, options[key] as? JsonObject, null)
                         }
                     }
@@ -383,9 +386,10 @@ internal object BlueprintGraph {
         val ids = externalIds(blueprint.tethers)
         return JsonObject(
             blueprint.tethers.withIndex().filter { (_, t) ->
-                drawable(t) && (t.delivery == DeliveryPolicy.BUFFER || t.record != null || t.bufferCapacity != null || t.requestTimeout != null || t.retry != null)
+                drawable(t) && (t.type != TetherType.MESSAGE || t.delivery == DeliveryPolicy.BUFFER || t.record != null || t.bufferCapacity != null || t.requestTimeout != null || t.retry != null)
             }.associate { (i, t) ->
                 keyOf(t, ids[i]) to buildJsonObject {
+                    put("type", t.type.name)
                     put("delivery", t.delivery.name)
                     put("record", JsonPrimitive(t.record != null))
                     t.record?.maxAge?.let { put("recordMaxAgeMs", JsonPrimitive(it.toMillis())) }

@@ -82,6 +82,15 @@
     "PathConfig": { "record": { "path": "cringle.std/String" } },
     "TextInputConfig": { "record": { "value": "cringle.std/String" } },
     "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
+    "VariableName": {
+      "string": { "pattern": "[A-Za-z][A-Za-z0-9_]*", "maxLength": 64, "description": "a name like name or order_id (letters, digits and _)" }
+    },
+    "TextFormatConfig": {
+      "record": {
+        "template": "cringle.std/String",
+        "variables": { "optional": { "list": "VariableName" } }
+      }
+    },
     "HttpMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] },
     "HttpPath": {
       "string": {

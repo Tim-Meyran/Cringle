@@ -90,38 +90,78 @@ internal class HttpEndpoint(private val http: HttpDriver) : Block {
 }
 
 /**
- * `http.response`: answers the request of an `http.endpoint` with a response: `status` (default 200), `contentType` and `headers` (texts) from the configuration. The
- * body is the answer of the block at `source` (it gets the request), or, with nothing connected at `source`, the configured `body` (a text, empty by default; a `{}`
- * in it is replaced by what this block got as its request, so a field from `http.request-field` can be part of the answer). A body that is not a text goes out as JSON.
+ * `http.response`: answers the request of an `http.endpoint` with a response. Every part of it can come from a port or from the properties: the ports `status`,
+ * `contentType`, `headers` and `body` are asked for (`PULL`, with the request as the context) when the request comes; a port that nothing is connected to gives the
+ * value of the properties (`status` 200, `contentType`, `headers` and `body`, a text in which `{}` is replaced by what this block got as its request). The `headers`
+ * of a port are added to those of the properties and win; a `body` that is not a text goes out as JSON.
  */
 internal class HttpResponseBlock : Block {
     private var status = 200L
     private val headers = LinkedHashMap<String, String>()
+    private var contentType: String? = null
     private var body: String = ""
-    private lateinit var source: Tether
+    private lateinit var statusPort: Tether
+    private lateinit var contentTypePort: Tether
+    private lateinit var headersPort: Tether
+    private lateinit var bodyPort: Tether
 
     override suspend fun init(context: BlockContext) {
         status = context.config.long("status") ?: 200
         require(status in 100..599) { "the configuration 'status' must be a HTTP status (100 to 599)" }
         (context.config["headers"] as? Map<*, *>)?.forEach { (k, v) -> headers[k.toString()] = v.toString() }
-        (context.config["contentType"] as? String)?.takeIf { it.isNotBlank() }?.let { type ->
-            if (headers.keys.none { it.equals("content-type", ignoreCase = true) }) headers["Content-Type"] = type
-        }
+        contentType = (context.config["contentType"] as? String)?.takeIf { it.isNotBlank() }
         body = context.config["body"] as? String ?: ""
-        source = context.ports.port("source")
+        statusPort = context.ports.port("status")
+        contentTypePort = context.ports.port("contentType")
+        headersPort = context.ports.port("headers")
+        bodyPort = context.ports.port("body")
+    }
+
+    /** What the block behind [port] answers, or `null` if nothing that can be asked is connected there (the value of the properties counts then). */
+    private suspend fun ask(port: Tether, context: Any): Any? = try {
+        port.request(context)
+    } catch (e: IllegalStateException) {
+        if (e.message?.contains("is not connected") != true && e.message?.contains("cannot initiate") != true) throw e
+        null
     }
 
     override suspend fun onTetherEvent(event: TetherEvent) {
         if (event !is TetherEvent.Request || event.port.name != "request") return
-        val answer: Any? = try {
-            source.request(event.value)
-        } catch (e: IllegalStateException) {
-            if (e.message?.contains("is not connected") != true) throw e
-            null
+        val context = event.value
+        val answerStatus = (ask(statusPort, context) as? Number)?.toLong() ?: status
+        require(answerStatus in 100..599) { "the status $answerStatus is not a HTTP status (100 to 599)" }
+        val all = LinkedHashMap(headers)
+        (ask(contentTypePort, context) as? String ?: contentType)?.let { type ->
+            if (all.keys.none { it.equals("content-type", ignoreCase = true) }) all["Content-Type"] = type
         }
-        // without a source the configured body is a template: `{}` becomes what the block got as its request (a text as it is, anything else as JSON)
-        val text = body.replace("{}", event.value as? String ?: toJson(event.value))
-        event.respond(mapOf("status" to status, "headers" to LinkedHashMap(headers), "body" to (answer ?: text)))
+        (ask(headersPort, context) as? Map<*, *>)?.forEach { (k, v) ->
+            all.keys.firstOrNull { it.equals(k.toString(), ignoreCase = true) }?.let { all.remove(it) }
+            all[k.toString()] = v.toString()
+        }
+        // without a body port the configured body is a template: `{}` becomes what the block got as its request (a text as it is, anything else as JSON)
+        val answerBody = ask(bodyPort, context) ?: body.replace("{}", context as? String ?: toJson(context))
+        event.respond(mapOf("status" to answerStatus, "headers" to all, "body" to answerBody))
+    }
+}
+
+/**
+ * `http.request-value`: the answer of a pull tether with one part of the HTTP request that it is asked with (the context of the pull): `field` as in `http.request-field`,
+ * with `json` parsed as JSON. A part that the request does not have is an empty text.
+ */
+internal class HttpRequestValue : Block {
+    private lateinit var field: String
+    private var json = false
+
+    override suspend fun init(context: BlockContext) {
+        field = (context.config["field"] as? String)?.trim().orEmpty()
+        require(HttpRequestField.FIELD.matches(field)) { "the configuration 'field' is body, method, path, user, params.<name>, query.<name> or headers.<name>" }
+        json = context.config["json"] as? Boolean ?: false
+    }
+
+    override suspend fun onTetherEvent(event: TetherEvent) {
+        if (event !is TetherEvent.Request || event.port.name != "out") return
+        val part = HttpRequestField.part(event.value, field)
+        event.respond(if (json) HttpRequestField.parse(part.toString(), field) else part)
     }
 }
 
@@ -144,34 +184,38 @@ internal class HttpRequestField : Block {
 
     override suspend fun onTetherEvent(event: TetherEvent) {
         if (event !is TetherEvent.Request || event.port.name != "request") return
-        val request = event.value as? Map<*, *> ?: throw IllegalArgumentException("the request is not the request of an http.endpoint")
-        val part: Any = when (field.substringBefore('.')) {
-            "params", "query", "headers" -> {
-                val key = field.substringAfter('.').let { if (field.startsWith("headers.")) it.lowercase() else it }
-                (request[field.substringBefore('.')] as? Map<*, *>)?.get(key) ?: ""
-            }
-            else -> request[field] ?: ""
-        }
-        val value: Any = if (json) {
-            try {
-                parseJson(part.toString())
-            } catch (e: Exception) {
-                throw IllegalArgumentException("'${field}' of the request is not valid JSON: ${e.message}")
-            }
-        } else {
-            part
-        }
+        val part = part(event.value, field)
+        val value: Any = if (json) parse(part.toString(), field) else part
         event.respond(next.request(value))
     }
 
-    private companion object {
+    internal companion object {
         val FIELD = Regex("body|method|path|user|(params|query|headers)\\.\\S+")
+
+        /** The part [field] of the HTTP request [request] (an empty text if it has none). */
+        fun part(request: Any, field: String): Any {
+            val map = request as? Map<*, *> ?: throw IllegalArgumentException("the request is not the request of an http.endpoint")
+            return when (field.substringBefore('.')) {
+                "params", "query", "headers" -> {
+                    val key = field.substringAfter('.').let { if (field.startsWith("headers.")) it.lowercase() else it }
+                    (map[field.substringBefore('.')] as? Map<*, *>)?.get(key) ?: ""
+                }
+                else -> map[field] ?: ""
+            }
+        }
+
+        fun parse(text: String, field: String): Any = try {
+            parseJson(text)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("'$field' of the request is not valid JSON: ${e.message}")
+        }
     }
 }
 
 private val HTTP_REQUEST = SchemaRef(StdBlockProvider.NAMESPACE, "HttpRequest")
 private val HTTP_RESPONSE = SchemaRef(StdBlockProvider.NAMESPACE, "HttpResponse")
 private val REQUEST_RESPONSE = setOf(TetherType.REQUEST_RESPONSE)
+private val PULL = setOf(TetherType.PULL)
 
 /** `http.request-field` with the type parameter `T` (bound `Any`): the value that `next` gets, a text or, with `json`, a JSON value. */
 private val REQUEST_FIELD = Entry(
@@ -204,9 +248,18 @@ internal val HTTP_ENTRIES: List<Entry> = listOf(
         "http.response",
         listOf(
             PortDefinition("request", PortDirection.IN, REQUEST_RESPONSE, ANY, responseSchema = HTTP_RESPONSE),
-            PortDefinition("source", PortDirection.OUT, REQUEST_RESPONSE, ANY, responseSchema = ANY),
+            // the parts of the response: asked for when a request comes; the properties are the defaults
+            PortDefinition("status", PortDirection.IN, PULL, SchemaRef("cringle.std", "Int")),
+            PortDefinition("contentType", PortDirection.IN, PULL, SchemaRef("cringle.std", "String")),
+            PortDefinition("headers", PortDirection.IN, PULL, ANY),
+            PortDefinition("body", PortDirection.IN, PULL, ANY),
         ),
         "HttpResponseConfig",
     ) { HttpResponseBlock() },
+    entry(
+        "http.request-value",
+        listOf(PortDefinition("out", PortDirection.OUT, PULL, ANY)),
+        "HttpRequestFieldConfig",
+    ) { HttpRequestValue() },
     REQUEST_FIELD,
 )

@@ -31,6 +31,7 @@ private fun parse(name: String, type: cringle.contract.SchemaRef, f: (String) ->
     }
 
 internal val TEXT_ENTRIES: List<Entry> = listOf(
+    TEXT_FORMAT_ENTRY,
     latest2Entry("text.concat", STRING, listOf(outPort("out")), "ConcatConfig") { config ->
         val separator = config["separator"] as? String ?: ""
         return@latest2Entry { a, b, emit -> emit.send("out", (a as String) + separator + (b as String)) }

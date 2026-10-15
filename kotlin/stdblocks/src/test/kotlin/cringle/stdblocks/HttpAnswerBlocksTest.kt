@@ -17,9 +17,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 class HttpAnswerBlocksTest {
-    private val unconnected: suspend (Any) -> Any = { throw IllegalStateException("port 'source' of block 'r' is not connected in the blueprint") }
+    private fun unconnected(port: String): suspend (Any) -> Any = { throw IllegalStateException("port '$port' of block 'r' is not connected in the blueprint") }
 
     private fun block(name: String, config: Map<String, Any?>) = BlockTestHarness.forProvider(StdBlockProvider(), name, TestDriverSet(), config)
+
+    private val parts = listOf("status", "contentType", "headers", "body")
 
     private val endpointRequest = mapOf(
         "method" to "POST", "path" to "/orders/7", "params" to mapOf("id" to "7"), "query" to mapOf("q" to "x y"), "headers" to mapOf("x-key" to "k1"),
@@ -29,7 +31,9 @@ class HttpAnswerBlocksTest {
     @Test
     fun inputJsonAnswersWithTheStructure() = runTest {
         block("input.json", mapOf("value" to """{"a":[1,2,{"b":true}],"c":"d"}""")).runLifecycle {
-            assertEquals(mapOf("a" to listOf(1L, 2L, mapOf("b" to true)), "c" to "d"), request("get", "?"))
+            val structure = mapOf("a" to listOf(1L, 2L, mapOf("b" to true)), "c" to "d")
+            assertEquals(structure, request("get", "?"))
+            assertEquals(structure, request("out", "?"), "it is also the value of a pull tether at out")
             sendMessage("trigger", 1L)
             assertEquals(1, ports.tether("out").sentMessages.size)
         }
@@ -38,39 +42,72 @@ class HttpAnswerBlocksTest {
     }
 
     @Test
-    fun theResponseBlockUsesTheSourceOrTheConfiguredBody() = runTest {
+    fun theResponseIsBuiltFromThePortsAndThePropertiesAreTheDefaults() = runTest {
         block("http.response", mapOf("status" to 201L, "contentType" to "text/csv", "headers" to mapOf("X-Id" to "5"), "body" to "a,b")).runLifecycle {
-            ports.tether("source").requestHandler = unconnected
+            for (p in parts) ports.tether(p).requestHandler = unconnected(p)
             val fixed = request("request", endpointRequest) as Map<*, *>
             assertEquals(201L, fixed["status"])
             assertEquals("a,b", fixed["body"])
             assertEquals(mapOf("X-Id" to "5", "Content-Type" to "text/csv"), fixed["headers"])
 
-            ports.tether("source").requestHandler = { mapOf("ok" to true) }
-            val dynamic = request("request", endpointRequest) as Map<*, *>
-            assertEquals(mapOf("ok" to true), dynamic["body"], "the answer of the source is the body")
-            assertEquals(endpointRequest, ports.tether("source").requests.last(), "the source gets the request")
+            // every part can come from a port: the port wins, the others stay the properties
+            ports.tether("status").requestHandler = { 404L }
+            ports.tether("body").requestHandler = { mapOf("ok" to true) }
+            ports.tether("headers").requestHandler = { mapOf("x-id" to "9", "X-New" to "1") }
+            ports.tether("contentType").requestHandler = { "application/json" }
+            val built = request("request", endpointRequest) as Map<*, *>
+            assertEquals(404L, built["status"])
+            assertEquals(mapOf("ok" to true), built["body"])
+            val headers = built["headers"] as Map<*, *>
+            assertEquals("9", headers.entries.single { it.key.toString().equals("x-id", ignoreCase = true) }.value, "the header of the port replaces the one of the properties")
+            assertEquals("1", headers["X-New"])
+            assertEquals("application/json", headers["Content-Type"], "the content type of the port wins")
+            for (p in parts) assertEquals(endpointRequest, ports.tether(p).requests.last(), "$p is asked with the request")
         }
         block("http.response", emptyMap()).runLifecycle {
-            ports.tether("source").requestHandler = unconnected
+            for (p in parts) ports.tether(p).requestHandler = unconnected(p)
             val defaults = request("request", endpointRequest) as Map<*, *>
             assertEquals(200L, defaults["status"])
             assertEquals("", defaults["body"])
-        }
-        block("http.response", mapOf("body" to "Hello {}!")).runLifecycle {
-            ports.tether("source").requestHandler = unconnected
-            assertEquals("Hello Ada!", (request("request", "Ada") as Map<*, *>)["body"], "a text request goes into the template")
-            assertEquals("Hello {\"a\":1}!", (request("request", mapOf("a" to 1L)) as Map<*, *>)["body"])
         }
         assertThrows<IllegalArgumentException> { block("http.response", mapOf("status" to 99L)).init() }
     }
 
     @Test
-    fun aFailureOfTheSourceIsNotHidden() = runTest {
-        block("http.response", emptyMap()).runLifecycle {
-            ports.tether("source").requestHandler = { throw IllegalStateException("the source failed") }
-            assertThrows<IllegalStateException> { request("request", endpointRequest) }
+    fun theBodyOfThePropertiesIsATemplateForWhatTheBlockGets() = runTest {
+        block("http.response", mapOf("body" to "Hello {}!")).runLifecycle {
+            for (p in parts) ports.tether(p).requestHandler = unconnected(p)
+            assertEquals("Hello Ada!", (request("request", "Ada") as Map<*, *>)["body"], "a text request goes into the template")
+            assertEquals("Hello {\"a\":1}!", (request("request", mapOf("a" to 1L)) as Map<*, *>)["body"])
         }
+    }
+
+    @Test
+    fun aFailureBehindAPortIsNotHiddenAndABadStatusIsRefused() = runTest {
+        block("http.response", emptyMap()).runLifecycle {
+            for (p in parts) ports.tether(p).requestHandler = unconnected(p)
+            ports.tether("body").requestHandler = { throw IllegalStateException("the source failed") }
+            assertThrows<IllegalStateException> { request("request", endpointRequest) }
+            ports.tether("body").requestHandler = unconnected("body")
+            ports.tether("status").requestHandler = { 700L }
+            assertThrows<IllegalArgumentException> { request("request", endpointRequest) }
+        }
+    }
+
+    @Test
+    fun theRequestValueAnswersWithOnePartOfTheRequest() = runTest {
+        val cases = mapOf(
+            "body" to endpointRequest["body"], "method" to "POST", "path" to "/orders/7", "params.id" to "7", "query.q" to "x y", "headers.X-Key" to "k1",
+            "params.missing" to "", "user" to "",
+        )
+        for ((field, expected) in cases) {
+            block("http.request-value", mapOf("field" to field)).runLifecycle { assertEquals(expected, request("out", endpointRequest), field) }
+        }
+        block("http.request-value", mapOf("field" to "body", "json" to true)).runLifecycle {
+            assertEquals(mapOf("item" to "pen", "qty" to 2L), request("out", endpointRequest), "the body parsed as JSON")
+            assertThrows<IllegalArgumentException> { request("out", "not a request") }
+        }
+        for (bad in listOf("", "bodies", "params.", "headers")) assertThrows<IllegalArgumentException>(bad) { block("http.request-value", mapOf("field" to bad)).init() }
     }
 
     @Test

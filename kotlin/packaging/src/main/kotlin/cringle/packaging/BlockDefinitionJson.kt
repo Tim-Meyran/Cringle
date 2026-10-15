@@ -25,7 +25,7 @@ public object BlockDefinitionJson {
     private val nameKeys = setOf("name", "schemas", "ports", "requiredDrivers", "configSchema", "exclusiveResources", "typeParameters")
     private val parameterKeys = setOf("name", "bound")
     private val resourceKeys = setOf("kind", "label")
-    private val portKeys = setOf("name", "direction", "tetherTypes", "schema", "varArg", "typeParam", "responseSchema")
+    private val portKeys = setOf("name", "direction", "tetherTypes", "schema", "varArg", "typeParam", "responseSchema", "namesFrom")
 
     /** Parses a block definition from text. */
     public fun parse(text: String): BlockDefinition =
@@ -73,6 +73,7 @@ public object BlockDefinitionJson {
                 varArg,
                 JsonReading.optString(o, "typeParam", path)?.let { ManifestJson.checkedIdentifier(it, "$path.typeParam") },
                 JsonReading.optString(o, "responseSchema", path)?.let { ref(it, "$path.responseSchema") },
+                JsonReading.optString(o, "namesFrom", path),
             )
         }
     }
@@ -112,6 +113,7 @@ public object BlockDefinitionJson {
                         if (p.varArg) put("varArg", true)
                         p.typeParam?.let { put("typeParam", it) }
                         p.responseSchema?.let { put("responseSchema", it.toString()) }
+                        p.namesFrom?.let { put("namesFrom", it) }
                     }
                 },
             ),

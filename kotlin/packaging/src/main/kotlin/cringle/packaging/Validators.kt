@@ -119,6 +119,12 @@ public object PackageValidator {
             for (name in b.varArgCounts.keys) {
                 if (name !in varArgPorts) problem("$path.varArgCounts.$name", "'$name' is not a VarArg port of '${b.block}'")
             }
+            // the slots of a port that is named by the configuration: one per name
+            for (port in definition.ports.filter { it.namesFrom != null }) {
+                val names = (b.config[port.namesFrom!!] as? kotlinx.serialization.json.JsonArray)?.size ?: continue
+                val slots = b.varArgCounts[port.name] ?: continue
+                if (slots != names) problem("$path.varArgCounts.${port.name}", "'${port.name}' has $slots slots but '${port.namesFrom}' names $names")
+            }
             val configSchema = definition.configSchema
             if (configSchema != null) {
                 for (e in SchemaValidator(registry).validate(b.config, configSchema)) {
