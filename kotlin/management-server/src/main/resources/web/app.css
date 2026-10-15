@@ -529,13 +529,6 @@ dialog.dialog::backdrop { background: rgba(6, 8, 12, 0.66); -webkit-backdrop-fil
 #mon-legend .line { width: 18px; height: 0; border-top: 3px solid var(--text-faint); }
 #mon-legend .line.active { border-color: var(--accent); }
 #mon-legend .line.held { border-color: var(--warning); border-top-style: dashed; }
-#mon-data { left: calc(248px + 2 * var(--space-3)); right: calc(340px + 2 * var(--space-3)); bottom: var(--space-3); max-height: 45%; overflow: auto; padding: var(--space-3) var(--space-4); }
-#mon-data[hidden] { display: none; }
-#mon-data #mon-data-close { position: absolute; top: var(--space-2); right: var(--space-2); }
-#mon-data table { width: 100%; font-size: var(--text-sm); }
-#mon-data table.kv { width: auto; }
-#mon-data .payload { display: block; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-#mon-data .payload.open { white-space: pre-wrap; word-break: break-all; max-width: none; }
 #drawflow .drawflow-node.monitor-node { border-left: 4px solid var(--text-faint); }
 #drawflow .drawflow-node.state-running { border-left-color: var(--success); }
 #drawflow .drawflow-node.state-starting, #drawflow .drawflow-node.state-restarting, #drawflow .drawflow-node.state-created { border-left-color: var(--warning); }
@@ -570,3 +563,68 @@ ul.tree .muted { color: var(--text-muted); font-size: var(--text-sm); }
 ul.tree .row-actions { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
 ul.tree form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: 0; }
 ul.tree .add { padding-top: var(--space-2); }
+
+/* Monitor UX (#401) */
+#monitor #properties { max-height: calc(100% - 2 * var(--space-3)); }
+#monitor #properties h2 { display: flex; justify-content: space-between; align-items: center; }
+#monitor #properties h2 .link { text-transform: none; letter-spacing: 0; font-size: var(--text-sm); }
+#monitor #editor-bar { max-width: calc(100% - 248px - 340px - 5 * var(--space-3)); }
+#monitor #editor-bar #mon-find { width: 130px; min-height: 30px; }
+#monitor #editor-bar select { min-height: 30px; }
+#mon-live { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); min-width: 110px; }
+#mon-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+#mon-live.ok i { background: var(--success); animation: mon-pulse 2s ease-in-out infinite; }
+#mon-live.paused i { background: var(--warning); }
+#mon-live.bad i { background: var(--danger); }
+@keyframes mon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+#mon-data { left: calc(248px + 2 * var(--space-3)); right: calc(340px + 2 * var(--space-3)); bottom: var(--space-3); height: min(46%, 440px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+#mon-data[hidden] { display: none; }
+#mon-data .dock-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+#mon-data .dock-head strong { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
+#mon-data .dock-head code { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mon-data .dock-head .filter-note { flex: 1; color: var(--text-faint); font-size: var(--text-sm); white-space: nowrap; }
+#mon-data .dock-head input[type=search] { width: 200px; min-height: 30px; }
+#mon-data-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) var(--space-4); }
+#mon-data .dock-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+#mon-data .dock-top .row-actions { margin: 0; }
+#mon-data h4 { margin: var(--space-3) 0 var(--space-2); }
+.mon-stats { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mon-stat-chip { display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-3); font-size: var(--text-sm); color: var(--text-muted); }
+.mon-stat-chip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.mon-stat-chip.flow b { color: var(--accent); }
+.mon-stat-chip.warn b { color: var(--warning); }
+.mon-stat-chip.bad b { color: var(--danger); }
+#mon-data table.values { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--text-sm); }
+#mon-data table.values th { position: sticky; top: calc(-1 * var(--space-3)); background: var(--surface-2); text-align: left; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); padding: var(--space-2); z-index: 1; }
+#mon-data table.values td { padding: 5px var(--space-2); border-top: 1px solid var(--border); vertical-align: top; font-variant-numeric: tabular-nums; }
+#mon-data table.values th:nth-child(1), #mon-data table.values td:nth-child(1) { width: 56px; }
+#mon-data table.values th:nth-child(2), #mon-data table.values td:nth-child(2) { width: 110px; }
+#mon-data table.values th:nth-child(3), #mon-data table.values td:nth-child(3) { width: 96px; }
+#mon-data td.val { display: flex; gap: var(--space-2); align-items: flex-start; }
+#mon-data .payload { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; background: none; padding: 0; }
+#mon-data .payload.open { white-space: pre-wrap; word-break: break-all; }
+#mon-data button.copy { flex: 0 0 auto; background: none; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--text-xs); padding: 0 6px; cursor: pointer; visibility: hidden; }
+#mon-data tr:hover button.copy, #mon-data button.copy.done { visibility: visible; }
+#mon-data tr:hover td { background: rgba(255, 255, 255, 0.03); }
+#mon-data tr.fresh td { animation: mon-fresh 2.5s ease-out; }
+@keyframes mon-fresh { from { background: var(--accent-tint); } to { background: transparent; } }
+#mon-data tr[hidden] { display: none; }
+main:has(#monitor) #flash { top: var(--space-3); bottom: auto; left: 50%; right: auto; transform: translateX(-50%); width: min(460px, 40vw); }
+#monitor .overview h3 { margin-bottom: var(--space-1); }
+#monitor .overview .mon-stats { margin: var(--space-3) 0; }
+#monitor .block-list { list-style: none; margin: 0; padding: 0; }
+#monitor .block-list li { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: 4px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+#monitor .block-list .muted { color: var(--text-faint); font-size: var(--text-xs); }
+#monitor .hint { color: var(--text-faint); font-size: var(--text-sm); margin: var(--space-3) 0 0; }
+#monitor .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); margin-right: 6px; }
+#monitor .sdot.state-running, #drawflow .state-running .sdot { background: var(--success); }
+#monitor .sdot.state-starting, #monitor .sdot.state-restarting, #drawflow .state-starting .sdot, #drawflow .state-restarting .sdot { background: var(--warning); }
+#monitor .sdot.state-failed, #monitor .sdot.state-stopped, #drawflow .state-failed .sdot, #drawflow .state-stopped .sdot { background: var(--danger); }
+#drawflow .drawflow-node.monitor-node { width: 220px; transition: opacity 0.2s, box-shadow 0.2s; }
+#drawflow .drawflow-node.monitor-node.dim { opacity: 0.25; }
+#drawflow .drawflow-node.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0, 0, 0, 0.35); }
+#drawflow .drawflow-node .mon-total { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+#monitor .connection .main-path.focus { stroke: var(--accent); stroke-width: 4px; }
+#monitor .connection text.mon-rate { fill: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
+#monitor .connection text.mon-rate.flow { fill: var(--accent); font-weight: 600; }
+@media (max-width: 900px) { #mon-data { left: var(--space-3); right: var(--space-3); } }

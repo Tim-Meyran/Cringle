@@ -79,6 +79,7 @@ class MonitorManagementTest : ServiceTestBase() {
             assertTrue(client.get("/monitor").body().contains("/monitor/$fabric"))
             val page = client.get("/monitor/$fabric").body()
             assertTrue(page.contains("id=\"monitor\"") && page.contains("/static/monitor.js"), page)
+            assertTrue(listOf("mon-live", "mon-pause", "mon-find", "mon-every", "mon-filter", "mon-back", "zoom-fit").all { page.contains("id=\"$it\"") }, page)
             val json = kotlinx.serialization.json.Json.parseToJsonElement(client.get("/monitor/$fabric/graph").body()) as kotlinx.serialization.json.JsonObject
             assertTrue(json.getValue("blocks").toString().contains("\"c2\"") && json.getValue("tethers").toString().contains(tether))
             val block = client.get("/monitor/$fabric/block?id=c2").body()
@@ -86,6 +87,8 @@ class MonitorManagementTest : ServiceTestBase() {
             val port = client.get("/monitor/$fabric/port?block=c2&port=out").body()
             assertTrue(port.contains("data-tether=\"c2.out -&gt; s2.in\""), port)
             await("a value in the table") { client.get("/monitor/$fabric/tether?id=" + java.net.URLEncoder.encode(tether, "UTF-8")).body().contains("class=\"payload\"") }
+            val fragment = client.get("/monitor/$fabric/tether?id=" + java.net.URLEncoder.encode(tether, "UTF-8")).body()
+            assertTrue(fragment.contains("mon-stat-chip") && fragment.contains("table class=\"values\"") && fragment.contains("data-seq=") && fragment.contains("class=\"copy\""), fragment)
 
             // a breakpoint on the block holds the values of its inputs; removing it lets them go
             val set = client.post("/monitor/$fabric/breakpoint", mapOf("block" to "s2", "mode" to "on")).body()
