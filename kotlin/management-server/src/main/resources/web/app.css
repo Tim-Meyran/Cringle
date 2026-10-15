@@ -580,6 +580,17 @@ ul.tree .row-actions { margin-left: auto; display: flex; gap: var(--space-2); al
 ul.tree form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: 0; }
 ul.tree .add { padding-top: var(--space-2); }
 
+/* Long text wraps inside panels and dialogs instead of scrolling them sideways (#406) */
+#properties, #mon-data-body, .dialog-body, .notice { overflow-wrap: anywhere; }
+#properties { overflow-x: hidden; }
+#properties table, #mon-data-body table, .dialog-body table { max-width: 100%; }
+#properties td, #properties th:not(:first-child), #mon-data-body td { min-width: 0; overflow-wrap: anywhere; word-break: normal; }
+#properties .table-wrap { overflow-x: hidden; }
+#properties code, .dialog-body code, .notice code { white-space: pre-wrap; overflow-wrap: anywhere; }
+#monitor .kv td { word-break: normal; overflow-wrap: anywhere; }
+#properties table { table-layout: fixed; width: 100%; }
+#properties .kv th { width: 36%; white-space: normal; }
+
 /* Monitor UX (#401) */
 #monitor #properties { max-height: calc(100% - 2 * var(--space-3)); }
 #monitor #properties h2 { display: flex; justify-content: space-between; align-items: center; }

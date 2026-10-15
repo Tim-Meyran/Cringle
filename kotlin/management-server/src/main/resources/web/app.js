@@ -24,6 +24,23 @@
 // Own helpers of the WebUI; the page logic is in htmx attributes and Alpine x-data.
 // The lists refresh themselves (hx-trigger "every 5s [cringleIdle()]"), morphing the new HTML into the old. They wait while the user is working in a
 // list: a field has the focus, a <details> is open, or a field differs from what it had when it was rendered (text typed, an option changed).
+// A text that is cut off (hidden overflow, ellipsis) shows itself whole as a tooltip: looked at when the pointer enters it or an element inside it.
+document.addEventListener('mouseover', function (event) {
+  var el = event.target;
+  for (var depth = 0; el && el !== document.body && depth < 4; depth++, el = el.parentElement) {
+    if (el.title && !el.hasAttribute('data-auto-tip')) return;
+    var style = getComputedStyle(el);
+    var clips = style.overflowX === 'hidden' || style.overflowX === 'clip';
+    var cut = clips && el.scrollWidth > el.clientWidth + 1;
+    if (cut) {
+      el.title = el.textContent.replace(/\s+/g, ' ').trim();
+      el.setAttribute('data-auto-tip', '');
+      return;
+    }
+    if (el.hasAttribute('data-auto-tip')) { el.removeAttribute('title'); el.removeAttribute('data-auto-tip'); }
+  }
+});
+
 window.cringleIdle = function () {
   var list = document.getElementById('list');
   if (!list) return true;
