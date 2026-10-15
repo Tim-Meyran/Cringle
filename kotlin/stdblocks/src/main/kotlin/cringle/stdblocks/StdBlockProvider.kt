@@ -72,7 +72,7 @@ public class StdBlockProvider : GenericBlockProvider {
          * The version of the plugin. A version of a package never changes in a repository: raise it whenever a block changes.
          * The schema of the configurations is `/cringle/stdblocks/schema.json` on the class path.
          */
-        public const val VERSION: String = "1.13.0"
+        public const val VERSION: String = "1.13.1"
 
         /** The namespace of the configuration schemas. */
         public const val NAMESPACE: String = "cringle.stdblocks"

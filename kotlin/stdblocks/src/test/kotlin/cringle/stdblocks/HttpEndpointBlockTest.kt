@@ -51,6 +51,12 @@ class HttpEndpointBlockTest {
         HttpRequest("GET", "/orders/7", mapOf("id" to "7"), mapOf("q" to "1"), mapOf("x-a" to "b"), "body", user)
 
     @Test
+    fun theDefinitionDeclaresTheApiPortAsExclusive() {
+        val definition = StdBlockProvider().definitions.single { it.name == "http.endpoint" }
+        assertEquals(listOf(cringle.contract.ExclusiveResource(cringle.contract.ExclusiveKind.PORT, "api")), definition.exclusiveResources)
+    }
+
+    @Test
     fun theRouteIsServedFromStartToStop() = runTest {
         val http = FakeHttp()
         val h = harness(http, mapOf("path" to "/orders/{id}", "method" to "post", "auth" to true, "timeoutMs" to 5000L))

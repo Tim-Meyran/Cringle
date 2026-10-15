@@ -41,19 +41,19 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
     private fun tether(from: String, port: String, to: String, input: String) = TetherDef(TetherType.MESSAGE, Endpoint(from, port), Endpoint(to, input))
 
     /** Publishes the standard blocks and a project `name` that holds [blueprint], starts an engine and deploys it. */
-    private fun deployStd(name: String, blueprint: Blueprint) {
+    private fun deployStd(name: String, blueprint: Blueprint, version: String = "1.0.0", startEngine: Boolean = true) {
         val installer = StdBlocksInstaller(core)
         runBlocking { installer.install() }
         val file = dir.resolve("std-package.cringle")
         Files.write(file, installer.packageBytes())
-        val project = TestProjectBuilder(name, "1.0.0")
+        val project = TestProjectBuilder(name, version)
             .dependency("cringle-std", "^1.0.0")
             .blueprint(blueprint)
             .fabric(FabricConfig(blueprint.name, 1, listOf("std"), emptyMap()))
             .build(Files.createDirectories(dir.resolve("std-build")), listOf(PackageReader.readPlugin(file)))
         runBlocking { publishProject(project.file) }
-        runBlocking { engine("e-std", "std") }
-        runBlocking { core.deploy(name, "1.0.0", true, false, true) }
+        if (startEngine) runBlocking { engine("e-std", "std") }
+        runBlocking { core.deploy(name, version, true, false, true) }
     }
 
     private fun awaitLog(vararg expected: String) {
@@ -500,6 +500,36 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         val made = call("POST", "/made")
         assertTrue(made.statusCode() == 201 && made.body() == "a,b" && made.headers().firstValue("X-Made").get() == "yes" && made.headers().firstValue("Content-Type").get() == "text/csv", made.toString())
         assertTrue(call("GET", "/hello/Ada").body() == "Hello Ada!", "a field of the request is part of the answer")
+    }
+
+    @Test
+    fun aNewVersionOfAProjectWithAnEndpointReplacesTheOldOne() {
+        fun blueprint(text: String) = Blueprint(
+            "app",
+            listOf(block("e", "http.endpoint", config("path" to "/version")), block("v", "input.text", config("value" to text))),
+            listOf(TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("e", "handler"), Endpoint("v", "get"))),
+        )
+        deployStd("std-redeploy", blueprint("one"), "1.0.0")
+        val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
+        val deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos()
+        while (!Files.exists(portFile) || Files.readString(portFile).isBlank()) {
+            check(System.nanoTime() < deadline) { "the engine did not open its API port: ${diagnostics()}" }
+            Thread.sleep(200)
+        }
+        val port = Files.readString(portFile).trim().toInt()
+        val client = java.net.http.HttpClient.newHttpClient()
+        fun body(): String = client.send(
+            java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:$port/version")).build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString(),
+        ).body()
+        assertTrue(body() == "one")
+        // the second version has the same route: it only starts after the first one has stopped (the endpoint is an exclusive resource)
+        deployStd("std-redeploy", blueprint("two"), "1.0.1", startEngine = false)
+        val until = System.nanoTime() + Duration.ofSeconds(60).toNanos()
+        while (body() != "two") {
+            check(System.nanoTime() < until) { "the new version does not answer: ${diagnostics()}" }
+            Thread.sleep(200)
+        }
     }
 
     private suspend fun publishProject(file: Path) {
