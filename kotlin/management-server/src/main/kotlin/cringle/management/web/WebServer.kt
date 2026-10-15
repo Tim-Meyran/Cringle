@@ -99,11 +99,24 @@ public class WebServer(
     }
 
 
+    /**
+     * The names that clients may use for this server: they go into the certificate of the web interface, so that clients which check the host name (browsers
+     * after the first trust, MCP clients) accept it. `localhost` and the loopback addresses, the host name of the machine, the host of `--web-url` and a
+     * specific address the server listens on.
+     */
+    private fun certificateNames(): Set<String> {
+        val names = linkedSetOf("localhost", "127.0.0.1", "::1")
+        runCatching { java.net.InetAddress.getLocalHost() }.getOrNull()?.let { names += it.hostName.lowercase() }
+        publicUrl?.let { runCatching { java.net.URI(it).host }.getOrNull() }?.let { names += it.lowercase() }
+        if (host != null && host.lowercase() !in setOf("loopback", "all", "0.0.0.0", "::")) names += host.lowercase()
+        return names
+    }
+
     private fun sslContext(): SSLContext {
         val store = KeyStore.getInstance("PKCS12")
         store.load(null, null)
         val password = CharArray(0)
-        store.setKeyEntry("web", core.identity.keyPair.private, password, arrayOf(core.identity.certificate))
+        store.setKeyEntry("web", core.identity.keyPair.private, password, arrayOf(core.identity.webCertificate(certificateNames())))
         val factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
         factory.init(store, password)
         return SSLContext.getInstance("TLSv1.3").also { it.init(factory.keyManagers, null, null) }

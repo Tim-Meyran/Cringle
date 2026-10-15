@@ -56,11 +56,11 @@ public class StdBlockProvider : GenericBlockProvider {
     override val definitions: List<BlockDefinition> = ENTRIES.map { it.definition }
 
     override fun createBlock(definitionName: String, drivers: DriverSet): Block =
-        (ENTRIES.firstOrNull { it.definition.name == definitionName } ?: throw IllegalArgumentException("this provider has no definition named '$definitionName'")).create(drivers)
+        QuietOutputs((ENTRIES.firstOrNull { it.definition.name == definitionName } ?: throw IllegalArgumentException("this provider has no definition named '$definitionName'")).create(drivers))
 
     override fun createBlock(definitionName: String, drivers: DriverSet, types: Map<String, SchemaRef>): Block {
         val entry = ENTRIES.firstOrNull { it.definition.name == definitionName } ?: throw IllegalArgumentException("this provider has no definition named '$definitionName'")
-        return entry.createTyped?.invoke(drivers, types) ?: entry.create(drivers)
+        return QuietOutputs(entry.createTyped?.invoke(drivers, types) ?: entry.create(drivers))
     }
 
     public companion object {
@@ -71,7 +71,7 @@ public class StdBlockProvider : GenericBlockProvider {
          * The version of the plugin. A version of a package never changes in a repository: raise it whenever a block changes.
          * The schema of the configurations is `/cringle/stdblocks/schema.json` on the class path.
          */
-        public const val VERSION: String = "1.10.0"
+        public const val VERSION: String = "1.11.0"
 
         /** The namespace of the configuration schemas. */
         public const val NAMESPACE: String = "cringle.stdblocks"

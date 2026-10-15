@@ -4,11 +4,14 @@ The ManagementServer has an MCP server (Model Context Protocol, revision 2025-03
 
 ## Connect
 
-The endpoint is `POST https://<host>:<web port>/mcp` of the web interface (default `https://localhost:8443/mcp`). It speaks JSON-RPC 2.0 over Streamable HTTP: one message per `POST`, the answer is the JSON of the response (no event stream; `GET` answers `405`). Sign in with the **token of a user** (`cringle token create <user-id>`) in the header `Authorization: Bearer <token>`; without `--auth` everybody is administrator, as everywhere. The certificate of the server is self-signed: the client has to trust it (the fingerprint of the server key is on the login page and in `cringle login`).
+The endpoint is `POST https://<host>:<web port>/mcp` of the web interface (default `https://localhost:8443/mcp`). It speaks JSON-RPC 2.0 over Streamable HTTP: one message per `POST`, the answer is the JSON of the response (no event stream; `GET` answers `405`). Sign in with the **token of a user** (`cringle token create <user-id>`) in the header `Authorization: Bearer <token>`; without `--auth` everybody is administrator, as everywhere. The certificate of the web interface is self-signed, so the client has to trust it, and it has the names `localhost`, `127.0.0.1`, `::1`, the host name of the machine, the host of `--web-url` and a specific `--web-host` (a Subject Alternative Name, #407), so that clients which check the host name accept it. It is the file `web.crt` in the `certs` folder of the management server (`<home>/management/certs/web.crt`; its key is the key of the server, the fingerprint on the login page and in `cringle login`). With Claude Code:
 
 ```bash
+export NODE_EXTRA_CA_CERTS=<home>/management/certs/web.crt
 claude mcp add --transport http cringle https://localhost:8443/mcp --header "Authorization: Bearer <token>"
 ```
+
+A name that is not in the certificate (another host name of the machine) needs `--web-url https://that-name:8443`, which adds it.
 
 A request with an `Origin` header (a web page) is refused (`403`) and so is one that is not `application/json` (`415`), so that a page in the browser of an administrator cannot control a server without `--auth`.
 

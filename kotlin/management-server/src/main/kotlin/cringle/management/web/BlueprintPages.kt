@@ -62,6 +62,26 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             val error = attempt { done = publish(drafts.load("project", req.params.getValue("name")) ?: throw ManagementException(io.grpc.Status.Code.NOT_FOUND, "there is no such draft")) }
             fragment(html(notice(error), done?.let { d -> html(info(d), raw("<p><a href=\"/deployments\">Go to the deployments</a></p>")) } ?: Html("")))
         }
+        r.post("/blueprints/{name}/deploy", Permission.OPERATE) { req ->
+            val name = req.params.getValue("name")
+            var out: Deployed? = null
+            val error = attempt {
+                req.session!!.require(Permission.OPERATE, core.access.project(name))
+                out = deploy(drafts.load("project", name) ?: throw ManagementException(io.grpc.Status.Code.NOT_FOUND, "there is no such draft"))
+            }
+            fragment(
+                html(
+                    notice(error),
+                    out?.let { d ->
+                        html(
+                            info(d.message),
+                            if (d.bumped) html(h("<input id=\"version\" value=\"{}\" size=\"10\" hx-swap-oob=\"true\">", d.version), h("<input type=\"hidden\" id=\"revision\" value=\"{}\" hx-swap-oob=\"true\">", d.revision)) else Html(""),
+                            raw("<p>"), d.running.map { f -> h("<a class=\"btn small\" href=\"/monitor/{}\">Monitor {}</a> ", f, f) }, raw("<a href=\"/fabrics\">All fabrics</a></p>"),
+                        )
+                    } ?: Html(""),
+                ),
+            )
+        }
         r.post("/blueprints/{name}/save", Permission.OPERATE) { req ->
             var saved: Draft? = null
             var problems: List<PackageProblem> = emptyList()
@@ -308,6 +328,34 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
 
     /** Builds, validates and publishes the project package of the draft; used by the publish route of the drafts. */
     suspend fun publish(draft: Draft): String {
+        val m = publishDraft(draft)
+        return "Published ${m.name} ${m.version}; deploy it on the deployments page"
+    }
+
+    /** What a deploy of a draft did: the [version] that was used ([bumped] when the draft's own was taken), the new [revision] of the draft, the running fabrics. */
+    class Deployed(val message: String, val version: String, val bumped: Boolean, val revision: Long, val running: List<String>)
+
+    /**
+     * The develop loop: publishes the draft (a version that the repository has already is raised by patch until it is free, and the draft keeps it) and
+     * deploys it, replacing a running older version blue/green.
+     */
+    suspend fun deploy(draft: Draft): Deployed {
+        val taken = core.repository().listPackages(cringle.repository.v1.ListPackagesRequest.newBuilder().setKind(cringle.repository.v1.PackageKind.PACKAGE_KIND_PROJECT).build())
+            .packagesList.filter { it.name == draft.name }.map { it.version }.toSet()
+        var current = draft
+        if (draft.version in taken) {
+            var v = cringle.packaging.Version.parse(draft.version)
+            while (v.toString() in taken) v = cringle.packaging.Version(v.major, v.minor, v.patch + 1)
+            current = drafts.save("project", draft.name, v.toString(), draft.content, null)
+        }
+        val m = publishDraft(current)
+        val result = core.deploy(draft.name, "=" + m.version, true, false, true)
+        val running = result.fabrics.filter { it.info.state == cringle.engine.v1.FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING }.map { it.info.fabricId.value }
+        val how = result.strategy.ifEmpty { "deployed" }
+        return Deployed("Deployed ${m.name} ${m.version} ($how): ${running.size} of ${result.fabrics.size} fabric(s) running", m.version, current !== draft, current.revision, running)
+    }
+
+    private suspend fun publishDraft(draft: Draft): cringle.repository.v1.PackageMetadata {
         val blueprint = blueprintOf(draft) ?: throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the draft holds no blueprint")
         if (blueprint.blocks.isEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "the blueprint has no block")
         val ranges = pluginRangesOf(draft)
@@ -335,8 +383,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         val problems = PackageValidator.validateProjectSources(project) + PackageValidator.validateProject(project, plugins)
         if (problems.isNotEmpty()) throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, problems.joinToString("; ") { "${it.path}: ${it.message}" })
         val bytes = ByteArrayOutputStream().also { PackageWriter.writeProject(manifest, listOf(blueprint), schemas, files.all(draft.name), it) }.toByteArray()
-        val m = publishPackage(core, bytes)
-        return "Published ${m.name} ${m.version}; deploy it on the deployments page"
+        return publishPackage(core, bytes)
     }
 
     // --- the page ---
@@ -427,8 +474,8 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         }
         return html(
             h(
-                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-schemas=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\">",
-                palette.toString(), buildJsonArray { snapshot.registry.types().forEach { add(JsonPrimitive("${it.namespace}/${it.name}")) } }.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base,
+                "<div id=\"blueprint-editor\" data-palette=\"{}\" data-schemas=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\" data-deploy-url=\"{}/deploy\">",
+                palette.toString(), buildJsonArray { snapshot.registry.types().forEach { add(JsonPrimitive("${it.namespace}/${it.name}")) } }.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base, base,
             ),
             raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
             raw("<div id=\"editor-left\"><header id=\"editor-head\" class=\"float\">"),
@@ -463,7 +510,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
             raw("<small>service=block.port, one per line</small></div></details>"),
             h("<input type=\"hidden\" id=\"revision\" value=\"{}\">", draft.revision),
             raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"undo\" title=\"Undo\">Undo</button><button type=\"button\" class=\"btn\" id=\"redo\" title=\"Redo\">Redo</button><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Reset the zoom\">Fit</button></div>"),
-            if (canSave) raw("<label class=\"check\"><input type=\"checkbox\" id=\"autosave\" checked> Autosave</label><button type=\"button\" class=\"btn primary\" id=\"save-blueprint\">Save draft</button><button type=\"button\" class=\"btn\" id=\"publish-blueprint\" title=\"Save, then publish as a package\">Publish</button>") else Html(""),
+            if (canSave) raw("<label class=\"check\"><input type=\"checkbox\" id=\"autosave\" checked> Autosave</label><button type=\"button\" class=\"btn\" id=\"save-blueprint\">Save draft</button><button type=\"button\" class=\"btn primary\" id=\"deploy-blueprint\" title=\"Save, publish and deploy in one step (Ctrl+Enter)\">Deploy</button><button type=\"button\" class=\"btn\" id=\"publish-blueprint\" title=\"Save, then publish as a package\">Publish</button>") else Html(""),
             raw("</div>"),
             raw("<aside id=\"properties\" class=\"float\"><h2>Properties</h2><div id=\"node-properties\"><p>Select a block or a connection.</p></div></aside>"),
             raw("<div id=\"result\" class=\"float\" role=\"status\"></div></div>"),
