@@ -43,6 +43,16 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         r.post("/drafts/{kind}/{name}/delete", Permission.OPERATE) { req ->
             fragment(list(req.session!!, attempt { drafts.delete(req.params.getValue("kind"), req.params.getValue("name")) }, null))
         }
+        r.post("/drafts/{kind}/{name}/deploy", Permission.OPERATE) { req ->
+            var done: String? = null
+            val name = req.params.getValue("name")
+            val error = attempt {
+                if (req.params.getValue("kind") != "project") throw ManagementException(io.grpc.Status.Code.INVALID_ARGUMENT, "only a project can be deployed")
+                req.session!!.require(Permission.OPERATE, core.access.project(name))
+                done = blueprints.deploy(drafts.load("project", name) ?: throw ManagementException(io.grpc.Status.Code.NOT_FOUND, "no project draft '$name'")).message
+            }
+            fragment(list(req.session!!, error, done))
+        }
         r.post("/drafts/{kind}/{name}/publish", Permission.OPERATE) { req ->
             var done: String? = null
             val error = attempt { done = publish(req.params.getValue("kind"), req.params.getValue("name")) }
@@ -85,6 +95,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
                 badge(if (d.kind == "schema") "schema" else "blueprint", if (d.kind == "schema") Tone.INFO else Tone.NEUTRAL), d.name, d.version, d.revision,
                 actionsCell(
                     h("<a class=\"btn small\" href=\"/{}/{}\">{}</a>", if (d.kind == "schema") "schemas" else "blueprints", d.name, if (session.canAnywhere(Permission.OPERATE)) "Edit" else "Open"),
+                    if (d.kind == "project") button(session, Permission.OPERATE, "Deploy", "$base/deploy", "Publish ${d.name} and deploy it? A running older version is replaced; a version that is already published is raised.") else Html(""),
                     button(session, Permission.OPERATE, "Publish", "$base/publish", "Publish ${d.kind} ${d.name} ${d.version} to the repository?"),
                     button(session, Permission.OPERATE, "Delete", "$base/delete", "Delete the draft ${d.name}?"),
                 ),
