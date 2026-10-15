@@ -694,3 +694,7 @@ code.cmd { display: block; width: fit-content; max-width: 100%; margin-top: var(
 #edge-legend .rr::before { border-top: 2px dashed #8aa4ff; }
 #edge-legend .pull::before { border-top: 3px dotted #e3b341; }
 #edge-legend .stream::before { border-top: 3px solid #7fd1a8; }
+
+/* ports that can be asked for their value (pull): a ring; a port that only asks has a dotted one */
+#drawflow .drawflow-node .input.pull-only, #drawflow .drawflow-node .output.pull-only { border-color: #e3b341; border-style: dotted; }
+#drawflow .drawflow-node .input.pull-capable, #drawflow .drawflow-node .output.pull-capable { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px #e3b341; }

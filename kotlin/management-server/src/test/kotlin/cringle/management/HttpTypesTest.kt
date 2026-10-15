@@ -42,7 +42,7 @@ class HttpTypesTest {
             emptyList<String>(),
             problems(
                 listOf(endpoint, block("r", "http.response"), block("v", "input.text", "value" to "hello")),
-                listOf(link("e", "handler", "r", "request"), link("r", "source", "v", "get")),
+                listOf(link("e", "handler", "r", "request"), TetherDef(TetherType.PULL, Endpoint("v", "out"), Endpoint("r", "body"))),
             ),
         )
     }
@@ -63,6 +63,27 @@ class HttpTypesTest {
         assertTrue(response.single().contains("media type"), response.toString())
         val field = problems(listOf(block("f", "http.request-field", "field" to "params.")), emptyList())
         assertTrue(field.single().contains("params.<name>"), field.toString())
+    }
+
+    @Test
+    fun theTypedPortsOfTheResponseCanBeAskedAndTheSlotsOfAFormatFollowItsNames() {
+        fun pull(from: String, port: String, to: String, input: String) = TetherDef(TetherType.PULL, Endpoint(from, port), Endpoint(to, input))
+        val status = BlueprintBlock("n", "cringle-std/input.number", JsonObject(mapOf("value" to JsonPrimitive(1.0))))
+        // a Double value cannot be the status (an Int port)
+        val wrong = problems(listOf(block("r", "http.response"), status), listOf(pull("n", "out", "r", "status")))
+        assertTrue(wrong.single().contains("not assignable"), wrong.toString())
+        // a pull needs ports that support it: a timer cannot be asked
+        val timer = problems(listOf(block("r", "http.response"), BlueprintBlock("t", "cringle-std/time.timer-trigger", JsonObject(mapOf("intervalMs" to JsonPrimitive(10))))), listOf(pull("t", "tick", "r", "body")))
+        assertTrue(timer.any { it.contains("does not support PULL") }, timer.toString())
+        // the number of the slots is the number of the names
+        val format = BlueprintBlock(
+            "f", "cringle-std/text.format",
+            JsonObject(mapOf("template" to JsonPrimitive("{a}"), "variables" to kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))))),
+            varArgCounts = mapOf("args" to 3),
+        )
+        val slots = problems(listOf(format), emptyList())
+        assertTrue(slots.single().contains("3 slots but 'variables' names 2"), slots.toString())
+        assertEquals(emptyList<String>(), problems(listOf(format.copy(varArgCounts = mapOf("args" to 2))), emptyList()))
     }
 
     @Test

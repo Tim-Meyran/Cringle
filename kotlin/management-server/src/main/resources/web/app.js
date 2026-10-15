@@ -132,12 +132,14 @@ document.addEventListener('htmx:responseError', function (event) {
   }
   function blockData(id) { return editor.getNodeFromId(id).data; }
   // the ports of a node as it draws them: a VarArg port once per slot (name[0], name[1], ...), in the order of the definition
-  function slots(blockType, kind, counts) {
+  function slots(blockType, kind, counts, config) {
     var p = byBlock[blockType], out = [];
     ((p && p[kind]) || []).forEach(function (port) {
       if (port.varArg) {
         var n = Math.max(1, (counts && counts[port.name]) || 1);
-        for (var i = 0; i < n; i++) out.push({ port: port.name, index: i, label: port.name + '[' + i + ']' });
+        // the slots of a port that the configuration names carry the names (the label stays name[index]: it identifies the slot)
+        var names = port.namesFrom && config && Array.isArray(config[port.namesFrom]) ? config[port.namesFrom] : [];
+        for (var i = 0; i < n; i++) out.push({ port: port.name, index: i, label: port.name + '[' + i + ']', title: names[i] || null });
       } else {
         out.push({ port: port.name, index: null, label: port.name });
       }
@@ -166,18 +168,27 @@ document.addEventListener('htmx:responseError', function (event) {
     ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { if (port.responseSchema) types[port.name] = port.responseSchema; });
     return types;
   }
-  function labelPorts(list, ports, types, responses) {
+  // the tether types of the ports of a block by name
+  function portKindMap(blockType, kind) {
+    var kinds = {};
+    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { kinds[port.name] = port.tetherTypes || []; });
+    return kinds;
+  }
+  function labelPorts(list, ports, types, responses, tetherKinds) {
     Array.prototype.forEach.call(ports, function (port, i) {
       var old = port.querySelector('.port-label');
       if (old) old.remove();
       var slot = list[i];
-      var text = slot ? slot.label : 'port ' + (i + 1);
+      var text = slot ? (slot.title || slot.label) : 'port ' + (i + 1);
       var span = document.createElement('span');
       span.className = 'port-label';
       var type = slot && types ? types[slot.port] : null;
       var response = slot && responses ? responses[slot.port] : null;
       span.textContent = type ? text + ': ' + typeName(type) + (response ? ' \u2192 ' + typeName(response) : '') : text;
       port.append(span);
+      var kinds = (slot && tetherKinds && tetherKinds[slot.port]) || [];
+      port.classList.toggle('pull-only', kinds.indexOf('PULL') >= 0 && kinds.indexOf('MESSAGE') < 0);
+      port.classList.toggle('pull-capable', kinds.indexOf('PULL') >= 0 && kinds.indexOf('MESSAGE') >= 0);
       port.title = type ? text + ' (' + type + (response ? ' \u2192 ' + response : '') + ')' : text;
     });
   }
@@ -191,15 +202,15 @@ document.addEventListener('htmx:responseError', function (event) {
       ins = data.send ? [{ label: name }] : [];
       outs = data.send ? [] : [{ label: name }];
     } else {
-      ins = slots(data.block, 'inputs', data.varArgCounts);
-      outs = slots(data.block, 'outputs', data.varArgCounts);
+      ins = slots(data.block, 'inputs', data.varArgCounts, data.config);
+      outs = slots(data.block, 'outputs', data.varArgCounts, data.config);
       inTypes = portTypes(data.block, 'inputs', data.types);
       outTypes = portTypes(data.block, 'outputs', data.types);
       inResponses = portResponses(data.block, 'inputs');
       outResponses = portResponses(data.block, 'outputs');
     }
-    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes, inResponses);
-    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes, outResponses);
+    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes, inResponses, data.kind === 'external' ? null : portKindMap(data.block, 'inputs'));
+    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes, outResponses, data.kind === 'external' ? null : portKindMap(data.block, 'outputs'));
     el.style.minHeight = (Math.max(ins.length, outs.length, 1) * 25 + 72) + 'px';
     // the widest input label and the widest output label must fit side by side
     var widest = function (selector) {
@@ -218,6 +229,11 @@ document.addEventListener('htmx:responseError', function (event) {
     var def = slot && ((byBlock[data.block] || {})[kind] || []).filter(function (p) { return p.name === slot.port; })[0];
     return def && def.tetherTypes ? def.tetherTypes : [];
   }
+  // the types that the two ports of a connection share, the first one is the default
+  function commonKinds(from, outClass, to, inClass) {
+    var out = portKinds(from, 'outputs', outClass), inn = portKinds(to, 'inputs', inClass);
+    return TYPE_ORDER.filter(function (t) { return out.indexOf(t) >= 0 && inn.indexOf(t) >= 0; });
+  }
   function decorateConnections() {
     var nodes = editor.export().drawflow.Home.data;
     Object.keys(nodes).forEach(function (id) {
@@ -227,8 +243,9 @@ document.addEventListener('htmx:responseError', function (event) {
         nodes[id].outputs[outClass].connections.forEach(function (c) {
           var to = nodes[c.node] && nodes[c.node].data;
           if (!to || isExternal(to)) return;
-          var out = portKinds(from, 'outputs', outClass), inn = portKinds(to, 'inputs', c.output);
-          var type = TYPE_ORDER.filter(function (t) { return out.indexOf(t) >= 0 && inn.indexOf(t) >= 0; })[0];
+          var common = commonKinds(from, outClass, to, c.output);
+          var chosen = (options[edgeKey({ output_id: id, input_id: c.node, output_class: outClass, input_class: c.output }) ] || {}).type;
+          var type = common.indexOf(chosen) >= 0 ? chosen : common[0];
           var el = document.querySelector('#drawflow .connection.node_out_node-' + id + '.node_in_node-' + c.node + '.' + outClass + '.' + c.output);
           if (el && type) el.dataset.type = type;
         });
@@ -424,6 +441,44 @@ document.addEventListener('htmx:responseError', function (event) {
       control.type = 'checkbox';
       control.checked = current === true;
       control.addEventListener('change', function () { store(control.checked); });
+    } else if (f.kind === 'stringlist') {
+      // one name per line; the slots of the ports that these names name follow the list
+      control = document.createElement('textarea');
+      control.rows = Math.max(2, Array.isArray(current) ? current.length + 1 : 2);
+      control.placeholder = 'one name per line';
+      control.value = Array.isArray(current) ? current.join('\n') : '';
+      var listMessage = document.createElement('small');
+      listMessage.className = 'cfg-error';
+      listMessage.hidden = true;
+      var lines = function () { return control.value.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l !== ''; }); };
+      var listProblem = function (names) {
+        for (var i = 0; i < names.length; i++) {
+          if (f.pattern !== undefined && !new RegExp('^(?:' + f.pattern + ')$').test(names[i])) return '"' + names[i] + '": ' + (f.description || 'not a valid name');
+          if (names.indexOf(names[i]) !== i) return '"' + names[i] + '" is used twice';
+        }
+        return '';
+      };
+      control.addEventListener('input', function () {
+        var names = lines();
+        var problem = listProblem(names);
+        control.classList.toggle('invalid', problem !== '');
+        listMessage.textContent = problem;
+        listMessage.hidden = problem === '';
+        store(names.length === 0 && f.optional ? undefined : names);
+        labelNode(id);
+      });
+      control.addEventListener('change', function () {
+        var names = lines();
+        var oldCounts = Object.assign({}, data.varArgCounts), moved = false;
+        (((byBlock[data.block] || {}).inputs || []).concat((byBlock[data.block] || {}).outputs || [])).forEach(function (port) {
+          if (port.varArg && port.namesFrom === f.name && Math.max(1, names.length) !== Math.max(1, data.varArgCounts[port.name] || 1)) {
+            data.varArgCounts[port.name] = Math.max(1, names.length);
+            moved = true;
+          }
+        });
+        if (moved) rebuildNode(id, data, oldCounts);
+      });
+      return fieldBox(f, control, f.description || 'one name per line: every name is a slot of the block', listMessage);
     } else if (f.kind === 'enum') {
       control = document.createElement('select');
       var none = document.createElement('option');
@@ -626,7 +681,7 @@ document.addEventListener('htmx:responseError', function (event) {
   // a new number of slots changes the ports of a node: it is drawn again and keeps the connections whose slot still exists
   function rebuildNode(oldId, data, oldCounts) {
     var node = editor.getNodeFromId(oldId);
-    var before = { ins: slots(data.block, 'inputs', oldCounts), outs: slots(data.block, 'outputs', oldCounts) };
+    var before = { ins: slots(data.block, 'inputs', oldCounts, data.config), outs: slots(data.block, 'outputs', oldCounts, data.config) };
     var links = [];
     Object.keys(node.outputs).forEach(function (cls) {
       node.outputs[cls].connections.forEach(function (c) { links.push({ side: 'out', slot: cls, other: c.node, otherClass: c.output }); });
@@ -640,7 +695,7 @@ document.addEventListener('htmx:responseError', function (event) {
     Object.keys(node.inputs).forEach(function (cls, i) { oldLabels.in[cls] = (before.ins[i] || {}).label; });
     rebuilding = true;
     editor.removeNodeId('node-' + oldId);
-    var inSlots = slots(data.block, 'inputs', data.varArgCounts), outSlots = slots(data.block, 'outputs', data.varArgCounts);
+    var inSlots = slots(data.block, 'inputs', data.varArgCounts, data.config), outSlots = slots(data.block, 'outputs', data.varArgCounts, data.config);
     var created = editor.addNode(data.block, inSlots.length, outSlots.length, x, y, 'cringle-block', data, nodeHtml(data));
     links.forEach(function (l) {
       var label = oldLabels[l.side][l.slot];
@@ -702,7 +757,25 @@ document.addEventListener('htmx:responseError', function (event) {
     }
     delivery.addEventListener('change', function () { o.delivery = delivery.value; drawRetry(); changed(); });
     drawRetry();
-    panel.replaceChildren(title, field('Delivery', delivery), field('Record in the data warehouse', record), number('Buffer capacity', o, 'bufferCapacity'), number('Request timeout in ms', o, 'requestTimeoutMs'), retryBox);
+    // two ports that share several tether types (a function block that pushes and can be asked): the kind is a choice of this connection
+    var kinds = [];
+    if (!isExternal(blockData(c.output_id)) && !isExternal(blockData(c.input_id))) kinds = commonKinds(blockData(c.output_id), c.output_class, blockData(c.input_id), c.input_class);
+    var kind = document.createElement('select');
+    kinds.forEach(function (t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = { MESSAGE: 'message (push)', PULL: 'pull (get): the receiver asks', REQUEST_RESPONSE: 'request / response' }[t] || t;
+      opt.selected = (o.type || kinds[0]) === t;
+      kind.append(opt);
+    });
+    kind.addEventListener('change', function () {
+      if (kind.value === kinds[0]) delete o.type; else o.type = kind.value;
+      decorateConnections();
+      changed();
+    });
+    panel.replaceChildren(title);
+    if (kinds.length > 1) panel.append(field('Kind of tether', kind));
+    panel.append(field('Delivery', delivery), field('Record in the data warehouse', record), number('Buffer capacity', o, 'bufferCapacity'), number('Request timeout in ms', o, 'requestTimeoutMs'), retryBox);
   });
 
   // saving: the server turns the graph into the blueprint and checks it

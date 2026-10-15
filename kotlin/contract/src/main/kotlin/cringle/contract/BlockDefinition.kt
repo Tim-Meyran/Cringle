@@ -67,6 +67,8 @@ public enum class PortDirection {
  * blueprint starts.
  * @property typeParam the name of the [TypeParameter] of the block that gives the type of this port, or `null` for a fixed [schema]. For such a port
  * [schema] is the bound of the parameter; a blueprint binds the parameter per block ([BlockDefinition.bind]).
+ * @property namesFrom for a VarArg port: the name of the configuration field (a list of texts) that names its slots; the blueprint has one slot per name, and the
+ * editor shows the names at the slots and keeps the number of slots equal to the number of names.
  * @property responseSchema for a port with [TetherType.REQUEST_RESPONSE]: the schema of the **responses** (a request is checked against [schema]); `null` means the
  * responses have [schema] too. See [response].
  */
@@ -78,6 +80,7 @@ public class PortDefinition @JvmOverloads constructor(
     public val varArg: Boolean = false,
     public val typeParam: String? = null,
     public val responseSchema: SchemaRef? = null,
+    public val namesFrom: String? = null,
 ) {
     public val tetherTypes: Set<TetherType> = Collections.unmodifiableSet(LinkedHashSet(tetherTypes))
 
@@ -87,18 +90,19 @@ public class PortDefinition @JvmOverloads constructor(
     init {
         require(name.isNotBlank()) { "Port name must not be blank" }
         require(tetherTypes.isNotEmpty()) { "Port '$name' must support at least one tether type" }
+        require(namesFrom == null || varArg) { "Port '$name' has namesFrom but is not a VarArg port" }
         require(responseSchema == null || TetherType.REQUEST_RESPONSE in tetherTypes) { "Port '$name' has a response schema but does not support REQUEST_RESPONSE" }
     }
 
     override fun equals(other: Any?): Boolean =
         other is PortDefinition && name == other.name && direction == other.direction &&
             tetherTypes == other.tetherTypes && schema == other.schema && varArg == other.varArg && typeParam == other.typeParam &&
-            responseSchema == other.responseSchema
+            responseSchema == other.responseSchema && namesFrom == other.namesFrom
 
-    override fun hashCode(): Int = listOf(name, direction, tetherTypes, schema, varArg, typeParam, responseSchema).hashCode()
+    override fun hashCode(): Int = listOf(name, direction, tetherTypes, schema, varArg, typeParam, responseSchema, namesFrom).hashCode()
 
     override fun toString(): String =
-        "PortDefinition(name=$name, direction=$direction, tetherTypes=$tetherTypes, schema=$schema, varArg=$varArg, typeParam=$typeParam, responseSchema=$responseSchema)"
+        "PortDefinition(name=$name, direction=$direction, tetherTypes=$tetherTypes, schema=$schema, varArg=$varArg, typeParam=$typeParam, responseSchema=$responseSchema, namesFrom=$namesFrom)"
 }
 
 /**
@@ -160,7 +164,7 @@ public class BlockDefinition @JvmOverloads constructor(
         val unknown = types.keys.firstOrNull { k -> typeParameters.none { it.name == k } }
         require(unknown == null) { "Block '$name' has no type parameter '$unknown'" }
         if (typeParameters.isEmpty()) return this
-        val bound = ports.map { p -> p.typeParam?.let { PortDefinition(p.name, p.direction, p.tetherTypes, types[it] ?: p.schema, p.varArg, null, p.responseSchema) } ?: p }
+        val bound = ports.map { p -> p.typeParam?.let { PortDefinition(p.name, p.direction, p.tetherTypes, types[it] ?: p.schema, p.varArg, null, p.responseSchema, p.namesFrom) } ?: p }
         return BlockDefinition(name, (schemas + bound.map { it.schema } + bound.mapNotNull { it.responseSchema }).distinct(), bound, requiredDrivers, configSchema, exclusiveResources)
     }
 

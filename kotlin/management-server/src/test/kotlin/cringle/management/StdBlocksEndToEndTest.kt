@@ -439,9 +439,9 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                 // the answer of an endpoint is an HttpResponse: http.response builds it from what its source answers
                 listOf(
                     TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("open", "handler"), Endpoint("ra", "request")),
-                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("ra", "source"), Endpoint("a", "get")),
+                    TetherDef(TetherType.PULL, Endpoint("a", "out"), Endpoint("ra", "body")),
                     TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("secret", "handler"), Endpoint("rb", "request")),
-                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("rb", "source"), Endpoint("b", "get")),
+                    TetherDef(TetherType.PULL, Endpoint("b", "out"), Endpoint("rb", "body")),
                 ),
             ),
         )
@@ -484,7 +484,7 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                 ),
                 listOf(
                     answer("json", "handler", "rj", "request"),
-                    answer("rj", "source", "data", "get"),
+                    TetherDef(TetherType.PULL, Endpoint("data", "out"), Endpoint("rj", "body")),
                     answer("made", "handler", "created", "request"),
                     answer("greet", "handler", "name", "request"),
                     answer("name", "next", "hello", "request"),
@@ -518,7 +518,7 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
             listOf(block("e", "http.endpoint", config("path" to "/version")), block("r", "http.response"), block("v", "input.text", config("value" to text))),
             listOf(
                 TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("e", "handler"), Endpoint("r", "request")),
-                TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("r", "source"), Endpoint("v", "get")),
+                TetherDef(TetherType.PULL, Endpoint("v", "out"), Endpoint("r", "body")),
             ),
         )
         deployStd("std-redeploy", blueprint("one"), "1.0.0")
@@ -542,6 +542,55 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
             check(System.nanoTime() < until) { "the new version does not answer: ${diagnostics()}" }
             Thread.sleep(200)
         }
+    }
+
+    @Test
+    fun aResponseIsComposedOfPulledParts() {
+        // /hello/{name}: the text comes from a text.format that asks its variables when the request comes (the name from the request, the greeting from a constant),
+        // the status and the content type come from the properties of the response or from a port
+        fun pull(from: String, to: String, input: String) = TetherDef(TetherType.PULL, Endpoint(from, "out"), Endpoint(to, input))
+        deployStd(
+            "std-composed",
+            Blueprint(
+                "app",
+                listOf(
+                    block("e", "http.endpoint", config("path" to "/hello/{name}")),
+                    block("r", "http.response", config("contentType" to "text/plain")),
+                    BlueprintBlock(
+                        "f", "cringle-std/text.format",
+                        JsonObject(mapOf("template" to JsonPrimitive("{greeting}, {name}!"), "variables" to kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("greeting"), JsonPrimitive("name"))))),
+                        varArgCounts = mapOf("args" to 2),
+                    ),
+                    block("greeting", "input.text", config("value" to "Hello")),
+                    block("name", "http.request-value", config("field" to "params.name")),
+                    block("up", "text.upper"),
+                    block("created", "input.number", config("value" to 201.0)),
+                    block("code", "math.to-int"),
+                ),
+                listOf(
+                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("e", "handler"), Endpoint("r", "request")),
+                    TetherDef(TetherType.PULL, Endpoint("f", "out"), Endpoint("up", "in")),
+                    TetherDef(TetherType.PULL, Endpoint("up", "out"), Endpoint("r", "body")),
+                    TetherDef(TetherType.PULL, Endpoint("greeting", "out"), Endpoint("f", "args", 0)),
+                    TetherDef(TetherType.PULL, Endpoint("name", "out"), Endpoint("f", "args", 1)),
+                    TetherDef(TetherType.PULL, Endpoint("created", "out"), Endpoint("code", "in")),
+                    TetherDef(TetherType.PULL, Endpoint("code", "out"), Endpoint("r", "status")),
+                ),
+            ),
+        )
+        val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
+        val deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos()
+        while (!Files.exists(portFile) || Files.readString(portFile).isBlank()) {
+            check(System.nanoTime() < deadline) { "the engine did not open its API port: ${diagnostics()}" }
+            Thread.sleep(200)
+        }
+        val port = Files.readString(portFile).trim().toInt()
+        val answer = java.net.http.HttpClient.newHttpClient().send(
+            java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:$port/hello/Ada")).build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString(),
+        )
+        // text.upper asks text.format, which asks greeting and name (both through the same context: the request of the client); math.to-int turns 201.0 into the status
+        assertTrue(answer.statusCode() == 201 && answer.body() == "HELLO, ADA!" && answer.headers().firstValue("Content-Type").get() == "text/plain", answer.toString() + " " + answer.body())
     }
 
     private suspend fun publishProject(file: Path) {

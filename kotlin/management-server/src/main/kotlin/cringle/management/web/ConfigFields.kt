@@ -32,6 +32,18 @@ internal object ConfigFields {
         var kind = "json"
         var values: List<String> = emptyList()
         var constrained: TypeDef.Constrained? = null
+        // a list of texts is one name per line (the names of the slots of a block, for example)
+        val listElement = (inner as? TypeExpr.ListOf)?.element as? TypeExpr.Ref
+        if (listElement != null) {
+            when (val element = registry.resolve(listElement.ref)) {
+                is TypeDef.Primitive -> if (element.kind == PrimitiveKind.STRING) kind = "stringlist"
+                is TypeDef.Constrained -> if (element.base == PrimitiveKind.STRING) {
+                    kind = "stringlist"
+                    constrained = element
+                }
+                else -> {}
+            }
+        }
         if (inner is TypeExpr.Ref) {
             when (val definition = registry.resolve(inner.ref)) {
                 is TypeDef.Constrained -> {

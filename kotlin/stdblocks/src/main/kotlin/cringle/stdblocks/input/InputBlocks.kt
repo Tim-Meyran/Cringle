@@ -34,7 +34,7 @@ internal class ConfiguredValue(private val read: (Map<String, Any?>) -> Any) : B
 
     override suspend fun onTetherEvent(event: TetherEvent) {
         when {
-            event is TetherEvent.Request && event.port.name == "get" -> event.respond(value)
+            event is TetherEvent.Request && (event.port.name == "get" || event.port.name == "out") -> event.respond(value)
             event is TetherEvent.Message && event.port.name == "trigger" -> out.send(value)
         }
     }
@@ -45,7 +45,8 @@ private fun input(name: String, configuration: String, type: SchemaRef, read: (M
     listOf(
         PortDefinition("get", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), ANY),
         inPort("trigger", ANY),
-        outPort("out", type),
+        // the value can be pushed (a message at trigger) and asked for (a pull tether)
+        PortDefinition("out", PortDirection.OUT, setOf(TetherType.MESSAGE, TetherType.PULL), type),
     ),
     configuration,
 ) { ConfiguredValue(read) }

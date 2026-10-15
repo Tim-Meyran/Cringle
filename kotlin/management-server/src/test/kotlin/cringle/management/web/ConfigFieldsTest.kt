@@ -66,7 +66,9 @@ class ConfigFieldsTest {
         assertEquals("boolean", kind("flag"))
         assertEquals("enum", kind("mode"))
         assertEquals(listOf("FAST", "SAFE"), byName.getValue("mode").getValue("values").jsonArray.map { it.jsonPrimitive.content })
-        for (json in listOf("tags", "labels", "origin", "any", "blob", "when")) assertEquals("json", kind(json), json)
+        // a list of texts is a list of names, one per line; the other composite types are JSON
+        assertEquals("stringlist", kind("tags"))
+        for (json in listOf("labels", "origin", "any", "blob", "when")) assertEquals("json", kind(json), json)
         assertEquals(listOf(false, false, true, true, false, true), listOf("name", "count", "ratio", "flag", "mode", "note").map { optional(it) })
     }
 

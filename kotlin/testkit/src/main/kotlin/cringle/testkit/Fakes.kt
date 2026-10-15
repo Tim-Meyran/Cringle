@@ -56,7 +56,8 @@ public class InMemoryTether(override val type: TetherType) : Tether {
     }
 
     override suspend fun request(request: Any): Any {
-        require(TetherType.REQUEST_RESPONSE, "request")
+        // an IN port that asks (a pull tether) requests too
+        check(type == TetherType.REQUEST_RESPONSE || type == TetherType.PULL) { "request is not valid for a $type tether" }
         requestList += request
         return requestHandler(request)
     }
@@ -173,7 +174,7 @@ public class TestBlockPorts : BlockPorts {
     public companion object {
         /**
          * Creates the ports of [definition]. A port's tether type is taken from [tetherTypes] or else the first
-         * type it supports; [varArgSizes] gives the size of every VarArg port (default 1).
+         * type it supports (`PULL` for an IN port that supports it); [varArgSizes] gives the size of every VarArg port (default 1).
          */
         public fun forDefinition(
             definition: BlockDefinition,
@@ -181,7 +182,8 @@ public class TestBlockPorts : BlockPorts {
             tetherTypes: Map<String, TetherType> = emptyMap(),
         ): TestBlockPorts = TestBlockPorts().also { ports ->
             for (p in definition.ports) {
-                val type = tetherTypes[p.name] ?: p.tetherTypes.first()
+                // an IN port that supports PULL asks for its value, so its tether is a PULL one (an OUT port sends: the first type)
+                val type = tetherTypes[p.name] ?: if (p.direction == cringle.contract.PortDirection.IN && TetherType.PULL in p.tetherTypes) TetherType.PULL else p.tetherTypes.first()
                 require(type in p.tetherTypes) { "Port '${p.name}' does not support $type" }
                 if (p.varArg) ports.addVarArgPort(p.name, varArgSizes[p.name] ?: 1, type) else ports.addPort(p.name, type)
             }

@@ -408,6 +408,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         put("schema", "${p.schema.namespace}/${p.schema.name}")
         p.typeParam?.let { put("typeParam", it) }
         put("tetherTypes", JsonArray(p.tetherTypes.map { JsonPrimitive(it.name) }))
+        p.namesFrom?.let { put("namesFrom", it) }
         p.responseSchema?.let { put("responseSchema", "${it.namespace}/${it.name}") }
     }
 
