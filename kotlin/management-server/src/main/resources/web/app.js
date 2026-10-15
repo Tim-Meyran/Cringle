@@ -209,6 +209,31 @@ document.addEventListener('htmx:responseError', function (event) {
   }
   function labelAll() {
     Object.keys(editor.export().drawflow.Home.data).forEach(labelNode);
+    decorateConnections();
+  }
+  // a tether is drawn by its kind (the first type that both ports support, as the server decides): push, request/response, pull (get), stream
+  var TYPE_ORDER = ['MESSAGE', 'REQUEST_RESPONSE', 'PULL', 'STREAM', 'BYTE_STREAM', 'TCP', 'SERIAL'];
+  function portKinds(data, kind, className) {
+    var slot = slots(data.block, kind, data.varArgCounts)[parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10) - 1];
+    var def = slot && ((byBlock[data.block] || {})[kind] || []).filter(function (p) { return p.name === slot.port; })[0];
+    return def && def.tetherTypes ? def.tetherTypes : [];
+  }
+  function decorateConnections() {
+    var nodes = editor.export().drawflow.Home.data;
+    Object.keys(nodes).forEach(function (id) {
+      var from = nodes[id].data;
+      if (!from || isExternal(from)) return;
+      Object.keys(nodes[id].outputs).forEach(function (outClass) {
+        nodes[id].outputs[outClass].connections.forEach(function (c) {
+          var to = nodes[c.node] && nodes[c.node].data;
+          if (!to || isExternal(to)) return;
+          var out = portKinds(from, 'outputs', outClass), inn = portKinds(to, 'inputs', c.output);
+          var type = TYPE_ORDER.filter(function (t) { return out.indexOf(t) >= 0 && inn.indexOf(t) >= 0; })[0];
+          var el = document.querySelector('#drawflow .connection.node_out_node-' + id + '.node_in_node-' + c.node + '.' + outClass + '.' + c.output);
+          if (el && type) el.dataset.type = type;
+        });
+      });
+    });
   }
   function slotLabel(data, kind, className) {
     var n = parseInt(className.replace(kind === 'outputs' ? 'output_' : 'input_', ''), 10);
@@ -351,6 +376,7 @@ document.addEventListener('htmx:responseError', function (event) {
       .then(function (r) { return r.json(); })
       .then(function (verdict) {
         if (verdict.ok) {
+          decorateConnections();
           say('Connected as a ' + verdict.type + ' tether.' + (inferred.length ? ' Type ' + inferred.map(function (d) { return d.parameter + ' = ' + typeName(d.data.types[d.parameter]); }).join(', ') + '.' : ''), false);
           window.cringleEditorSnapshot();
         } else {

@@ -70,6 +70,8 @@ class TetherNetworkTest {
             PortDefinition("back", PortDirection.IN, setOf(TetherType.MESSAGE), string),
             // a request is a String, the answer an Int
             PortDefinition("outRr", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), string, responseSchema = int),
+            // a value that can be pushed and asked for
+            PortDefinition("pullOut", PortDirection.OUT, setOf(TetherType.MESSAGE, TetherType.PULL), string),
         ),
         emptyList(),
     )
@@ -83,6 +85,9 @@ class TetherNetworkTest {
             PortDefinition("inAny", PortDirection.IN, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "Any")),
             PortDefinition("inRr", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), string, responseSchema = int),
             PortDefinition("inRrText", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), string),
+            PortDefinition("pullIn", PortDirection.IN, setOf(TetherType.PULL), string),
+            PortDefinition("pullIn2", PortDirection.IN, setOf(TetherType.PULL), string),
+            PortDefinition("pullInInt", PortDirection.IN, setOf(TetherType.PULL), int),
         ),
         emptyList(),
     )
@@ -102,8 +107,9 @@ class TetherNetworkTest {
         tethers: List<TetherDef>,
         config: TetherConfig,
         handler: suspend (TetherEvent) -> Unit,
+        srcHandler: suspend (TetherEvent) -> Unit = {},
     ) : AutoCloseable {
-        val src = TestBlock { }
+        val src = TestBlock(srcHandler)
         val dst = TestBlock(handler)
         private val provider = object : BlockProvider {
             override val definitions = listOf(srcDef, dstDef)
@@ -138,8 +144,8 @@ class TetherNetworkTest {
     private fun config(capacity: Int = 64, timeout: Duration = Duration.ofSeconds(10), observer: TetherObserver? = null, interceptor: TetherInterceptor? = null) =
         TetherConfig(SchemaRegistry(), capacity, timeout, observer, interceptor)
 
-    private fun setup(tethers: List<TetherDef>, config: TetherConfig = config(), handler: suspend (TetherEvent) -> Unit = {}) =
-        Setup(tethers, config, handler)
+    private fun setup(tethers: List<TetherDef>, config: TetherConfig = config(), srcHandler: suspend (TetherEvent) -> Unit = {}, handler: suspend (TetherEvent) -> Unit = {}) =
+        Setup(tethers, config, handler, srcHandler)
 
     @Test
     fun messageIsDeliveredToTheReceivingPort(): Unit = runBlocking {
@@ -264,6 +270,46 @@ class TetherNetworkTest {
         assertTrue(e.message!!.contains("response schema"), e.message)
         // without a declared response schema on either side nothing is checked in this direction (as before)
         TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.REQUEST_RESPONSE, "out", "inRrText"))), defs, config())
+    }
+
+    @Test
+    fun aPullTetherAsksTheProducerForItsValue(): Unit = runBlocking {
+        val asked = CopyOnWriteArrayList<Any>()
+        val tethers = listOf(tether(TetherType.PULL, "pullOut", "pullIn"), tether(TetherType.PULL, "pullOut", "pullIn2"))
+        setup(tethers, srcHandler = { e ->
+            if (e is TetherEvent.Request) {
+                asked += e.value
+                assertEquals("pullOut", e.port.name, "the producer is asked at its OUT port")
+                e.respond("value ${asked.size}")
+            }
+        }).use { s ->
+            // the IN end starts it: its block asks, the block of the OUT port answers; the OUT port can be asked by several tethers
+            assertEquals("value 1", s.inPort("pullIn").request(mapOf("who" to "first")))
+            assertEquals("value 2", s.inPort("pullIn2").request(mapOf<String, Any>()))
+            assertEquals(listOf<Any>(mapOf("who" to "first"), mapOf<String, Any>()), asked, "the context goes to the producer")
+        }
+    }
+
+    @Test
+    fun aPullAnswerIsCheckedAgainstTheSchemaOfTheProducer(): Unit = runBlocking {
+        setup(listOf(tether(TetherType.PULL, "pullOut", "pullIn")), srcHandler = { e -> runCatching { (e as TetherEvent.Request).respond(5L) } }).use { s ->
+            assertThrows<TetherTimeoutException> { runBlocking { withTimeout(10.seconds) { s.inPort("pullIn").request("ctx") } } }
+        }
+    }
+
+    @Test
+    fun pullTethersAreCheckedWhenTheyAreWired() {
+        val defs = mapOf("s" to srcDef, "d" to dstDef)
+        val blocks = listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst"))
+        fun wire(vararg t: TetherDef) = TetherNetwork.create(Blueprint("bp", blocks, t.toList()), defs, config())
+        wire(tether(TetherType.PULL, "pullOut", "pullIn"))
+        assertTrue(assertThrows<TetherWiringException> { wire(tether(TetherType.PULL, "pullOut", "pullInInt")) }.message!!.contains("not assignable"))
+        assertTrue(assertThrows<TetherWiringException> { wire(tether(TetherType.PULL, "out", "pullIn")) }.message!!.contains("does not support PULL"))
+        assertTrue(assertThrows<TetherWiringException> { wire(tether(TetherType.PULL, "pullOut", "in")) }.message!!.contains("does not support PULL"))
+        // a port that asks has one source
+        assertTrue(
+            assertThrows<TetherWiringException> { wire(tether(TetherType.PULL, "pullOut", "pullIn"), tether(TetherType.PULL, "pullOut", "pullIn")) }.message!!.contains("already connected"),
+        )
     }
 
     @Test

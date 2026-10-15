@@ -33,7 +33,7 @@ internal class GraphException(message: String) : RuntimeException(message)
  * `fromBlock.port>toBlock.port`.
  */
 internal object BlueprintGraph {
-    private val typeOrder = listOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.STREAM, TetherType.BYTE_STREAM, TetherType.TCP, TetherType.SERIAL)
+    private val typeOrder = listOf(TetherType.MESSAGE, TetherType.REQUEST_RESPONSE, TetherType.PULL, TetherType.STREAM, TetherType.BYTE_STREAM, TetherType.TCP, TetherType.SERIAL)
 
     fun inputs(definition: BlockDefinition): List<PortDefinition> = definition.ports.filter { it.direction == PortDirection.IN }
 

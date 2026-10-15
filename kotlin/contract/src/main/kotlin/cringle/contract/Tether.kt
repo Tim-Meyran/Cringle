@@ -29,6 +29,14 @@ public enum class TetherType {
 
     /** A raw byte stream carried over a serial connection to an external device. */
     SERIAL,
+
+    /**
+     * A value that the receiving end **asks for** (a get). The data flows like in a [MESSAGE] tether, from an `OUT` port to an `IN` port, but the `IN` end starts it:
+     * its block calls [Tether.request] on its port (the request is a context value that the block hands on, for example the HTTP request, or an empty object), the block
+     * of the `OUT` port gets a `TetherEvent.Request` at its port and answers with the value. A pure function block supports it on its ports next to [MESSAGE], so that the
+     * blueprint can compute a value when it is needed. Only local, no remote end.
+     */
+    PULL,
 }
 
 /**
