@@ -10,6 +10,9 @@ import cringle.packaging.Endpoint
 import cringle.packaging.FabricConfig
 import cringle.packaging.PackageReader
 import cringle.packaging.TetherDef
+import cringle.router.users.FileUserStore
+import cringle.router.users.UserManager
+import cringle.contract.UserRole
 import cringle.testkit.TestProjectBuilder
 import java.nio.file.Files
 import java.nio.file.Path
@@ -27,6 +30,9 @@ import org.junit.jupiter.api.Test
  */
 @Tag("integration")
 class StdBlocksEndToEndTest : ServiceTestBase() {
+    // the HTTP API of the engines of this test: any free port, without TLS
+    override val daemonOverrides: Map<String, String> get() = mapOf("api.port" to "0", "api.tls" to "off")
+
     private fun config(vararg pairs: Pair<String, Any>) =
         JsonObject(pairs.associate { (k, v) -> k to if (v is String) JsonPrimitive(v) else if (v is Boolean) JsonPrimitive(v) else JsonPrimitive(v as Number) })
 
@@ -410,6 +416,46 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         val fabric = runBlocking { core.listFabrics(null, null) }.single { it.info.blueprint == "app" }
         assertTrue(fabric.info.blocksList.all { it.state.name.endsWith("RUNNING") }, fabric.info.toString())
         assertTrue(fabric.info.state.name.endsWith("RUNNING"), fabric.info.toString())
+    }
+
+    @Test
+    fun anHttpEndpointAnswersWithTheResultOfTheFlow() {
+        // one user of the machine who may use applications; the engine reads the user store of the management folder
+        val store = FileUserStore(Files.createDirectories(dir.resolve("home").resolve("management")).resolve("users.json"))
+        val users = UserManager(store)
+        val token = users.createToken(users.createUser("ada", setOf(UserRole.END_USER)).user.id, "api", null).secret
+        fun answer(endpoint: String, source: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(endpoint, "handler"), Endpoint(source, "get"))
+        deployStd(
+            "std-http",
+            Blueprint(
+                "app",
+                listOf(
+                    block("open", "http.endpoint", config("path" to "/hello/{name}")),
+                    block("secret", "http.endpoint", config("path" to "/private", "auth" to true)),
+                    block("a", "input.text", config("value" to "hello")),
+                    block("b", "input.text", config("value" to "classified")),
+                ),
+                listOf(answer("open", "a"), answer("secret", "b")),
+            ),
+        )
+        val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
+        val deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos()
+        while (!Files.exists(portFile) || Files.readString(portFile).isBlank()) {
+            check(System.nanoTime() < deadline) { "the engine did not open its API port: ${diagnostics()}" }
+            Thread.sleep(200)
+        }
+        val port = Files.readString(portFile).trim().toInt()
+        val client = java.net.http.HttpClient.newHttpClient()
+        fun get(path: String, bearer: String? = null): java.net.http.HttpResponse<String> {
+            val b = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:$port$path"))
+            bearer?.let { b.header("Authorization", "Bearer $it") }
+            return client.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString())
+        }
+        assertTrue(get("/hello/ada").let { it.statusCode() == 200 && it.body() == "hello" }, "the flow answers")
+        assertTrue(get("/nothing").statusCode() == 404)
+        assertTrue(get("/private").statusCode() == 401, "a protected route without a token")
+        assertTrue(get("/private", "wrong").statusCode() == 401)
+        assertTrue(get("/private", token).let { it.statusCode() == 200 && it.body() == "classified" }, "with the token of a user")
     }
 
     private suspend fun publishProject(file: Path) {

@@ -26,11 +26,14 @@ public object BuiltinDriverTypes {
     /** [DwhDriver]. */
     public val DWH: DriverType = DriverType("dwh", IsolationLevel.SHARED)
 
+    /** [HttpDriver]: routes on the API port of the engine. */
+    public val HTTP: DriverType = DriverType("http", IsolationLevel.SHARED)
+
     /** [UserManagementDriver]; provided by the daemon, not by every engine. */
     public val USER_MANAGEMENT: DriverType = DriverType("user-management", IsolationLevel.SHARED)
 
     /** The types every engine ships, by id. */
-    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, FILESYSTEM_FABRIC, TCP, SERIAL, DWH).associateBy { it.id }
+    public val ALL: Map<String, DriverType> = listOf(LOGGING, FILESYSTEM, FILESYSTEM_FABRIC, TCP, SERIAL, DWH, HTTP).associateBy { it.id }
 }
 
 /** Severity of a log entry. */

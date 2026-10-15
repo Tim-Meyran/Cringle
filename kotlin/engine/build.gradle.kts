@@ -7,6 +7,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":wire"))
     implementation(project(":repository"))
+    implementation(project(":router"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.grpc.netty.shaded)
     implementation(libs.jserialcomm)

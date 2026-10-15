@@ -24,6 +24,8 @@ public class BuiltinDrivers(
     public val serial: SerialService = SerialService(),
     /** The data warehouse of the engine (`<engine dir>/dwh`, #188). */
     public val dwh: cringle.engine.dwh.Dwh = cringle.engine.dwh.Dwh(engineDir.resolve("dwh")),
+    /** The HTTP API of the engine (`api.port`), `null` for an engine without one. */
+    public val http: HttpService? = null,
 ) : AutoCloseable {
     /** The engine-wide log service and store. */
     public val logging: LoggingService = LoggingService(engineDir)
@@ -36,6 +38,7 @@ public class BuiltinDrivers(
     override fun close() {
         tcp.close()
         serial.close()
+        http?.close()
     }
 
     private class Blocks(
@@ -58,6 +61,7 @@ public class BuiltinDrivers(
                     BuiltinDriverTypes.TCP.id -> services.tcp.driverFor(fabricId, blockId.value).also { tcp += it }
                     BuiltinDriverTypes.SERIAL.id -> services.serial.driverFor(fabricId, blockId.value).also { serial += it }
                     BuiltinDriverTypes.DWH.id -> cringle.engine.dwh.BlockDwhDriver(services.dwh, fabricId, blockId.value)
+                    BuiltinDriverTypes.HTTP.id -> (services.http ?: throw IllegalArgumentException("this engine has no HTTP API")).driverFor("$fabricId/${blockId.value}")
                     else -> throw IllegalArgumentException(
                         "block '${blockId.value}' requires unknown driver '$id' (built-in: ${BuiltinDriverTypes.ALL.keys.joinToString()})",
                     )

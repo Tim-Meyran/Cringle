@@ -82,6 +82,14 @@
     "PathConfig": { "record": { "path": "cringle.std/String" } },
     "TextInputConfig": { "record": { "value": "cringle.std/String" } },
     "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
+    "HttpEndpointConfig": {
+      "record": {
+        "path": "cringle.std/String",
+        "method": { "optional": "cringle.std/String" },
+        "auth": { "optional": "cringle.std/Boolean" },
+        "timeoutMs": { "optional": "cringle.std/Int" }
+      }
+    },
     "LogWriteConfig": {
       "record": {
         "level": { "optional": "LogLevel" },
