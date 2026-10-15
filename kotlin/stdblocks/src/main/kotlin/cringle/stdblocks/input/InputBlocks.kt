@@ -17,6 +17,7 @@ import cringle.stdblocks.STRING
 import cringle.stdblocks.entry
 import cringle.stdblocks.inPort
 import cringle.stdblocks.outPort
+import cringle.stdblocks.parseJson
 
 /**
  * A value that is set in the configuration. It answers a request at `get` (`flow.trigger` pulls it that way) and, as a push, sends the value on `out` for every
@@ -51,6 +52,14 @@ private fun input(name: String, configuration: String, type: SchemaRef, read: (M
 
 internal val INPUT_ENTRIES: List<Entry> = listOf(
     input("input.text", "TextInputConfig", STRING) { config -> config["value"] as? String ?: throw IllegalArgumentException("the configuration 'value' is missing") },
+    input("input.json", "JsonInputConfig", ANY) { config ->
+        val text = config["value"] as? String ?: throw IllegalArgumentException("the configuration 'value' is missing")
+        try {
+            parseJson(text)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("the configuration 'value' is not valid JSON: ${e.message}")
+        }
+    },
     input("input.number", "NumberInputConfig", DOUBLE) { config ->
         val number = (config["value"] as? Number)?.toDouble() ?: throw IllegalArgumentException("the configuration 'value' is missing")
         require(number.isFinite()) { "the configuration 'value' must be a finite number" }

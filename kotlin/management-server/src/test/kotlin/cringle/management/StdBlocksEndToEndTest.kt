@@ -458,6 +458,50 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         assertTrue(get("/private", token).let { it.statusCode() == 200 && it.body() == "classified" }, "with the token of a user")
     }
 
+    @Test
+    fun anEndpointAnswersWithJsonStatusAndHeaders() {
+        fun answer(from: String, port: String, to: String, input: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(from, port), Endpoint(to, input))
+        deployStd(
+            "std-http-answers",
+            Blueprint(
+                "app",
+                listOf(
+                    block("json", "http.endpoint", config("path" to "/json")),
+                    block("data", "input.json", config("value" to """{"hello":"world","n":3}""")),
+                    block("made", "http.endpoint", config("path" to "/made", "method" to "POST")),
+                    block("created", "http.response", JsonObject(mapOf("status" to JsonPrimitive(201), "contentType" to JsonPrimitive("text/csv"), "headers" to JsonObject(mapOf("X-Made" to JsonPrimitive("yes"))), "body" to JsonPrimitive("a,b")))),
+                    block("greet", "http.endpoint", config("path" to "/hello/{name}")),
+                    block("name", "http.request-field", config("field" to "params.name")),
+                    block("hello", "http.response", config("body" to "Hello {}!")),
+                ),
+                listOf(
+                    answer("json", "handler", "data", "get"),
+                    answer("made", "handler", "created", "request"),
+                    answer("greet", "handler", "name", "request"),
+                    answer("name", "next", "hello", "request"),
+                ),
+            ),
+        )
+        val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
+        val deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos()
+        while (!Files.exists(portFile) || Files.readString(portFile).isBlank()) {
+            check(System.nanoTime() < deadline) { "the engine did not open its API port: ${diagnostics()}" }
+            Thread.sleep(200)
+        }
+        val port = Files.readString(portFile).trim().toInt()
+        val client = java.net.http.HttpClient.newHttpClient()
+        fun call(method: String, path: String): java.net.http.HttpResponse<String> =
+            client.send(
+                java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:$port$path")).method(method, java.net.http.HttpRequest.BodyPublishers.noBody()).build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString(),
+            )
+        val json = call("GET", "/json")
+        assertTrue(json.statusCode() == 200 && json.body() == """{"hello":"world","n":3}""" && json.headers().firstValue("Content-Type").get().startsWith("application/json"), json.body())
+        val made = call("POST", "/made")
+        assertTrue(made.statusCode() == 201 && made.body() == "a,b" && made.headers().firstValue("X-Made").get() == "yes" && made.headers().firstValue("Content-Type").get() == "text/csv", made.toString())
+        assertTrue(call("GET", "/hello/Ada").body() == "Hello Ada!", "a field of the request is part of the answer")
+    }
+
     private suspend fun publishProject(file: Path) {
         val data = Files.readAllBytes(file)
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }

@@ -87,9 +87,25 @@
         "path": "cringle.std/String",
         "method": { "optional": "cringle.std/String" },
         "auth": { "optional": "cringle.std/Boolean" },
-        "timeoutMs": { "optional": "cringle.std/Int" }
+        "timeoutMs": { "optional": "cringle.std/Int" },
+        "contentType": { "optional": "cringle.std/String" }
       }
     },
+    "HttpResponseConfig": {
+      "record": {
+        "status": { "optional": "cringle.std/Int" },
+        "contentType": { "optional": "cringle.std/String" },
+        "headers": { "optional": { "map": "cringle.std/String" } },
+        "body": { "optional": "cringle.std/String" }
+      }
+    },
+    "HttpRequestFieldConfig": {
+      "record": {
+        "field": "cringle.std/String",
+        "json": { "optional": "cringle.std/Boolean" }
+      }
+    },
+    "JsonInputConfig": { "record": { "value": "cringle.std/String" } },
     "LogWriteConfig": {
       "record": {
         "level": { "optional": "LogLevel" },
