@@ -392,17 +392,12 @@ document.addEventListener('htmx:responseError', function (event) {
     }
     var current = (data.config || {})[f.name];
     var control;
+    var hint = f.description || '';
     if (f.kind === 'boolean') {
-      control = document.createElement('select');
-      [['', f.optional ? '(not set)' : 'false'], ['true', 'true'], ['false', 'false']].forEach(function (pair) {
-        if (pair[0] === 'false' && !f.optional) return;
-        var opt = document.createElement('option');
-        opt.value = pair[0];
-        opt.textContent = pair[1];
-        opt.selected = (current === undefined ? '' : String(current)) === pair[0];
-        control.append(opt);
-      });
-      control.addEventListener('change', function () { store(control.value === '' ? (f.optional ? undefined : false) : control.value === 'true'); });
+      control = document.createElement('input');
+      control.type = 'checkbox';
+      control.checked = current === true;
+      control.addEventListener('change', function () { store(control.checked); });
     } else if (f.kind === 'enum') {
       control = document.createElement('select');
       var none = document.createElement('option');
@@ -436,16 +431,61 @@ document.addEventListener('htmx:responseError', function (event) {
       if (f.kind === 'int' || f.kind === 'double') {
         control.type = 'number';
         control.step = f.kind === 'int' ? '1' : 'any';
+        if (f.minimum !== undefined) control.min = f.minimum;
+        if (f.maximum !== undefined) control.max = f.maximum;
+        if (!hint && (f.minimum !== undefined || f.maximum !== undefined)) hint = (f.minimum !== undefined ? f.minimum : '...') + ' to ' + (f.maximum !== undefined ? f.maximum : '...');
       }
+      if (f.maxLength !== undefined) control.maxLength = f.maxLength;
       control.value = current === undefined ? '' : current;
+      var message = document.createElement('small');
+      message.className = 'cfg-error';
+      message.hidden = true;
+      // the same checks as the server makes (schema constraints), shown at once at the field
+      var validate = function () {
+        var problem = '';
+        var v = control.value;
+        if (v === '') {
+          problem = f.optional ? '' : 'required';
+        } else if (f.kind === 'string') {
+          if (f.minLength !== undefined && v.length < f.minLength) problem = 'at least ' + f.minLength + ' characters';
+          else if (f.pattern !== undefined && !new RegExp('^(?:' + f.pattern + ')$').test(v)) problem = f.description || 'not a valid value';
+        } else {
+          var n = Number(v);
+          if (f.minimum !== undefined && n < f.minimum) problem = 'at least ' + f.minimum;
+          else if (f.maximum !== undefined && n > f.maximum) problem = 'at most ' + f.maximum;
+          else if (f.kind === 'int' && n !== Math.floor(n)) problem = 'a whole number';
+        }
+        control.classList.toggle('invalid', problem !== '');
+        message.textContent = problem;
+        message.hidden = problem === '';
+      };
       control.addEventListener('input', function () {
+        validate();
         if (control.value === '') { store(undefined); return; }
         if (f.kind === 'int') store(parseInt(control.value, 10));
         else if (f.kind === 'double') store(parseFloat(control.value));
         else store(control.value);
       });
+      if (control.value !== '') validate();
+      return fieldBox(f, control, hint, message);
     }
-    return field(f.name + (f.optional ? '' : ' *'), control);
+    return fieldBox(f, control, hint, null);
+  }
+  // a field of the configuration form: the name (with * for a required one), the control, what a valid value is, and the problem with the value
+  function fieldBox(f, control, hint, message) {
+    var wrap = document.createElement('div');
+    wrap.className = 'cfg-field' + (f.kind === 'boolean' ? ' cfg-check' : '');
+    var label = document.createElement('label');
+    if (f.kind === 'boolean') label.append(control, ' ' + f.name); else label.append(f.name + (f.optional ? '' : ' *'), control);
+    wrap.append(label);
+    if (hint) {
+      var small = document.createElement('small');
+      small.className = 'cfg-hint';
+      small.textContent = hint;
+      wrap.append(small);
+    }
+    if (message) wrap.append(message);
+    return wrap;
   }
 
   function showExternal(id, data) {
@@ -688,13 +728,7 @@ document.addEventListener('htmx:responseError', function (event) {
   }
   function markProblems() {
     clearErrors();
-    var first = null;
-    document.querySelectorAll('#problems button.problem').forEach(function (b) {
-      var ids = b.dataset.blocks.split(',');
-      markErrors(ids);
-      if (first === null) first = ids[0];
-    });
-    if (first !== null) focusBlock(first, false);
+    document.querySelectorAll('#problems button.problem').forEach(function (b) { markErrors(b.dataset.blocks.split(',')); });
   }
   function focusBlock(blockId, select) {
     var number = nodeNumber(blockId);
