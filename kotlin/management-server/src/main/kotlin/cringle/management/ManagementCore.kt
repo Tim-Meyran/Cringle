@@ -1087,7 +1087,14 @@ public class ManagementCore(
      * mutual TLS, so its key has to be trusted; [token] is only for it (the token of the local repository is never sent there). Plugins before projects,
      * versions ascending; a package that fails is reported and the others go on; a fetched plugin is untrusted here. With [dryRun] nothing is copied.
      */
-    public suspend fun fetchPackages(source: String, token: String?, specs: List<String>, update: Boolean, dryRun: Boolean): cringle.management.v1.FetchPackagesResponse {
+    public suspend fun fetchPackages(source: String, token: String?, specs: List<String>, update: Boolean, dryRun: Boolean): cringle.management.v1.FetchPackagesResponse =
+        copyPackages(source, token, specs, update, dryRun, push = false)
+
+    /** The other direction (#431): copies the packages of the default repository that the repository at [source] lacks into it; the rest as [fetchPackages]. */
+    public suspend fun pushPackages(source: String, token: String?, specs: List<String>, update: Boolean, dryRun: Boolean): cringle.management.v1.FetchPackagesResponse =
+        copyPackages(source, token, specs, update, dryRun, push = true)
+
+    private suspend fun copyPackages(source: String, token: String?, specs: List<String>, update: Boolean, dryRun: Boolean, push: Boolean): cringle.management.v1.FetchPackagesResponse {
         if (source.isBlank()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "the address (host:port) of the remote repository is missing")
         val local = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
         val wanted = specs.map { it.trim() }.filter { it.isNotEmpty() }.map { spec ->
@@ -1098,12 +1105,14 @@ public class ManagementCore(
         val response = cringle.management.v1.FetchPackagesResponse.newBuilder()
         try {
             cringle.repository.RepositoryClient(source.trim(), token, cringle.repository.RepositoryTls(identity, trustStore)).use { remote ->
-                val here = local.list()
-                val haveNames = here.map { it.name }.toSet()
-                val have = here.map { it.name to it.version }.toSet()
+                val from = if (push) local else remote
+                val to = if (push) remote else local
+                val there = to.list()
+                val haveNames = there.map { it.name }.toSet()
+                val have = there.map { it.name to it.version }.toSet()
                 var present = 0
                 val missing = ArrayList<cringle.repository.PackageEntry>()
-                for (e in remote.list()) {
+                for (e in from.list()) {
                     if (wanted.isNotEmpty() && wanted.none { (n, r) -> n == e.name && (r == null || r.matches(cringle.packaging.Version.parse(e.version))) }) continue
                     if (update && e.name !in haveNames) continue
                     if ((e.name to e.version) in have) present++ else missing += e
@@ -1113,14 +1122,14 @@ public class ManagementCore(
                     .setKind(e.kind.jsonName).setName(e.name).setVersion(e.version).setState(state).setMessage(message).build()
                 for (e in missing) {
                     if (dryRun) {
-                        response.addPackages(row(e, "would-fetch"))
+                        response.addPackages(row(e, if (push) "would-push" else "would-fetch"))
                         continue
                     }
-                    val file = java.nio.file.Files.createTempFile("fetch-", ".cringle")
+                    val file = java.nio.file.Files.createTempFile("copy-", ".cringle")
                     try {
-                        remote.download(e.name, e.version, file)
-                        local.publish(file)
-                        response.addPackages(row(e, "fetched", if (e.kind == cringle.packaging.PackageKind.PLUGIN) "untrusted here: trust it to let it run" else ""))
+                        from.download(e.name, e.version, file)
+                        to.publish(file)
+                        response.addPackages(row(e, if (push) "pushed" else "fetched", if (e.kind == cringle.packaging.PackageKind.PLUGIN) "untrusted ${if (push) "there" else "here"}: trust it to let it run" else ""))
                     } catch (x: cringle.repository.RepositoryClientException) {
                         if (x.status == Status.Code.ALREADY_EXISTS) present++ else response.addPackages(row(e, "failed", x.message.orEmpty()))
                     } catch (x: cringle.packaging.PackageHashMismatchException) {

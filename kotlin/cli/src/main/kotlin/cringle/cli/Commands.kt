@@ -823,6 +823,18 @@ internal val COMMANDS: List<Command> = listOf(
             "nothing to fetch (${r.present} version(s) are already here)",
         )
     },
+    Command(
+        listOf("repo", "push"), "<host:port> [<name[@range]>...]", "Copy the packages that a remote repository lacks into it (its key has to be trusted: trust add-component)",
+        listOf(flag("update", "only the packages that the remote repository already has"), flag("dry-run", "show what would be pushed, copy nothing"), opt("token", "token of the remote repository", "TOKEN")), 1,
+    ) { env, a ->
+        val r = env.m.pushPackages(
+            FetchPackagesRequest.newBuilder().setSource(a.positional[0]).setToken(a.option("token").orEmpty()).addAllPackages(a.positional.drop(1)).setUpdate(a.flag("update")).setDryRun(a.flag("dry-run")).build(),
+        )
+        Output.Rows(
+            r.packagesList.map { linkedMapOf<String, Any?>("kind" to it.kind, "name" to it.name, "version" to it.version, "state" to it.state, "message" to it.message) },
+            "nothing to push (${r.present} version(s) are already there)",
+        )
+    },
     Command(listOf("repo", "trust"), "<plugin> <trusted|untrusted>", "Set the trust status of a plugin (all versions)", minArgs = 2) { env, a ->
         val trust = when (a.positional[1].lowercase()) {
             "trusted" -> PluginTrust.PLUGIN_TRUST_TRUSTED

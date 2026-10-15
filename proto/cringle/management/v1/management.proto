@@ -166,6 +166,10 @@ service ManagementService {
   // Copies the packages that are missing here from a remote repository (#426).
   rpc FetchPackages(FetchPackagesRequest) returns (FetchPackagesResponse);
 
+  // The other direction (#431): copies the packages of this repository that the remote repository lacks into it. `source` is the remote repository the
+  // packages go to; the states are `pushed`, `would-push` or `failed`.
+  rpc PushPackages(FetchPackagesRequest) returns (FetchPackagesResponse);
+
   rpc ListVersions(cringle.repository.v1.ListVersionsRequest) returns (cringle.repository.v1.ListVersionsResponse);
 
   rpc GetPackage(cringle.repository.v1.GetPackageRequest) returns (cringle.repository.v1.PackageMetadata);
