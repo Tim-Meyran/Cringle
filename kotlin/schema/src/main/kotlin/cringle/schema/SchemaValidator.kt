@@ -78,7 +78,26 @@ public class SchemaValidator(private val registry: SchemaRegistry) {
                     errors += ValidationError(path, "unknown enum value '$text', expected one of ${definition.values.joinToString()}")
                 }
             }
+            is TypeDef.Constrained -> {
+                val before = errors.size
+                validatePrimitive(value, definition.base, path, errors)
+                if (errors.size == before) validateConstraints((value as JsonPrimitive), definition, path, errors)
+            }
             is TypeDef.Record -> validateRecord(value, definition, path, errors)
+        }
+    }
+
+    private fun validateConstraints(value: JsonPrimitive, c: TypeDef.Constrained, path: String, errors: MutableList<ValidationError>) {
+        val hint = c.description?.let { ": $it" }.orEmpty()
+        if (c.base == PrimitiveKind.STRING) {
+            val text = value.content
+            if (c.minLength != null && text.length < c.minLength) errors += ValidationError(path, "the text is shorter than ${c.minLength} characters$hint")
+            else if (c.maxLength != null && text.length > c.maxLength) errors += ValidationError(path, "the text is longer than ${c.maxLength} characters$hint")
+            else if (c.regex != null && !c.regex.matches(text)) errors += ValidationError(path, "'$text' is not a valid value$hint")
+        } else {
+            val number = value.content.toDoubleOrNull() ?: return
+            if (c.minimum != null && number < c.minimum) errors += ValidationError(path, "$number is below the minimum ${c.minimum.let { if (c.base == PrimitiveKind.INT) it.toLong().toString() else it.toString() }}$hint")
+            else if (c.maximum != null && number > c.maximum) errors += ValidationError(path, "$number is above the maximum ${c.maximum.let { if (c.base == PrimitiveKind.INT) it.toLong().toString() else it.toString() }}$hint")
         }
     }
 

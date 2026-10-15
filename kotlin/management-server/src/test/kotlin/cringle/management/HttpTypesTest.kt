@@ -48,6 +48,24 @@ class HttpTypesTest {
     }
 
     @Test
+    fun aWrongConfigurationIsFoundWhenTheBlueprintIsChecked() {
+        fun problems(vararg config: Pair<String, String>) = problems(listOf(block("e", "http.endpoint", *config)), emptyList())
+        // the path of the endpoint, found at design time instead of when the block starts
+        assertTrue(problems("path" to "test").single().contains("a path that starts with '/'"))
+        assertTrue(problems("path" to "/a b").single().isNotEmpty())
+        assertTrue(problems("path" to "/a//b").single().isNotEmpty())
+        assertTrue(problems("path" to "/orders?x=1").single().isNotEmpty())
+        assertEquals(emptyList<String>(), problems("path" to "/orders/{id}/lines"))
+        assertEquals(emptyList<String>(), problems("path" to "/", "method" to "POST"))
+        assertTrue(problems("path" to "/x", "method" to "FETCH").single().contains("unknown enum value"))
+        assertTrue(problems("path" to "/x", "contentType" to "csv").single().contains("media type"))
+        val response = problems(listOf(block("r", "http.response", "contentType" to "text")), emptyList())
+        assertTrue(response.single().contains("media type"), response.toString())
+        val field = problems(listOf(block("f", "http.request-field", "field" to "params.")), emptyList())
+        assertTrue(field.single().contains("params.<name>"), field.toString())
+    }
+
+    @Test
     fun theFieldOfTheRequestIsTypedByItsTypeParameter() {
         val chain = listOf(block("e", "http.endpoint", "path" to "/x/{id}"), block("f", "http.request-field", "field" to "params.id"), block("r", "http.response"))
         val links = listOf(link("e", "handler", "f", "request"), link("f", "next", "r", "request"))
