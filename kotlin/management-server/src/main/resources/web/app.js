@@ -730,6 +730,23 @@ document.addEventListener('htmx:responseError', function (event) {
     });
   }
 
+  // deploying: save, then publish and deploy in one step (the develop loop)
+  var deploy = document.getElementById('deploy-blueprint');
+  if (deploy) {
+    var deployNow = function () {
+      clearTimeout(autosaveTimer);
+      saveNow().then(function () {
+        var box = document.getElementById('result');
+        if (box.querySelector('.error')) return;
+        return htmx.ajax('POST', host.dataset.deployUrl, { source: host, target: '#result', swap: 'innerHTML' });
+      });
+    };
+    deploy.addEventListener('click', deployNow);
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); deployNow(); }
+    });
+  }
+
   // undo and redo from a stack of exports of the graph
   var history = [JSON.stringify(editor.export())], at = 0, snapTimer = null;
   function snapshot() {

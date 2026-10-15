@@ -164,9 +164,9 @@ class WebBlueprintTest {
     @Test
     fun theEditorHasTheOperationButtons() {
         val page = admin.get("/blueprints/flow-app").body()
-        for (id in listOf("undo", "redo", "zoom-in", "zoom-out", "zoom-fit", "autosave", "publish-blueprint", "data-publish-url")) assertTrue(page.contains(id), id)
+        for (id in listOf("undo", "redo", "zoom-in", "zoom-out", "zoom-fit", "autosave", "publish-blueprint", "data-publish-url", "deploy-blueprint", "data-deploy-url")) assertTrue(page.contains(id), id)
         val readOnly = viewer.get("/blueprints/flow-app").body()
-        assertTrue(readOnly.contains("id=\"undo\"") && !readOnly.contains("publish-blueprint") && !readOnly.contains("id=\"autosave\""), "a viewer cannot save or publish")
+        assertTrue(readOnly.contains("id=\"undo\"") && !readOnly.contains("publish-blueprint") && !readOnly.contains("deploy-blueprint") && !readOnly.contains("id=\"autosave\""), "a viewer cannot save or publish")
     }
 
     @Test
