@@ -600,6 +600,10 @@ public class TetherNetwork private constructor(
         val remoteSends: Boolean = false,
         /** Set for the receiving end of a provided service port: the name of the service (#177). */
         val serviceName: String? = null,
+        /** The schema a request is checked against; `null`: the schema of [fromPort]. A pull tether asks with a context of any type. */
+        val requestSchema: cringle.contract.SchemaRef? = null,
+        /** The schema a response is checked against; `null`: the response schema of [fromPort]. */
+        val responseSchema: cringle.contract.SchemaRef? = null,
     ) {
         /** The open call of a tether whose local end sends to another engine. */
         @Volatile var call: RemoteCall? = null
@@ -784,7 +788,7 @@ public class TetherNetwork private constructor(
         } catch (e: IllegalArgumentException) {
             throw TetherValidationException("tether ${c.info.id}: $what is not valid data: ${e.message}", listOf(e.message.orEmpty()))
         }
-        val schema = if (what == "response") c.fromPort.response else c.fromPort.schema
+        val schema = if (what == "response") c.responseSchema ?: c.fromPort.response else c.requestSchema ?: c.fromPort.schema
         val errors = v.validate(json, schema)
         if (errors.isNotEmpty()) {
             c.errors.incrementAndGet()
@@ -799,7 +803,8 @@ public class TetherNetwork private constructor(
 
     override fun tether(blockId: BlockId, port: PortDefinition, index: Int?): Tether {
         val key = key(blockId.value, port.name, index)
-        if (port.direction == PortDirection.OUT) {
+        // an IN port that asks (a pull tether) starts its tether like an OUT port does
+        if (port.direction == PortDirection.OUT || outgoing[key].orEmpty().isNotEmpty()) {
             val starting = outgoing[key].orEmpty()
             return when (starting.size) {
                 0 -> Unconnected(blockId.value, port, index)
@@ -1067,6 +1072,7 @@ public class TetherNetwork private constructor(
                     val port = endpoint(local, if (sends) PortDirection.OUT else PortDirection.IN, "tether $id") ?: continue
                     if (t.type !in port.tetherTypes) problems += "tether $id: port '${local.port}' does not support ${t.type}"
                     if (t.type == TetherType.TCP || t.type == TetherType.SERIAL) problems += "tether $id: a ${t.type} tether is a local resource and cannot end on another engine"
+                    if (t.type == TetherType.PULL) problems += "tether $id: a PULL tether is local and cannot end on another engine"
                     if (config.remote == null) problems += "tether $id: this engine cannot run tethers to other engines"
                     val c = Connection(
                         TetherInfo(id, t.type, if (sends) local else far, if (sends) far else local, remote, t.record),
@@ -1100,6 +1106,29 @@ public class TetherNetwork private constructor(
                 if (from == null || to == null) continue
                 if (t.type !in from.tetherTypes) problems += "tether $id: port '${localFrom.port}' does not support ${t.type}"
                 if (t.type !in to.tetherTypes) problems += "tether $id: port '${localTo.port}' does not support ${t.type}"
+                if (t.type == TetherType.PULL) {
+                    // the data flows from `from` to `to` as in a message, but `to` asks: inside it is a request from the IN port to the OUT port, with a context of any type as the request
+                    val registry = config.schemas
+                    val fits = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
+                    if (!fits) problems += "tether $id: schema ${from.schema} is not assignable to ${to.schema}"
+                    val pull = Connection(
+                        TetherInfo(id, TetherType.REQUEST_RESPONSE, localTo, localFrom, null, t.record),
+                        to,
+                        from,
+                        t.delivery,
+                        null,
+                        t.bufferCapacity ?: config.bufferCapacity,
+                        t.requestTimeout ?: config.requestTimeout,
+                        t.retry ?: RetryConfig(),
+                        null,
+                        requestSchema = cringle.schema.StandardSchemas.ANY,
+                        responseSchema = from.schema,
+                    )
+                    addOutgoing(key(localTo.block, localTo.port, localTo.index), pull, "tether $id: endpoint '${localTo.block}.${localTo.port}' is already connected")
+                    // the OUT port can be asked by several tethers
+                    connections["${key(localFrom.block, localFrom.port, localFrom.index)}<$id"] = pull
+                    continue
+                }
                 if (t.type != TetherType.BYTE_STREAM && t.type != TetherType.TCP && t.type != TetherType.SERIAL) {
                     val registry = config.schemas
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema

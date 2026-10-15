@@ -407,6 +407,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         put("varArg", p.varArg)
         put("schema", "${p.schema.namespace}/${p.schema.name}")
         p.typeParam?.let { put("typeParam", it) }
+        put("tetherTypes", JsonArray(p.tetherTypes.map { JsonPrimitive(it.name) }))
         p.responseSchema?.let { put("responseSchema", "${it.namespace}/${it.name}") }
     }
 
@@ -478,7 +479,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
                 "<div id=\"blueprint-editor\" data-palette=\"{}\" data-schemas=\"{}\" data-graph=\"{}\" data-options=\"{}\" data-check-url=\"{}/check\" data-save-url=\"{}/save\" data-publish-url=\"{}/publish\" data-deploy-url=\"{}/deploy\">",
                 palette.toString(), buildJsonArray { snapshot.registry.types().forEach { add(JsonPrimitive("${it.namespace}/${it.name}")) } }.toString(), graph.toString(), BlueprintGraph.options(blueprint).toString(), base, base, base, base,
             ),
-            raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
+            raw("<div id=\"canvas\"><div id=\"drawflow\"></div><p id=\"edge-legend\" aria-label=\"Kinds of tethers\"><span class=\"lg msg\">message (push)</span><span class=\"lg rr\">request / response</span><span class=\"lg pull\">pull (get)</span><span class=\"lg stream\">stream</span></p><p id=\"canvas-hint\">Add a block from the palette, then drag from an output to an input.</p></div>"),
             raw("<div id=\"editor-left\"><header id=\"editor-head\" class=\"float\">"),
             h("<h1>Blueprint {}</h1>", draft.name),
             raw("<p class=\"subtitle\">Add blocks from the palette, connect an output to an input; the server checks every connection.</p>"),

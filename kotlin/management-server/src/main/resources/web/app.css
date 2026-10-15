@@ -684,3 +684,13 @@ code.cmd { display: block; width: fit-content; max-width: 100%; margin-top: var(
 #node-properties input.invalid, #node-properties textarea.invalid, #node-properties select.invalid { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
 #node-properties .config-form { display: flex; flex-direction: column; margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--border); }
 #node-properties .config-form::before { content: "Configuration"; margin-bottom: var(--space-3); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); }
+
+/* the kinds of tethers (#425): push solid, request/response dashed, pull (get) dotted, stream thick */
+#drawflow .connection[data-type="REQUEST_RESPONSE"] .main-path { stroke: #8aa4ff; stroke-dasharray: 9 5; }
+#drawflow .connection[data-type="PULL"] .main-path { stroke: #e3b341; stroke-dasharray: 2 6; stroke-linecap: round; stroke-width: 3px; }
+#drawflow .connection[data-type="STREAM"] .main-path, #drawflow .connection[data-type="BYTE_STREAM"] .main-path { stroke: #7fd1a8; stroke-width: 3px; }
+#edge-legend { position: absolute; left: var(--space-3); bottom: var(--space-3); margin: 0; display: flex; gap: var(--space-3); flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-faint); pointer-events: none; }
+#edge-legend .lg::before { content: ""; display: inline-block; width: 22px; margin-right: 6px; vertical-align: middle; border-top: 2px solid var(--text-faint); }
+#edge-legend .rr::before { border-top: 2px dashed #8aa4ff; }
+#edge-legend .pull::before { border-top: 3px dotted #e3b341; }
+#edge-legend .stream::before { border-top: 3px solid #7fd1a8; }

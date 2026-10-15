@@ -162,8 +162,8 @@ public class HttpService(
             user = found
         }
         val declared = exchange.requestHeaders.getFirst("Content-Length")?.toLongOrNull()
-        if (declared != null && declared > MAX_BODY) return reply(exchange, 413, error("the body is larger than $MAX_BODY bytes"), mapOf("Connection" to "close"))
-        val body = readBody(exchange) ?: return reply(exchange, 413, error("the body is larger than $MAX_BODY bytes"), mapOf("Connection" to "close"))
+        if (declared != null && declared > MAX_BODY) return tooLarge(exchange)
+        val body = readBody(exchange) ?: return tooLarge(exchange)
         val headers = HashMap<String, String>()
         exchange.requestHeaders.forEach { (k, v) -> headers[k.lowercase()] = v.firstOrNull().orEmpty() }
         val request = HttpRequest(method, rawPath, params, query(uri.rawQuery), headers, body.toString(Charsets.UTF_8), user)
@@ -182,6 +182,20 @@ public class HttpService(
             return reply(exchange, 500, error("the handler failed"))
         }
         reply(exchange, answer.status.coerceIn(100, 599), answer.body.toByteArray(Charsets.UTF_8), answer.headers, defaultType = "text/plain; charset=utf-8")
+    }
+
+    /** Answers `413`; what the client is still sending is read and dropped first (up to a limit), or it would see a reset instead of the answer. */
+    private fun tooLarge(exchange: HttpExchange) {
+        runCatching {
+            val buffer = ByteArray(8192)
+            var left = 8L * MAX_BODY
+            while (left > 0) {
+                val n = exchange.requestBody.read(buffer)
+                if (n < 0) break
+                left -= n
+            }
+        }
+        reply(exchange, 413, error("the body is larger than $MAX_BODY bytes"), mapOf("Connection" to "close"))
     }
 
     private fun readBody(exchange: HttpExchange): ByteArray? {
