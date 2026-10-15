@@ -173,6 +173,12 @@ public object PackageValidator {
             if (from != null && to != null && !isAssignable(from.schema, to.schema, registry)) {
                 problem(path, "schema ${from.schema} of '${t.from?.port}' is not assignable to ${to.schema} of '${t.to?.port}'")
             }
+            // the response goes the other way: what the receiver answers has to fit what the sender expects (only where a port declares a response schema)
+            if (t.type == TetherType.REQUEST_RESPONSE && from != null && to != null && (from.responseSchema != null || to.responseSchema != null) &&
+                !isAssignable(to.response, from.response, registry)
+            ) {
+                problem(path, "the response schema ${to.response} of '${t.to?.port}' is not assignable to the response schema ${from.response} that '${t.from?.port}' expects")
+            }
         }
         return problems
     }
@@ -336,6 +342,7 @@ public object PackageValidator {
     private fun schemaRefs(block: BlockDefinition, path: String, registry: SchemaRegistry): List<PackageProblem> {
         val refs = block.schemas.mapIndexed { i, r -> "$path.schemas[$i]" to r } +
             block.ports.mapIndexed { i, p -> "$path.ports[$i].schema" to p.schema } +
+            block.ports.mapIndexedNotNull { i, p -> p.responseSchema?.let { "$path.ports[$i].responseSchema" to it } } +
             block.typeParameters.mapIndexed { i, t -> "$path.typeParameters[$i].bound" to t.bound } +
             listOfNotNull(block.configSchema?.let { "$path.configSchema" to it })
         return refs.filter { (_, ref) -> registry.resolve(ref) == null }

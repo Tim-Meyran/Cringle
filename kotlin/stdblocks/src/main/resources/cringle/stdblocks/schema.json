@@ -82,6 +82,24 @@
     "PathConfig": { "record": { "path": "cringle.std/String" } },
     "TextInputConfig": { "record": { "value": "cringle.std/String" } },
     "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
+    "HttpRequest": {
+      "record": {
+        "method": "cringle.std/String",
+        "path": "cringle.std/String",
+        "params": { "map": "cringle.std/String" },
+        "query": { "map": "cringle.std/String" },
+        "headers": { "map": "cringle.std/String" },
+        "body": "cringle.std/String",
+        "user": { "optional": "cringle.std/String" }
+      }
+    },
+    "HttpResponse": {
+      "record": {
+        "status": { "optional": "cringle.std/Int" },
+        "headers": { "optional": { "map": "cringle.std/String" } },
+        "body": { "optional": "cringle.std/Any" }
+      }
+    },
     "HttpEndpointConfig": {
       "record": {
         "path": "cringle.std/String",

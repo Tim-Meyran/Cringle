@@ -407,6 +407,7 @@ internal class BlueprintPages(private val core: ManagementCore, private val draf
         put("varArg", p.varArg)
         put("schema", "${p.schema.namespace}/${p.schema.name}")
         p.typeParam?.let { put("typeParam", it) }
+        p.responseSchema?.let { put("responseSchema", "${it.namespace}/${it.name}") }
     }
 
     private suspend fun editor(session: Session, draft: Draft): Html {

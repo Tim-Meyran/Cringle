@@ -68,6 +68,8 @@ class TetherNetworkTest {
             PortDefinition("unused", PortDirection.OUT, setOf(TetherType.MESSAGE), string),
             PortDefinition("outAny", PortDirection.OUT, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "Any")),
             PortDefinition("back", PortDirection.IN, setOf(TetherType.MESSAGE), string),
+            // a request is a String, the answer an Int
+            PortDefinition("outRr", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), string, responseSchema = int),
         ),
         emptyList(),
     )
@@ -79,6 +81,8 @@ class TetherNetworkTest {
             PortDefinition("in2", PortDirection.IN, all, string),
             PortDefinition("inInt", PortDirection.IN, setOf(TetherType.MESSAGE), int),
             PortDefinition("inAny", PortDirection.IN, setOf(TetherType.MESSAGE), SchemaRef("cringle.std", "Any")),
+            PortDefinition("inRr", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), string, responseSchema = int),
+            PortDefinition("inRrText", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), string),
         ),
         emptyList(),
     )
@@ -234,6 +238,32 @@ class TetherNetworkTest {
             // the invalid response is rejected in the receiver; the caller times out instead of getting bad data
             assertThrows<TetherTimeoutException> { runBlocking { s.out("out").let { _ -> withTimeout(10.seconds) { s.out("out").request("x") } } } }
         }
+    }
+
+    @Test
+    fun aRequestAndItsResponseHaveTheirOwnSchemas(): Unit = runBlocking {
+        // the response schema of the port (Int) is the one of the response, the request is a String
+        setup(listOf(tether(TetherType.REQUEST_RESPONSE, "outRr", "inRr"))) { e -> (e as TetherEvent.Request).respond(5L) }.use { s ->
+            assertEquals(5L, s.out("outRr").request("question"))
+            assertThrows<TetherValidationException> { runBlocking { s.out("outRr").request(42) } }
+        }
+        setup(listOf(tether(TetherType.REQUEST_RESPONSE, "outRr", "inRr"))) { e -> runCatching { (e as TetherEvent.Request).respond("not an Int") } }.use { s ->
+            assertThrows<TetherTimeoutException> { runBlocking { withTimeout(10.seconds) { s.out("outRr").request("question") } } }
+        }
+    }
+
+    @Test
+    fun theResponseSchemaOfTheReceiverHasToFitWhatTheSenderExpects() {
+        val defs = mapOf("s" to srcDef, "d" to dstDef)
+        val blocks = listOf(BlueprintBlock("s", "p/src"), BlueprintBlock("d", "p/dst"))
+        TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.REQUEST_RESPONSE, "outRr", "inRr"))), defs, config())
+        // the receiver answers Strings, the sender wants Ints
+        val e = assertThrows<TetherWiringException> {
+            TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.REQUEST_RESPONSE, "outRr", "inRrText"))), defs, config())
+        }
+        assertTrue(e.message!!.contains("response schema"), e.message)
+        // without a declared response schema on either side nothing is checked in this direction (as before)
+        TetherNetwork.create(Blueprint("bp", blocks, listOf(tether(TetherType.REQUEST_RESPONSE, "out", "inRrText"))), defs, config())
     }
 
     @Test
