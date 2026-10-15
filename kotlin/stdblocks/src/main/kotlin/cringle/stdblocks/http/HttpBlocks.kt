@@ -3,6 +3,7 @@
 package cringle.stdblocks.http
 
 import cringle.contract.Block
+import cringle.contract.BlockDefinition
 import cringle.contract.BlockContext
 import cringle.contract.BuiltinDriverTypes
 import cringle.contract.ExclusiveKind
@@ -15,10 +16,13 @@ import cringle.contract.HttpRoute
 import cringle.contract.PortDefinition
 import cringle.contract.TetherEvent
 import cringle.contract.PortDirection
+import cringle.contract.SchemaRef
 import cringle.contract.Tether
 import cringle.contract.TetherType
+import cringle.contract.TypeParameter
 import cringle.stdblocks.ANY
 import cringle.stdblocks.Entry
+import cringle.stdblocks.StdBlockProvider
 import cringle.stdblocks.entry
 import cringle.stdblocks.long
 import cringle.stdblocks.parseJson
@@ -165,10 +169,32 @@ internal class HttpRequestField : Block {
     }
 }
 
+private val HTTP_REQUEST = SchemaRef(StdBlockProvider.NAMESPACE, "HttpRequest")
+private val HTTP_RESPONSE = SchemaRef(StdBlockProvider.NAMESPACE, "HttpResponse")
+private val REQUEST_RESPONSE = setOf(TetherType.REQUEST_RESPONSE)
+
+/** `http.request-field` with the type parameter `T` (bound `Any`): the value that `next` gets, a text or, with `json`, a JSON value. */
+private val REQUEST_FIELD = Entry(
+    BlockDefinition(
+        "http.request-field",
+        listOf(HTTP_REQUEST, HTTP_RESPONSE, ANY),
+        listOf(
+            PortDefinition("request", PortDirection.IN, REQUEST_RESPONSE, HTTP_REQUEST, responseSchema = HTTP_RESPONSE),
+            PortDefinition("next", PortDirection.OUT, REQUEST_RESPONSE, ANY, typeParam = "T", responseSchema = HTTP_RESPONSE),
+        ),
+        emptyList(),
+        SchemaRef(StdBlockProvider.NAMESPACE, "HttpRequestFieldConfig"),
+        emptyList(),
+        listOf(TypeParameter("T")),
+    ),
+    { HttpRequestField() },
+)
+
 internal val HTTP_ENTRIES: List<Entry> = listOf(
     entry(
         "http.endpoint",
-        listOf(PortDefinition("handler", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), ANY)),
+        // a request is an HttpRequest, the answer of the flow an HttpResponse (http.response builds one)
+        listOf(PortDefinition("handler", PortDirection.OUT, REQUEST_RESPONSE, HTTP_REQUEST, responseSchema = HTTP_RESPONSE)),
         "HttpEndpointConfig",
         listOf(BuiltinDriverTypes.HTTP.id),
         // a route of the API port is served by one fabric at a time: a project with an endpoint is updated by stopping the old fabric first
@@ -177,17 +203,10 @@ internal val HTTP_ENTRIES: List<Entry> = listOf(
     entry(
         "http.response",
         listOf(
-            PortDefinition("request", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), ANY),
-            PortDefinition("source", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), ANY),
+            PortDefinition("request", PortDirection.IN, REQUEST_RESPONSE, ANY, responseSchema = HTTP_RESPONSE),
+            PortDefinition("source", PortDirection.OUT, REQUEST_RESPONSE, ANY, responseSchema = ANY),
         ),
         "HttpResponseConfig",
     ) { HttpResponseBlock() },
-    entry(
-        "http.request-field",
-        listOf(
-            PortDefinition("request", PortDirection.IN, setOf(TetherType.REQUEST_RESPONSE), ANY),
-            PortDefinition("next", PortDirection.OUT, setOf(TetherType.REQUEST_RESPONSE), ANY),
-        ),
-        "HttpRequestFieldConfig",
-    ) { HttpRequestField() },
+    REQUEST_FIELD,
 )

@@ -160,7 +160,13 @@ document.addEventListener('htmx:responseError', function (event) {
     return types;
   }
   function typeName(type) { return type.substring(type.indexOf('/') + 1); }
-  function labelPorts(list, ports, types) {
+  // the response type of a request/response port (the request type is the type of the port)
+  function portResponses(blockType, kind) {
+    var types = {};
+    ((byBlock[blockType] || {})[kind] || []).forEach(function (port) { if (port.responseSchema) types[port.name] = port.responseSchema; });
+    return types;
+  }
+  function labelPorts(list, ports, types, responses) {
     Array.prototype.forEach.call(ports, function (port, i) {
       var old = port.querySelector('.port-label');
       if (old) old.remove();
@@ -169,16 +175,17 @@ document.addEventListener('htmx:responseError', function (event) {
       var span = document.createElement('span');
       span.className = 'port-label';
       var type = slot && types ? types[slot.port] : null;
-      span.textContent = type ? text + ': ' + typeName(type) : text;
+      var response = slot && responses ? responses[slot.port] : null;
+      span.textContent = type ? text + ': ' + typeName(type) + (response ? ' \u2192 ' + typeName(response) : '') : text;
       port.append(span);
-      port.title = type ? text + ' (' + type + ')' : text;
+      port.title = type ? text + ' (' + type + (response ? ' \u2192 ' + response : '') + ')' : text;
     });
   }
   function labelNode(number) {
     var el = document.getElementById('node-' + number);
     if (!el) return;
     var data = editor.getNodeFromId(number).data;
-    var ins, outs, inTypes = null, outTypes = null;
+    var ins, outs, inTypes = null, outTypes = null, inResponses = null, outResponses = null;
     if (data.kind === 'external') {
       var name = data.mode === 'service' ? 'service' : (data.send ? 'to remote' : 'from remote');
       ins = data.send ? [{ label: name }] : [];
@@ -188,9 +195,11 @@ document.addEventListener('htmx:responseError', function (event) {
       outs = slots(data.block, 'outputs', data.varArgCounts);
       inTypes = portTypes(data.block, 'inputs', data.types);
       outTypes = portTypes(data.block, 'outputs', data.types);
+      inResponses = portResponses(data.block, 'inputs');
+      outResponses = portResponses(data.block, 'outputs');
     }
-    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes);
-    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes);
+    labelPorts(ins, el.querySelectorAll('.inputs .input'), inTypes, inResponses);
+    labelPorts(outs, el.querySelectorAll('.outputs .output'), outTypes, outResponses);
     el.style.minHeight = (Math.max(ins.length, outs.length, 1) * 25 + 72) + 'px';
     // the widest input label and the widest output label must fit side by side
     var widest = function (selector) {

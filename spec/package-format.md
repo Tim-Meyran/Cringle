@@ -84,7 +84,7 @@ Object with keys `name` (block name, same grammar as package names), `schemas` (
 uses, `namespace/Name`), `ports`, `requiredDrivers` (driver ids, unique) and optional `configSchema`. A port has
 `name` (identifier grammar of section 3, unique per block), `direction` (`IN` or `OUT`), `tetherTypes` (non-empty,
 values `REQUEST_RESPONSE`, `MESSAGE`, `STREAM`, `BYTE_STREAM`), `schema` and optional `varArg` (boolean, default
-`false`) and optional `typeParam`. Optional `typeParameters` makes the block **generic**: a list of objects with `name` (identifier grammar, unique per block)
+`false`), optional `typeParam` and, for a port that supports `REQUEST_RESPONSE`, optional `responseSchema` (the schema of the responses; the requests have `schema`; without it the responses have `schema` too). Optional `typeParameters` makes the block **generic**: a list of objects with `name` (identifier grammar, unique per block)
 and `bound` (a schema reference, default `cringle.std/Any`). A port with `typeParam: "T"` carries the type that the blueprint binds to the parameter `T` (its `schema`
 is the bound of `T`, and is the type of the port as long as nothing is bound); `typeParam` must name a declared parameter. Optional `exclusiveResources` lists what the block holds that only one instance can have at a time: objects with `kind` (`PORT`, `SERIAL` or
 `OTHER`) and `label` (not blank, for example `http` or `COM3`), no duplicates. A fabric with such a block, or with a `TCP` or `SERIAL` tether (section 5), is updated by

@@ -784,12 +784,13 @@ public class TetherNetwork private constructor(
         } catch (e: IllegalArgumentException) {
             throw TetherValidationException("tether ${c.info.id}: $what is not valid data: ${e.message}", listOf(e.message.orEmpty()))
         }
-        val errors = v.validate(json, c.fromPort.schema)
+        val schema = if (what == "response") c.fromPort.response else c.fromPort.schema
+        val errors = v.validate(json, schema)
         if (errors.isNotEmpty()) {
             c.errors.incrementAndGet()
             val list = errors.map { "${it.path}: ${it.message}" }
             throw TetherValidationException(
-                "tether ${c.info.id}: $what violates schema ${c.fromPort.schema}:\n" + list.joinToString("\n") { "  $it" },
+                "tether ${c.info.id}: $what violates schema $schema:\n" + list.joinToString("\n") { "  $it" },
                 list,
             )
         }
@@ -1103,6 +1104,10 @@ public class TetherNetwork private constructor(
                     val registry = config.schemas
                     val ok = if (registry != null) cringle.schema.isAssignable(from.schema, to.schema, registry) else from.schema == to.schema
                     if (!ok) problems += "tether $id: schema ${from.schema} is not assignable to ${to.schema}"
+                    if (t.type == TetherType.REQUEST_RESPONSE && (from.responseSchema != null || to.responseSchema != null)) {
+                        val answers = if (registry != null) cringle.schema.isAssignable(to.response, from.response, registry) else to.response == from.response
+                        if (!answers) problems += "tether $id: the response schema ${to.response} is not assignable to the response schema ${from.response} that '${localFrom.port}' expects"
+                    }
                 }
                 if (t.type == TetherType.TCP) {
                     if (t.port == null) problems += "tether $id: a TCP tether needs a port"

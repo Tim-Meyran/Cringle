@@ -424,7 +424,6 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
         val store = FileUserStore(Files.createDirectories(dir.resolve("home").resolve("management")).resolve("users.json"))
         val users = UserManager(store)
         val token = users.createToken(users.createUser("ada", setOf(UserRole.END_USER)).user.id, "api", null).secret
-        fun answer(endpoint: String, source: String) = TetherDef(TetherType.REQUEST_RESPONSE, Endpoint(endpoint, "handler"), Endpoint(source, "get"))
         deployStd(
             "std-http",
             Blueprint(
@@ -432,10 +431,18 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                 listOf(
                     block("open", "http.endpoint", config("path" to "/hello/{name}")),
                     block("secret", "http.endpoint", config("path" to "/private", "auth" to true)),
+                    block("ra", "http.response"),
+                    block("rb", "http.response"),
                     block("a", "input.text", config("value" to "hello")),
                     block("b", "input.text", config("value" to "classified")),
                 ),
-                listOf(answer("open", "a"), answer("secret", "b")),
+                // the answer of an endpoint is an HttpResponse: http.response builds it from what its source answers
+                listOf(
+                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("open", "handler"), Endpoint("ra", "request")),
+                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("ra", "source"), Endpoint("a", "get")),
+                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("secret", "handler"), Endpoint("rb", "request")),
+                    TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("rb", "source"), Endpoint("b", "get")),
+                ),
             ),
         )
         val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
@@ -467,6 +474,7 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                 "app",
                 listOf(
                     block("json", "http.endpoint", config("path" to "/json")),
+                    block("rj", "http.response"),
                     block("data", "input.json", config("value" to """{"hello":"world","n":3}""")),
                     block("made", "http.endpoint", config("path" to "/made", "method" to "POST")),
                     block("created", "http.response", JsonObject(mapOf("status" to JsonPrimitive(201), "contentType" to JsonPrimitive("text/csv"), "headers" to JsonObject(mapOf("X-Made" to JsonPrimitive("yes"))), "body" to JsonPrimitive("a,b")))),
@@ -475,7 +483,8 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
                     block("hello", "http.response", config("body" to "Hello {}!")),
                 ),
                 listOf(
-                    answer("json", "handler", "data", "get"),
+                    answer("json", "handler", "rj", "request"),
+                    answer("rj", "source", "data", "get"),
                     answer("made", "handler", "created", "request"),
                     answer("greet", "handler", "name", "request"),
                     answer("name", "next", "hello", "request"),
@@ -506,8 +515,11 @@ class StdBlocksEndToEndTest : ServiceTestBase() {
     fun aNewVersionOfAProjectWithAnEndpointReplacesTheOldOne() {
         fun blueprint(text: String) = Blueprint(
             "app",
-            listOf(block("e", "http.endpoint", config("path" to "/version")), block("v", "input.text", config("value" to text))),
-            listOf(TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("e", "handler"), Endpoint("v", "get"))),
+            listOf(block("e", "http.endpoint", config("path" to "/version")), block("r", "http.response"), block("v", "input.text", config("value" to text))),
+            listOf(
+                TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("e", "handler"), Endpoint("r", "request")),
+                TetherDef(TetherType.REQUEST_RESPONSE, Endpoint("r", "source"), Endpoint("v", "get")),
+            ),
         )
         deployStd("std-redeploy", blueprint("one"), "1.0.0")
         val portFile = dir.resolve("home").resolve("engines").resolve("e-std").resolve("api.port")
