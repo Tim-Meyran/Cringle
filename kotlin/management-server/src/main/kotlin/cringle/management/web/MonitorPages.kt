@@ -181,12 +181,18 @@ internal class MonitorPages(private val core: ManagementCore) {
         raw("<div class=\"page-actions\"><a class=\"btn small\" href=\"/fabrics\">Fabrics</a><a class=\"btn small\" href=\"/monitor\">Monitor</a></div></header>"),
         raw("<aside id=\"mon-legend\" class=\"float\"><h2>Legend</h2><ul><li><span class=\"dot ok\"></span>running</li><li><span class=\"dot warn\"></span>starting, restarting</li><li><span class=\"dot bad\"></span>failed, stopped</li><li><span class=\"line active\"></span>values since the last refresh</li><li><span class=\"line held\"></span>breakpoint</li></ul></aside></div>"),
         raw("<div id=\"editor-bar\" class=\"float\">"),
-        raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Reset the zoom\">Fit</button></div>"),
-        raw("<label class=\"check\"><input type=\"checkbox\" id=\"mon-pause\"> Pause</label>"),
+        raw("<span id=\"mon-live\" class=\"live\" role=\"status\"><i></i><span>Loading</span></span>"),
+        raw("<button type=\"button\" class=\"btn\" id=\"mon-pause\" aria-pressed=\"false\" title=\"Freeze the view to read the values (Space)\">Pause</button>"),
+        raw("<div class=\"btn-group\" role=\"group\" aria-label=\"View\"><button type=\"button\" class=\"btn\" id=\"zoom-out\" title=\"Zoom out\">&minus;</button><button type=\"button\" class=\"btn\" id=\"zoom-in\" title=\"Zoom in\">+</button><button type=\"button\" class=\"btn\" id=\"zoom-fit\" title=\"Fit the graph into the view (F)\">Fit</button></div>"),
+        raw("<input type=\"search\" id=\"mon-find\" placeholder=\"Find a block\" aria-label=\"Find a block\" autocomplete=\"off\">"),
+        field("Refresh", raw("<select id=\"mon-every\"><option value=\"1000\">1 s</option><option value=\"2000\" selected>2 s</option><option value=\"5000\">5 s</option></select>")),
         field("Values", raw("<select id=\"mon-n\"><option>10</option><option selected>50</option><option>100</option></select>")),
         raw("</div>"),
-        raw("<aside id=\"properties\" class=\"float\"><h2>Details</h2><div id=\"mon-props\"><p>Select a block, a port or a tether.</p></div></aside>"),
-        h("<section id=\"mon-data\" class=\"float\" data-operate=\"{}\" hidden><button type=\"button\" class=\"btn small\" id=\"mon-data-close\">Close</button><div id=\"mon-data-body\"></div></section>", canOperate.toString()),
+        raw("<aside id=\"properties\" class=\"float\"><h2>Details<button type=\"button\" class=\"link\" id=\"mon-back\" hidden>&larr; Overview</button></h2><div id=\"mon-props\"><p>Loading &hellip;</p></div></aside>"),
+        h(
+            "<section id=\"mon-data\" class=\"float\" data-operate=\"{}\" hidden><header class=\"dock-head\"><strong>Tether</strong><code id=\"mon-data-title\"></code><span class=\"filter-note\"></span><input type=\"search\" id=\"mon-filter\" placeholder=\"Filter the values\" aria-label=\"Filter the values\" autocomplete=\"off\"><button type=\"button\" class=\"btn small\" id=\"mon-data-close\" aria-label=\"Close\">&times;</button></header><div id=\"mon-data-body\"></div></section>",
+            canOperate.toString(),
+        ),
         raw("</div>"),
     )
 
@@ -232,15 +238,10 @@ internal class MonitorPages(private val core: ManagementCore) {
 
     private suspend fun tetherPanel(fabric: String, g: GetFabricGraphResponse, id: String, n: Int, canOperate: Boolean): Html {
         val t = g.tethersList.firstOrNull { it.id == id } ?: return notice("There is no tether $id.")
-        val head = html(
-            h("<h3><code>{}</code></h3>", t.id),
-            raw("<table class=\"kv inline\">"),
-            statRow("Type", t.type),
-            statRow("Values", t.messages),
-            statRow("Bytes", bytes(t.bytes)),
-            statRow("Errors", t.errors),
-            statRow("Last activity", lastActivity(t.lastActivityEpochMillis)),
-            raw("</table>"),
+        fun chip(value: Any?, label: String, tone: String = "") = h("<span class=\"mon-stat-chip {}\"><b>{}</b> {}</span>", tone, value, label)
+        val head = h(
+            "<div class=\"mon-stats\">{}{}{}{}{}</div>",
+            chip(t.type, "type"), chip(t.messages, "values"), chip(bytes(t.bytes), "total"), chip(t.errors, "errors", if (t.errors > 0L) "bad" else ""), chip(lastActivity(t.lastActivityEpochMillis), "last activity"),
         )
         if (!canOperate) return html(head, raw("<p class=\"muted\">The values of a tether need the permission to operate the fabric.</p>"))
         val traffic = core.fabricTraffic(fabric, id, n)
@@ -255,24 +256,33 @@ internal class MonitorPages(private val core: ManagementCore) {
         )
         val heldTable = if (held.isEmpty()) Html("") else html(
             raw("<h4>Held back</h4>"),
-            dataTable(listOf("Since", "Value"), held.map { v -> h("<tr><td>{}</td><td><code class=\"payload\">{}</code></td></tr>", time(v.sinceEpochMillis), v.payload) }, Html("")),
+            valueTable(listOf("", "Since", "State", "Value"), held.map { v -> h("<tr><td></td><td title=\"{}\">{}</td><td>{}</td><td class=\"val\"><code class=\"payload\">{}</code>{}</td></tr>", fullTime(v.sinceEpochMillis), time(v.sinceEpochMillis), badge("held", Tone.WARN), v.payload, copyButton()) }, Html("")),
         )
         val recent = if (!traffic.capturable) {
             raw("<p class=\"muted\">The values of this tether are not copied (a TCP or serial tether); the numbers above are all the monitor knows.</p>")
         } else {
             html(
                 h("<h4>Last {} values</h4>", traffic.recordsCount),
-                dataTable(
+                valueTable(
                     listOf("#", "Time", "Kind", "Value"),
-                    traffic.recordsList.map { r -> h("<tr><td>{}</td><td>{}</td><td>{}</td><td><code class=\"payload\">{}</code></td></tr>", r.seq, time(r.timeEpochMillis), r.kind, r.payload) },
+                    traffic.recordsList.map { r -> h("<tr data-seq=\"{}\"><td>{}</td><td title=\"{}\">{}</td><td>{}</td><td class=\"val\"><code class=\"payload\">{}</code>{}</td></tr>", r.seq, r.seq, fullTime(r.timeEpochMillis), time(r.timeEpochMillis), badge(r.kind), r.payload, copyButton()) },
                     raw("No value has crossed this tether since the monitor was opened."),
                 ),
             )
         }
-        return html(head, actions, heldTable, recent)
+        return html(h("<div class=\"dock-top\">{}{}</div>", head, actions), heldTable, recent)
     }
 
-    private fun time(millis: Long): String = Instant.ofEpochMilli(millis).toString().take(23).replace("T", " ")
+    private fun fullTime(millis: Long): String = Instant.ofEpochMilli(millis).toString().take(23).replace("T", " ")
+
+    /** The time of day with milliseconds (UTC); the whole date is the title of the cell. */
+    private fun time(millis: Long): String = fullTime(millis).substring(11)
+
+    private fun copyButton(): Html = raw("<button type=\"button\" class=\"copy\" title=\"Copy the value\">Copy</button>")
+
+    /** The table of values: fixed columns, the last one gets the room; an empty list shows [empty]. */
+    private fun valueTable(headers: List<String>, rows: List<Html>, empty: Html): Html =
+        if (rows.isEmpty()) h("<p class=\"muted\">{}</p>", empty) else html(raw("<table class=\"values\"><thead><tr>"), headers.map { h("<th>{}</th>", it) }, raw("</tr></thead><tbody>"), rows, raw("</tbody></table>"))
 
     private fun lastActivity(millis: Long): String = if (millis == 0L) "none yet" else "${((System.currentTimeMillis() - millis) / 1000).coerceAtLeast(0)} s ago"
 
