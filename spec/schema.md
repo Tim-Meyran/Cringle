@@ -50,6 +50,16 @@ A type definition is an object with exactly one of:
 
 - `enum`: a non-empty array of unique enum values.
 - `record`: an object from field name to type expression. A record may have no fields.
+- `string`, `int` or `double`: a type with constraints (below).
+
+#### Constrained types
+
+A type definition can also be a **string, a whole number or a number with constraints**: `{"string": {"pattern", "minLength", "maxLength", "description"}}`, `{"int": {"minimum", "maximum", "description"}}` and `{"double": {"minimum", "maximum", "description"}}`. A value is valid when it is a valid value of the base type (`cringle.std/String`, `Int`, `Double`) and meets every constraint that is given: `pattern` is a regular expression that the **whole** text matches, the lengths count characters, the bounds are inclusive. `description` says in one sentence what a valid value is; it is part of the error message and the hint of the editor. A constrained type is its own type: it is assignable to itself and to `cringle.std/Any`, not to its base type. The pattern, the lengths and the bounds are checked when the document is read (a pattern that is not a regular expression, a minimum above the maximum, a fractional bound of an `int`).
+
+```json
+"Path": { "string": { "pattern": "/[a-z]*", "description": "a path like /orders" } },
+"Port": { "int": { "minimum": 1, "maximum": 65535 } }
+```
 
 ### 2.3 Type expressions
 

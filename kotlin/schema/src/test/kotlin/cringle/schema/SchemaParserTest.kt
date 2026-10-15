@@ -98,8 +98,8 @@ class SchemaParserTest {
 
     @Test
     fun rejectsBadTypeDefinitions() {
-        assertInvalid("""{"namespace":"a","types":{"A":{}}}""", "$.types.A", "needs either 'enum' or 'record'")
-        assertInvalid("""{"namespace":"a","types":{"A":{"enum":["X"],"record":{}}}}""", "$.types.A", "not both")
+        assertInvalid("""{"namespace":"a","types":{"A":{}}}""", "$.types.A", "needs exactly one of")
+        assertInvalid("""{"namespace":"a","types":{"A":{"enum":["X"],"record":{}}}}""", "$.types.A", "needs exactly one of")
         assertInvalid("""{"namespace":"a","types":{"A":{"enu":["X"]}}}""", "$.types.A.enu", "unknown key 'enu'")
         assertInvalid("""{"namespace":"a","types":{"A":"enum"}}""", "$.types.A", "must be an object")
         assertInvalid("""{"namespace":"a","types":{"A":{"enum":[]}}}""", "$.types.A.enum", "must not be empty")

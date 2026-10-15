@@ -82,6 +82,28 @@
     "PathConfig": { "record": { "path": "cringle.std/String" } },
     "TextInputConfig": { "record": { "value": "cringle.std/String" } },
     "NumberInputConfig": { "record": { "value": "cringle.std/Double" } },
+    "HttpMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] },
+    "HttpPath": {
+      "string": {
+        "pattern": "/(((\\{[A-Za-z][A-Za-z0-9_]*\\})|[^\\s/?#{}]+)(/((\\{[A-Za-z][A-Za-z0-9_]*\\})|[^\\s/?#{}]+))*/?)?",
+        "maxLength": 200,
+        "description": "a path that starts with '/', like /orders or /orders/{id} (no blank, '?', '#' or '//')"
+      }
+    },
+    "HttpTimeout": { "int": { "minimum": 1, "maximum": 600000, "description": "milliseconds, 1 to 600000" } },
+    "HttpStatus": { "int": { "minimum": 100, "maximum": 599, "description": "an HTTP status, 100 to 599" } },
+    "HttpContentType": {
+      "string": {
+        "pattern": "[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+(;.*)?",
+        "description": "a media type like application/json or text/csv"
+      }
+    },
+    "HttpRequestPart": {
+      "string": {
+        "pattern": "body|method|path|user|(params|query|headers)\\.\\S+",
+        "description": "body, method, path, user, or params.<name>, query.<name>, headers.<name>"
+      }
+    },
     "HttpRequest": {
       "record": {
         "method": "cringle.std/String",
@@ -102,24 +124,24 @@
     },
     "HttpEndpointConfig": {
       "record": {
-        "path": "cringle.std/String",
-        "method": { "optional": "cringle.std/String" },
+        "path": "HttpPath",
+        "method": { "optional": "HttpMethod" },
         "auth": { "optional": "cringle.std/Boolean" },
-        "timeoutMs": { "optional": "cringle.std/Int" },
-        "contentType": { "optional": "cringle.std/String" }
+        "timeoutMs": { "optional": "HttpTimeout" },
+        "contentType": { "optional": "HttpContentType" }
       }
     },
     "HttpResponseConfig": {
       "record": {
-        "status": { "optional": "cringle.std/Int" },
-        "contentType": { "optional": "cringle.std/String" },
+        "status": { "optional": "HttpStatus" },
+        "contentType": { "optional": "HttpContentType" },
         "headers": { "optional": { "map": "cringle.std/String" } },
         "body": { "optional": "cringle.std/String" }
       }
     },
     "HttpRequestFieldConfig": {
       "record": {
-        "field": "cringle.std/String",
+        "field": "HttpRequestPart",
         "json": { "optional": "cringle.std/Boolean" }
       }
     },

@@ -31,8 +31,17 @@ internal object ConfigFields {
         val inner = (expression as? TypeExpr.Optional)?.inner ?: expression
         var kind = "json"
         var values: List<String> = emptyList()
+        var constrained: TypeDef.Constrained? = null
         if (inner is TypeExpr.Ref) {
             when (val definition = registry.resolve(inner.ref)) {
+                is TypeDef.Constrained -> {
+                    constrained = definition
+                    kind = when (definition.base) {
+                        PrimitiveKind.STRING -> "string"
+                        PrimitiveKind.INT -> "int"
+                        else -> "double"
+                    }
+                }
                 is TypeDef.Primitive -> kind = when (definition.kind) {
                     PrimitiveKind.STRING -> "string"
                     PrimitiveKind.INT -> "int"
@@ -52,6 +61,14 @@ internal object ConfigFields {
             put("kind", kind)
             put("optional", optional)
             if (values.isNotEmpty()) put("values", JsonArray(values.map { JsonPrimitive(it) }))
+            constrained?.let { c ->
+                c.pattern?.let { put("pattern", it) }
+                c.minLength?.let { put("minLength", it) }
+                c.maxLength?.let { put("maxLength", it) }
+                c.minimum?.let { put("minimum", it) }
+                c.maximum?.let { put("maximum", it) }
+                c.description?.let { put("description", it) }
+            }
         }
     }
 }

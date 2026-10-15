@@ -78,17 +78,56 @@ public object SchemaParser {
 
     private fun parseDefinition(json: JsonElement, path: String, namespace: String): TypeDef {
         val definition = json as? JsonObject
-            ?: throw SchemaParseException(path, "a type definition must be an object with either 'enum' or 'record'")
+            ?: throw SchemaParseException(path, "a type definition must be an object with either 'enum', 'record', 'string', 'int' or 'double'")
         for (key in definition.keys) {
-            if (key != "enum" && key != "record") throw SchemaParseException("$path.$key", "unknown key '$key'")
+            if (key !in definitionKeys) throw SchemaParseException("$path.$key", "unknown key '$key'")
         }
+        if (definition.size != 1) throw SchemaParseException(path, "a type definition needs exactly one of 'enum', 'record', 'string', 'int' or 'double'")
         return when {
-            "enum" in definition && "record" in definition ->
-                throw SchemaParseException(path, "a type definition has either 'enum' or 'record', not both")
             "enum" in definition -> parseEnum(definition.getValue("enum"), "$path.enum")
             "record" in definition -> parseRecord(definition.getValue("record"), "$path.record", namespace)
-            else -> throw SchemaParseException(path, "a type definition needs either 'enum' or 'record'")
+            "string" in definition -> parseConstrained(definition.getValue("string"), "$path.string", PrimitiveKind.STRING)
+            "int" in definition -> parseConstrained(definition.getValue("int"), "$path.int", PrimitiveKind.INT)
+            else -> parseConstrained(definition.getValue("double"), "$path.double", PrimitiveKind.DOUBLE)
         }
+    }
+
+    private val definitionKeys = setOf("enum", "record", "string", "int", "double")
+
+    /** `{"string": {"pattern", "minLength", "maxLength", "description"}}`, `{"int": {"minimum", "maximum", "description"}}`, the same for `double`. */
+    private fun parseConstrained(json: JsonElement, path: String, base: PrimitiveKind): TypeDef.Constrained {
+        val o = json as? JsonObject ?: throw SchemaParseException(path, "the constraints must be an object")
+        val allowed = if (base == PrimitiveKind.STRING) setOf("pattern", "minLength", "maxLength", "description") else setOf("minimum", "maximum", "description")
+        for (key in o.keys) if (key !in allowed) throw SchemaParseException("$path.$key", "unknown constraint '$key' (expected ${allowed.joinToString()})")
+        fun number(key: String): Double? = o[key]?.let { e ->
+            (e as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: throw SchemaParseException("$path.$key", "'$key' must be a number")
+        }
+        fun length(key: String): Int? = number(key)?.let { n ->
+            if (n < 0 || n != Math.floor(n)) throw SchemaParseException("$path.$key", "'$key' must be a whole number of at least 0")
+            n.toInt()
+        }
+        val pattern = o["pattern"]?.let { e ->
+            val text = (e as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw SchemaParseException("$path.pattern", "'pattern' must be a string")
+            try {
+                Regex(text)
+            } catch (ex: IllegalArgumentException) {
+                throw SchemaParseException("$path.pattern", "'pattern' is not a valid regular expression: ${ex.message?.lineSequence()?.firstOrNull()}")
+            }
+            text
+        }
+        val description = o["description"]?.let { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: throw SchemaParseException("$path.description", "'description' must be a string") }
+        val minLength = length("minLength")
+        val maxLength = length("maxLength")
+        if (minLength != null && maxLength != null && minLength > maxLength) throw SchemaParseException(path, "'minLength' is larger than 'maxLength'")
+        val minimum = number("minimum")
+        val maximum = number("maximum")
+        if (minimum != null && maximum != null && minimum > maximum) throw SchemaParseException(path, "'minimum' is larger than 'maximum'")
+        if (base == PrimitiveKind.INT) {
+            for ((key, v) in listOf("minimum" to minimum, "maximum" to maximum)) {
+                if (v != null && v != Math.floor(v)) throw SchemaParseException("$path.$key", "'$key' of an int must be a whole number")
+            }
+        }
+        return TypeDef.Constrained(base, pattern, minLength, maxLength, minimum, maximum, description)
     }
 
     private fun parseEnum(json: JsonElement, path: String): TypeDef.Enum {

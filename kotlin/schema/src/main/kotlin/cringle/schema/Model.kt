@@ -68,6 +68,32 @@ public sealed interface TypeDef {
     }
 
     /**
+     * A string, a whole number or a number with constraints: a named type that holds the values of [base] (`STRING`, `INT` or `DOUBLE`) that match them. Only
+     * the constraints that fit [base] are set: [pattern] (the whole text matches), [minLength] and [maxLength] for a string, [minimum] and [maximum] for the numbers.
+     * [description] says in a sentence what a valid value is; it is part of the error message.
+     */
+    public class Constrained(
+        public val base: PrimitiveKind,
+        public val pattern: String? = null,
+        public val minLength: Int? = null,
+        public val maxLength: Int? = null,
+        public val minimum: Double? = null,
+        public val maximum: Double? = null,
+        public val description: String? = null,
+    ) : TypeDef {
+        /** [pattern] compiled; `null` without a pattern. */
+        public val regex: Regex? = pattern?.let { Regex(it) }
+
+        override fun equals(other: Any?): Boolean =
+            other is Constrained && base == other.base && pattern == other.pattern && minLength == other.minLength && maxLength == other.maxLength &&
+                minimum == other.minimum && maximum == other.maximum && description == other.description
+
+        override fun hashCode(): Int = listOf(base, pattern, minLength, maxLength, minimum, maximum, description).hashCode()
+
+        override fun toString(): String = "Constrained($base, pattern=$pattern, length=$minLength..$maxLength, range=$minimum..$maximum)"
+    }
+
+    /**
      * A record.
      *
      * @property fields the fields by name, in declaration order. Immutable.
