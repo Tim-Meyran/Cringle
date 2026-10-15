@@ -1081,6 +1081,62 @@ public class ManagementCore(
         }
     }
 
+    /**
+     * Copies the packages that are missing here from the repository at [source] into the default repository (#426): every version of every package, or
+     * of the packages named in [specs] (`name` or `name@range`), with [update] only of the names that exist here. A remote repository is reached over
+     * mutual TLS, so its key has to be trusted; [token] is only for it (the token of the local repository is never sent there). Plugins before projects,
+     * versions ascending; a package that fails is reported and the others go on; a fetched plugin is untrusted here. With [dryRun] nothing is copied.
+     */
+    public suspend fun fetchPackages(source: String, token: String?, specs: List<String>, update: Boolean, dryRun: Boolean): cringle.management.v1.FetchPackagesResponse {
+        if (source.isBlank()) throw ManagementException(Status.Code.INVALID_ARGUMENT, "the address (host:port) of the remote repository is missing")
+        val local = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))
+        val wanted = specs.map { it.trim() }.filter { it.isNotEmpty() }.map { spec ->
+            val name = spec.substringBefore('@')
+            val range = spec.substringAfter('@', "").trim()
+            name to (if (range.isEmpty()) null else try { VersionRange.parse(range) } catch (e: Exception) { throw ManagementException(Status.Code.INVALID_ARGUMENT, "the range '$range' of '$name' is not valid: ${e.message}") })
+        }
+        val response = cringle.management.v1.FetchPackagesResponse.newBuilder()
+        try {
+            cringle.repository.RepositoryClient(source.trim(), token, cringle.repository.RepositoryTls(identity, trustStore)).use { remote ->
+                val here = local.list()
+                val haveNames = here.map { it.name }.toSet()
+                val have = here.map { it.name to it.version }.toSet()
+                var present = 0
+                val missing = ArrayList<cringle.repository.PackageEntry>()
+                for (e in remote.list()) {
+                    if (wanted.isNotEmpty() && wanted.none { (n, r) -> n == e.name && (r == null || r.matches(cringle.packaging.Version.parse(e.version))) }) continue
+                    if (update && e.name !in haveNames) continue
+                    if ((e.name to e.version) in have) present++ else missing += e
+                }
+                missing.sortWith(compareBy({ it.kind != cringle.packaging.PackageKind.PLUGIN }, { it.name }, { cringle.packaging.Version.parse(it.version) }))
+                fun row(e: cringle.repository.PackageEntry, state: String, message: String = "") = cringle.management.v1.FetchedPackage.newBuilder()
+                    .setKind(e.kind.jsonName).setName(e.name).setVersion(e.version).setState(state).setMessage(message).build()
+                for (e in missing) {
+                    if (dryRun) {
+                        response.addPackages(row(e, "would-fetch"))
+                        continue
+                    }
+                    val file = java.nio.file.Files.createTempFile("fetch-", ".cringle")
+                    try {
+                        remote.download(e.name, e.version, file)
+                        local.publish(file)
+                        response.addPackages(row(e, "fetched", if (e.kind == cringle.packaging.PackageKind.PLUGIN) "untrusted here: trust it to let it run" else ""))
+                    } catch (x: cringle.repository.RepositoryClientException) {
+                        if (x.status == Status.Code.ALREADY_EXISTS) present++ else response.addPackages(row(e, "failed", x.message.orEmpty()))
+                    } catch (x: cringle.packaging.PackageHashMismatchException) {
+                        response.addPackages(row(e, "failed", x.message.orEmpty()))
+                    } finally {
+                        java.nio.file.Files.deleteIfExists(file)
+                    }
+                }
+                response.setPresent(present)
+            }
+        } catch (e: cringle.repository.RepositoryClientException) {
+            throw ManagementException(e.status, "remote repository $source: ${e.message}")
+        }
+        return response.build()
+    }
+
     /** Every plugin of the default repository with all its versions, the highest first. */
     public suspend fun pluginVersions(): Map<String, List<String>> {
         val repo = repositoryClient(defaultRepository ?: throw ManagementException(Status.Code.FAILED_PRECONDITION, "no repository is configured"))

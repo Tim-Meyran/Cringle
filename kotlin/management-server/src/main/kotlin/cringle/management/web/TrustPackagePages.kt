@@ -76,6 +76,30 @@ internal class TrustPackagePages(private val core: ManagementCore) {
             }
             fragment(packages(req.session!!, error, done))
         }
+        r.post("/packages/fetch", Permission.OPERATE) { req ->
+            var done: String? = null
+            var detail: Html? = null
+            val error = attempt {
+                val result = core.fetchPackages(
+                    req.form["source"].orEmpty().trim(), req.form["token"]?.ifBlank { null }, req.form["packages"].orEmpty().split(Regex("[\\s,]+")).filter { it.isNotEmpty() },
+                    req.form["update"] == "on", req.form["dryRun"] == "on",
+                )
+                val failed = result.packagesList.count { it.state == "failed" }
+                val copied = result.packagesList.size - failed
+                done = (if (req.form["dryRun"] == "on") "$copied version(s) would be fetched" else "$copied version(s) fetched") + ", ${result.present} already here" + if (failed > 0) ", $failed failed" else ""
+                if (result.packagesCount > 0) {
+                    detail = html(
+                        h("<strong>{}</strong>", "Result of the fetch from " + req.form["source"].orEmpty().trim()),
+                        dataTable(
+                            listOf("Kind", "Name", "Version", "State", ""),
+                            result.packagesList.map { p -> h("<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td></tr>", p.kind, p.name, p.version, stateBadge(p.state), p.message) },
+                            Html(""),
+                        ),
+                    )
+                }
+            }
+            fragment(packages(req.session!!, error, done, detail))
+        }
         r.post("/packages/{name}/trust", Permission.ADMINISTER) { req ->
             val trust = when (req.form["trust"]) {
                 "trusted" -> PluginTrust.PLUGIN_TRUST_TRUSTED
@@ -155,7 +179,7 @@ internal class TrustPackagePages(private val core: ManagementCore) {
         )
     }
 
-    private suspend fun packages(session: Session, error: String?, done: String?): Html {
+    private suspend fun packages(session: Session, error: String?, done: String?, detail: Html? = null): Html {
         val packages = core.repository().listPackages(cringle.repository.v1.ListPackagesRequest.getDefaultInstance()).packagesList.sortedWith(compareBy({ it.kind.number }, { it.name }, { it.version }))
         val rows = packages.map { p ->
             val plugin = p.kind == PackageKind.PACKAGE_KIND_PLUGIN
@@ -183,10 +207,23 @@ internal class TrustPackagePages(private val core: ManagementCore) {
                 field("Package file", raw("<input type=\"file\" name=\"file\" required>"), "a project or plugin package, up to 64 MB"),
             )
         }
+        val fetch = if (!session.canAnywhere(Permission.OPERATE)) {
+            Html("")
+        } else {
+            h(
+                "<form class=\"form-row\" hx-post=\"/packages/fetch\" hx-target=\"#list\" hx-swap=\"morph:innerHTML\">{}{}{}{}{}<button class=\"btn primary\">Fetch</button></form>",
+                field("Remote repository", raw("<input name=\"source\" placeholder=\"host:7600\" required>"), "its key has to be trusted here (Trust, <em>Trust a component</em>)"),
+                field("Packages", raw("<textarea name=\"packages\" rows=\"3\" placeholder=\"cringle-std&#10;acme-orders@^1.2\"></textarea>"), "name or name@range, one per line; empty: every package"),
+                raw("<label class=\"check\"><input type=\"checkbox\" name=\"update\"> Only update what I already have</label>"),
+                raw("<label class=\"check\"><input type=\"checkbox\" name=\"dryRun\"> Only show what would be fetched</label>"),
+                field("Token", raw("<input type=\"password\" name=\"token\" autocomplete=\"off\">"), "only if the remote repository asks for one"),
+            )
+        }
         return html(
-            flash(error, done),
+            flash(error, done, detail),
             dataTable(listOf("Kind", "Name", "Version", "Bytes", "Trust", ""), rows, raw("The repository is empty. Use <em>Publish a package</em> to add the first one.")),
             formPanel("Publish a package", "The repository checks the package and its hash.", upload),
+            formPanel("Fetch from a remote repository", "Copies the versions that are missing here; every package is checked by its hash. A fetched plugin stays untrusted until you trust it.", fetch),
         )
     }
 

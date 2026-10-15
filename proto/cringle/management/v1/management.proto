@@ -163,6 +163,9 @@ service ManagementService {
 
   rpc ListPackages(cringle.repository.v1.ListPackagesRequest) returns (cringle.repository.v1.ListPackagesResponse);
 
+  // Copies the packages that are missing here from a remote repository (#426).
+  rpc FetchPackages(FetchPackagesRequest) returns (FetchPackagesResponse);
+
   rpc ListVersions(cringle.repository.v1.ListVersionsRequest) returns (cringle.repository.v1.ListVersionsResponse);
 
   rpc GetPackage(cringle.repository.v1.GetPackageRequest) returns (cringle.repository.v1.PackageMetadata);
@@ -551,4 +554,33 @@ message ConfigSetRequest {
   string machine_id = 1;
   string key = 2;
   string value = 3;
+}
+
+message FetchPackagesRequest {
+  // `host:port` of the remote repository; its key must be trusted (a COMPONENT of the trust store).
+  string source = 1;
+  // Credentials of the remote repository, if it requires them.
+  string token = 2;
+  // `name` or `name@range`; empty: every package of the remote repository.
+  repeated string packages = 3;
+  // Only packages that already exist here (get their newer versions).
+  bool update = 4;
+  // Say what would be fetched, copy nothing.
+  bool dry_run = 5;
+}
+
+message FetchedPackage {
+  // `plugin` or `project`.
+  string kind = 1;
+  string name = 2;
+  string version = 3;
+  // `fetched`, `would-fetch` or `failed`.
+  string state = 4;
+  string message = 5;
+}
+
+message FetchPackagesResponse {
+  repeated FetchedPackage packages = 1;
+  // Versions that were already here.
+  int32 present = 2;
 }
