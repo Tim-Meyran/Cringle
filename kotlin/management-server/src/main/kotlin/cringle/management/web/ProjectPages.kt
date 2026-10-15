@@ -141,7 +141,7 @@ internal class ProjectPages(private val core: ManagementCore, private val drafts
         }
         return html(
             flash(error, done),
-            dataTable(listOf("Project", "Version", "Blocks", "Files", ""), rows, raw("No project yet. Create one below; it starts with an empty blueprint.")),
+            dataTable(listOf("Project", "Version", "Blocks", "Files", ""), rows, raw("No project yet. Use <em>Create a project</em>; it starts with an empty blueprint.")),
             formPanel("Create a project", "A project holds its blueprint, schemas and files and is published as one package.", form),
         )
     }

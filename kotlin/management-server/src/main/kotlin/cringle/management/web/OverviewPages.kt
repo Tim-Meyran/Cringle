@@ -82,7 +82,7 @@ internal class OverviewPages(private val core: ManagementCore) {
                 req.session!!.require(Permission.READ, core.access.fabric(req.params.getValue("machine"), req.params.getValue("fabric")))
                 val f = core.getFabric(req.params.getValue("machine"), req.params.getValue("engine"), req.params.getValue("fabric"))
                 html(
-                    pageHeader("Fabric ${f.info.fabricId.value}", "Blueprint ${f.info.blueprint} on engine ${f.engineId} of machine ${f.machine}.", raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>")),
+                    pageHeader("Fabric ${f.info.fabricId.value}", "Blueprint ${f.info.blueprint} on engine ${f.engineId} of machine ${f.machine}.", html(if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING) h("<a class=\"btn primary\" href=\"/monitor/{}\">Monitor</a>", f.info.fabricId.value) else Html(""), raw("<a class=\"btn\" href=\"/fabrics\">All fabrics</a>"))),
                     h("<section class=\"panel facts\"><dl><dt>State</dt><dd>{}</dd><dt>Wanted</dt><dd>{}</dd></dl>{}{}</section>", stateBadge(f.info.state.pretty()), stateBadge(if (f.desiredRunning) "running" else "stopped"), if (f.info.failure.isNotEmpty()) h("<p class=\"notice error\" role=\"alert\">{}</p>", f.info.failure) else Html(""), if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_MIGRATION_FAILED) h("<p class=\"hint\">{}</p>", "The data was backed up before the migration and is not changed back. Fix the cause (or restore the backup), then start the fabric again: the migration is retried.") else Html("")),
                     raw("<h2>Blocks</h2>"),
                     dataTable(
@@ -134,7 +134,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         }
         return html(
             flash(message),
-            dataTable(listOf("Machine", "Daemon", "State", ""), rows, raw("No machine yet. Add the first one below: every engine runs on a machine that has a daemon.")),
+            dataTable(listOf("Machine", "Daemon", "State", ""), rows, raw("No machine yet. Use <em>Add a machine</em>: every engine runs on a machine that has a daemon.")),
             formPanel("Add a machine", "The daemon has to run there and has to trust this server, and the other way round.", form),
         )
     }
@@ -168,7 +168,7 @@ internal class OverviewPages(private val core: ManagementCore) {
         }
         return html(
             flash(message),
-            dataTable(listOf("Machine", "Engine", "State", "Roles", "Labels", ""), rows, raw("No engine yet. Create one below, then start it.")),
+            dataTable(listOf("Machine", "Engine", "State", "Roles", "Labels", ""), rows, raw("No engine yet. Use <em>Create an engine</em>, then start it.")),
             formPanel("Create an engine", "An engine is created on a machine and started separately. Roles and labels are set afterwards under Tags.", form),
         )
     }
@@ -201,7 +201,7 @@ internal class OverviewPages(private val core: ManagementCore) {
             val base = "/fabrics/${f.machine}/${f.engineId}/$id"
             val running = f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING || f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_STARTING
             h(
-                "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td>{} / {}</td><td>{}</td><td>{}{}</td><td>{}</td>{}</tr>",
+                "<tr><td><a href=\"{}\"><strong>{}</strong></a></td><td class=\"nowrap\">{} / {}</td><td>{}</td><td>{}{}</td><td>{}</td>{}</tr>",
                 base, id, f.machine, f.engineId, f.info.blueprint, stateBadge(f.info.state.pretty()), violatedBadge(f.info), stateBadge(if (f.desiredRunning) "running" else "stopped"),
                 actionsCell(
                     if (f.info.state == FabricRuntimeState.FABRIC_RUNTIME_STATE_RUNNING) h("<a class=\"btn small\" href=\"/monitor/{}\">Monitor</a>", id) else Html(""),

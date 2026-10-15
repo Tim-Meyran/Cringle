@@ -67,6 +67,9 @@ class WebSchemaEditorTest {
         val badModel = model.replace("\"Order\"", "\"order\"")
         val check = admin.post("/schemas/acme-orders/check", mapOf("model" to badModel)).body()
         assertTrue(check.contains("class=\"error\"") && check.contains("$.types.order"), check)
+        // a new, empty schema is not called an error (#411)
+        val empty = admin.post("/schemas/acme-orders/check", mapOf("model" to """{"namespace": "", "types": []}""")).body()
+        assertTrue(empty.contains("Start with a namespace") && !empty.contains("class=\"error\""), empty)
         assertTrue(admin.post("/schemas/acme-orders/save", mapOf("model" to badModel, "version" to "1.0.0", "revision" to "1")).body().contains("Saved as revision 2"))
         assertTrue(admin.post("/drafts/schema/acme-orders/publish").body().contains("INVALID_ARGUMENT"))
 

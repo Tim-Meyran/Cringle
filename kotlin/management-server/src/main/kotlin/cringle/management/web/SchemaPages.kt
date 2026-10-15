@@ -112,7 +112,7 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         }
         return html(
             flash(error, done),
-            dataTable(listOf("Kind", "Name", "Version", "Revision", ""), rows, raw("No draft yet. Create a schema for your data types or a project with a blueprint below.")),
+            dataTable(listOf("Kind", "Name", "Version", "Revision", ""), rows, raw("No draft yet. Use <em>Create a draft</em> for a schema of your data types or a project with a blueprint.")),
             formPanel("Create a draft", "The editors open from the list. Nothing reaches the repository before you publish.", form),
         )
     }
@@ -217,7 +217,12 @@ internal class SchemaPages(private val core: ManagementCore, private val drafts:
         return html(
             notice(error),
             if (saved != null) html(info("Saved as revision ${saved.revision}."), h("<input type=\"hidden\" id=\"revision\" name=\"revision\" value=\"{}\" hx-swap-oob=\"true\">", saved.revision)) else Html(""),
-            if (problem != null) h("<p class=\"error\" role=\"alert\">{}</p>", problem) else info("The document is valid."),
+            when {
+                // a new schema has nothing to check yet: say what to do instead of an error
+                document["namespace"]?.jsonPrimitive?.content.isNullOrBlank() && document["types"]?.jsonObject.isNullOrEmpty() -> info("Start with a namespace, for example acme.orders, then add a type.")
+                problem != null -> h("<p class=\"error\" role=\"alert\">{}</p>", problem)
+                else -> info("The document is valid.")
+            },
             h("<pre><code>{}</code></pre>", text),
         )
     }
