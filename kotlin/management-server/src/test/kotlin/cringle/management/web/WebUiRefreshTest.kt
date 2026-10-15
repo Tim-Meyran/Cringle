@@ -88,7 +88,7 @@ class WebUiRefreshTest {
     @Test
     fun anEmptyListSaysWhatToDoNext() {
         val machines = ui.get("/machines/list").body()
-        assertTrue(machines.contains("class=\"empty\"") && machines.contains("Add the first one"), machines)
+        assertTrue(machines.contains("class=\"empty\"") && machines.contains("Use <em>Add a machine</em>"), machines)
         assertFalse(machines.contains("<table"), "no empty table")
         assertTrue(ui.get("/engines/list").body().contains("No engine yet"))
         assertTrue(ui.get("/groups/list").body().contains("No group yet"))
