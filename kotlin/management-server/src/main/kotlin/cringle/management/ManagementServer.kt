@@ -417,6 +417,11 @@ public class ManagementServer(
             core.fetchPackages(request.source, request.token.ifEmpty { null }, request.packagesList, request.update, request.dryRun)
         }
 
+        override suspend fun pushPackages(request: cringle.management.v1.FetchPackagesRequest): cringle.management.v1.FetchPackagesResponse = guard {
+            access.requireAnywhere(Permission.OPERATE)
+            core.pushPackages(request.source, request.token.ifEmpty { null }, request.packagesList, request.update, request.dryRun)
+        }
+
         override suspend fun listPackages(request: ListPackagesRequest): ListPackagesResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listPackages(request) }
 
         override suspend fun listVersions(request: ListVersionsRequest): ListVersionsResponse = guard { access.requireAnywhere(Permission.READ); core.repository().listVersions(request) }
@@ -495,6 +500,7 @@ public class ManagementServer(
             "RemoveTrust" to Permission.ADMINISTER,
             "PublishPackage" to Permission.OPERATE,
             "FetchPackages" to Permission.OPERATE,
+            "PushPackages" to Permission.OPERATE,
             "ListPackages" to Permission.READ,
             "ListVersions" to Permission.READ,
             "GetPackage" to Permission.READ,
