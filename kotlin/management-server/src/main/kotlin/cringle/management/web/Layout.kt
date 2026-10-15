@@ -40,8 +40,10 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
         val visible = navigation.filter { if (it.scopes == null) session.canAnywhere(it.permission) else session.canFor(it.permission, it.scopes) }
         val name = session.user?.name ?: "Everybody"
         return html(
-            raw("<aside class=\"sidebar\"><a class=\"brand\" href=\"/\">"),
-            raw("<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"3.2\" fill=\"currentColor\"/></svg>Cringle</a>"),
+            raw("<aside class=\"sidebar\"><div class=\"sidebar-head\"><a class=\"brand\" href=\"/\" title=\"Cringle\">"),
+            raw("<svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"3.2\" fill=\"currentColor\"/></svg><span class=\"brand-text\">Cringle</span></a>"),
+            raw("<button type=\"button\" class=\"icon-btn nav-toggle\" aria-label=\"Fold the navigation away\" title=\"Fold the navigation away\" aria-expanded=\"true\">"),
+            raw("<svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M9 4v16\"/></svg></button></div>"),
             raw("<nav aria-label=\"Main\">"),
             groups.mapNotNull { group ->
                 val entries = visible.filter { it.group == group }
@@ -50,13 +52,13 @@ public class Layout(private val navigation: List<NavItem>, private val version: 
                 } else {
                     html(
                         h("<div class=\"nav-group\"><p class=\"nav-title\">{}</p>", group),
-                        entries.map { e -> html(raw("<div class=\"nav-item\">"), Icons.forEntry(e.label), h("<a href=\"{}\"{}>{}</a>", e.path, if (e.path == active) raw(" aria-current=\"page\"") else Html(""), e.label), raw("</div>")) },
+                        entries.map { e -> html(raw("<div class=\"nav-item\">"), Icons.forEntry(e.label), h("<a href=\"{}\" title=\"{}\"{}>{}</a>", e.path, e.label, if (e.path == active) raw(" aria-current=\"page\"") else Html(""), e.label), raw("</div>")) },
                         raw("</div>"),
                     )
                 }
             },
             raw("</nav><div class=\"sidebar-foot\">"),
-            h("<div class=\"who\"><span class=\"avatar\" aria-hidden=\"true\">{}</span><div><strong>{}</strong><small>{}</small></div></div>", name.take(1).uppercase(), name, roleName(session)),
+            h("<div class=\"who\" title=\"{}\"><span class=\"avatar\" aria-hidden=\"true\">{}</span><div class=\"who-text\"><strong>{}</strong><small>{}</small></div></div>", name, name.take(1).uppercase(), name, roleName(session)),
             if (session.user != null) raw("<button class=\"btn ghost small\" hx-post=\"/logout\">Sign out</button>") else Html(""),
             h("<small class=\"build\" title=\"Server key {}\">Cringle {} &middot; {}&hellip;</small>", fingerprint, version, fingerprint.take(8)),
             raw("</div></aside>"),
